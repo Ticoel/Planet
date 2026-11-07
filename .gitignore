@@ -1,0 +1,15 @@
+# Godot
+.godot/
+/android/
+*.translation
+export_presets.cfg
+
+# .NET
+bin/
+obj/
+*.user
+
+# Éditeurs et système
+.vscode/
+*.swp
+.directory
