@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Tests de la simulation Planet, hors moteur Godot (aucun paquet de test : petit lanceur maison).
+    Depuis le dossier du projet Godot :
+      dotnet run -c Release (tiret tiret) project tests/Planet.Tests
+    Options après un double tiret : quick (sans les simulations longues), ou un filtre sur le nom.
+    Commandes exactes : voir Program.cs.
+    Seul le code de Simulation/ (plus la palette de couleurs) est compilé ici : le rendu et
+    la carte graphique ont besoin du moteur ; la comparaison GPU/CPU est faite au lancement du jeu.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>Planet.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../../Simulation/**/*.cs" />
+    <Compile Include="../../Rendering/PlanetColorizer.cs" />
+  </ItemGroup>
+
+  <!-- GodotSharp (Vector3, Color…) : paquet NuGet par défaut, ou chemin direct vers la DLL -->
+  <ItemGroup Condition="'$(GodotSharpDll)' == ''">
+    <PackageReference Include="GodotSharp" Version="4.7.2" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GodotSharpDll)' != ''">
+    <Reference Include="GodotSharp">
+      <HintPath>$(GodotSharpDll)</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

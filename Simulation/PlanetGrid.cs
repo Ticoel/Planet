@@ -33,6 +33,10 @@ public sealed class PlanetGrid
     public int CellCount => Positions.Length;
     public int TriangleCount => Triangles.Length / 3;
 
+    /// <summary>Distance angulaire moyenne entre deux cellules voisines (radians).
+    /// Sert d'unité de longueur pour borner les pas de temps.</summary>
+    public float MeanEdgeAngle { get; }
+
     private PlanetGrid(int subdivisions, Vector3[] positions, int[] triangles,
                        int[][] neighbors, int[][] cellTriangles)
     {
@@ -41,6 +45,116 @@ public sealed class PlanetGrid
         Triangles = triangles;
         Neighbors = neighbors;
         CellTriangles = cellTriangles;
+        MeanEdgeAngle = ComputeMeanEdgeAngle();
+    }
+
+    /// <summary>
+    /// Cellule la plus proche d'un point de la sphère, en marchant de voisine en voisine depuis
+    /// une cellule de départ : on avance tant qu'une voisine est plus proche. Sur une grille
+    /// géodésique cette marche aboutit à la plus proche ; elle est très rapide quand le départ
+    /// est déjà voisin du résultat.
+    /// </summary>
+    public int NearestCell(Vector3 point, int startCell)
+    {
+        int current = startCell;
+        float currentDot = Positions[current].Dot(point);
+        while (true)
+        {
+            int best = current;
+            float bestDot = currentDot;
+            foreach (int neighbor in Neighbors[current])
+            {
+                float dot = Positions[neighbor].Dot(point);
+                if (dot > bestDot)
+                {
+                    bestDot = dot;
+                    best = neighbor;
+                }
+            }
+            if (best == current)
+                return current;
+            current = best;
+            currentDot = bestDot;
+        }
+    }
+
+    /// <summary>
+    /// Géométrie exacte des cellules (diagramme de Voronoï sur la sphère unité) : pour chaque
+    /// cellule et chaque voisine (même ordre que <see cref="Neighbors"/>), longueur de la face
+    /// commune divisée par l'aire de la cellule (1/radian). La face relie les centres des cercles
+    /// circonscrits aux deux triangles qui bordent l'arête ; elle est perpendiculaire à l'arête.
+    /// Avec ces poids, un vent sans divergence n'en montre pas sur la grille : une valeur commune
+    /// 2/(3h) pour toutes les faces laisse au contraire des traînées le long des arêtes de
+    /// l'icosaèdre d'origine, où les cellules sont un peu déformées.
+    /// </summary>
+    public float[][] ComputeFaceWeights()
+    {
+        ComputeVoronoi(out float[][] weights, out _);
+        return weights;
+    }
+
+    /// <summary>Aire de chaque cellule sur la sphère unité (stéradians ; somme ≈ 4π).</summary>
+    public float[] ComputeCellAreas()
+    {
+        ComputeVoronoi(out _, out float[] areas);
+        return areas;
+    }
+
+    private void ComputeVoronoi(out float[][] faceWeights, out float[] cellAreas)
+    {
+        var weights = new float[Positions.Length][];
+        var areas = new float[Positions.Length];
+        System.Threading.Tasks.Parallel.For(0, Positions.Length, cell =>
+        {
+            Vector3 p = Positions[cell];
+            int[] neighbors = Neighbors[cell];
+            var lengths = new double[neighbors.Length];
+            double area = 0;
+            for (int k = 0; k < neighbors.Length; k++)
+            {
+                int n = neighbors[k];
+                // Les deux voisines communes à la cellule et à sa voisine n
+                Vector3 c1 = Vector3.Zero, c2 = Vector3.Zero;
+                int found = 0;
+                foreach (int m in neighbors)
+                {
+                    if (m == n || Array.IndexOf(Neighbors[n], m) < 0)
+                        continue;
+                    Vector3 center = Circumcenter(p, Positions[n], Positions[m]);
+                    if (found == 0) c1 = center; else c2 = center;
+                    found++;
+                }
+                if (found < 2)
+                    continue;
+                lengths[k] = c1.AngleTo(c2);
+                area += 0.5 * (c1 - p).Cross(c2 - p).Length();
+            }
+            weights[cell] = new float[neighbors.Length];
+            for (int k = 0; k < neighbors.Length; k++)
+                weights[cell][k] = (float)(lengths[k] / area);
+            areas[cell] = (float)area;
+        });
+        faceWeights = weights;
+        cellAreas = areas;
+    }
+
+    private static Vector3 Circumcenter(Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 center = (b - a).Cross(c - a).Normalized();
+        return center.Dot(a) < 0f ? -center : center;
+    }
+
+    private float ComputeMeanEdgeAngle()
+    {
+        double sum = 0;
+        long count = 0;
+        for (int cell = 0; cell < Positions.Length; cell++)
+            foreach (int neighbor in Neighbors[cell])
+            {
+                sum += Positions[cell].AngleTo(Positions[neighbor]);
+                count++;
+            }
+        return (float)(sum / count);
     }
 
     /// <summary>Nombre de cellules attendu pour un niveau de subdivision donné.</summary>

@@ -5,12 +5,21 @@ namespace Planet.Rendering;
 
 /// <summary>
 /// Construit le maillage affichable de la planète : chaque cellule est dessinée comme un
-/// polygone (hexagone ou pentagone) d'une couleur unie. Les coins du polygone sont les
-/// centres des triangles géodésiques qui entourent la cellule.
+/// polygone (hexagone ou pentagone). Les coins du polygone sont les centres des triangles
+/// géodésiques qui entourent la cellule.
+/// Le maillage ne contient ni couleurs ni altitudes : chaque sommet porte des numéros de
+/// cellules, et le shader va chercher couleur et altitude dans des textures (voir CellDataLayer).
+/// Ainsi, l'affichage change à chaque pas sans reconstruire la géométrie.
+/// <list type="bullet">
+/// <item>UV.x : cellule dont le sommet prend la couleur ;</item>
+/// <item>UV.y, UV2.x, UV2.y : les trois cellules dont on moyenne l'altitude pour soulever le
+/// sommet. Un coin est partagé par trois cellules : en moyennant les trois, deux cellules
+/// voisines soulèvent leur coin commun de la même hauteur, et le relief n'a pas de fissures.</item>
+/// </list>
 /// </summary>
 public static class PlanetMeshBuilder
 {
-    public static ArrayMesh Build(PlanetGrid grid, Color[] cellColors, float radius = 1f)
+    public static ArrayMesh Build(PlanetGrid grid, float radius = 1f)
     {
         // Comptage préalable pour allouer les tableaux en une fois
         int vertexCount = 0, indexCount = 0;
@@ -23,7 +32,8 @@ public static class PlanetMeshBuilder
 
         var vertices = new Vector3[vertexCount];
         var normals = new Vector3[vertexCount];
-        var colors = new Color[vertexCount];
+        var cellIds = new Vector2[vertexCount];
+        var reliefIds = new Vector2[vertexCount];
         var indices = new int[indexCount];
 
         int v = 0, i = 0;
@@ -32,12 +42,14 @@ public static class PlanetMeshBuilder
             int[] ringTriangles = grid.CellTriangles[cell];
             int corners = ringTriangles.Length;
             int centerIndex = v;
-            Color color = cellColors[cell];
+            // Les numéros de cellule tiennent exactement dans un float 32 bits (< 16 millions)
 
+            // Le centre prend l'altitude de sa propre cellule
             Vector3 center = grid.Positions[cell];
             vertices[v] = center * radius;
             normals[v] = center;
-            colors[v] = color;
+            cellIds[v] = new Vector2(cell, cell);
+            reliefIds[v] = new Vector2(cell, cell);
             v++;
 
             foreach (int triangle in ringTriangles)
@@ -45,7 +57,9 @@ public static class PlanetMeshBuilder
                 Vector3 corner = grid.TriangleCenter(triangle);
                 vertices[v] = corner * radius;
                 normals[v] = corner;
-                colors[v] = color;
+                int t = triangle * 3;
+                cellIds[v] = new Vector2(cell, grid.Triangles[t]);
+                reliefIds[v] = new Vector2(grid.Triangles[t + 1], grid.Triangles[t + 2]);
                 v++;
             }
 
@@ -63,20 +77,14 @@ public static class PlanetMeshBuilder
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = vertices;
         arrays[(int)Mesh.ArrayType.Normal] = normals;
-        arrays[(int)Mesh.ArrayType.Color] = colors;
+        arrays[(int)Mesh.ArrayType.TexUV] = cellIds;
+        arrays[(int)Mesh.ArrayType.TexUV2] = reliefIds;
         arrays[(int)Mesh.ArrayType.Index] = indices;
 
+        // Pas d'option de compression : les UV doivent rester en float 32 bits pour coder
+        // des numéros de cellule au-delà de 2048
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         return mesh;
     }
-
-    /// <summary>Matériau qui affiche simplement la couleur de chaque cellule.</summary>
-    public static StandardMaterial3D CreateCellMaterial() => new()
-    {
-        VertexColorUseAsAlbedo = true,
-        Roughness = 1f,
-        // Sécurité tant que l'orientation des faces n'est pas validée à l'écran
-        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-    };
 }

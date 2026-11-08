@@ -13,3 +13,4 @@ obj/
 .vscode/
 *.swp
 .directory
+Claude outputs/
