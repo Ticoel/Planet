@@ -294,16 +294,20 @@ public sealed class TerrainHeightField
             {
                 case LandformKind.ShieldVolcano:
                 {
+                    // Caldeira sommitale : ~5 % du diamètre, profonde de ~4 % de la hauteur
+                    // (Mauna Loa : Mokuʻāweoweo, 3 × 5 km, 180 m de profondeur)
                     double h = Math.Pow(1 - q * q, 1.5);
-                    double caldera = 1 - SmoothStep(0.06, 0.1, q);
-                    total += scale * landform.PeakHeightM * (h - 0.06 * caldera);
+                    double caldera = 1 - SmoothStep(0.03, 0.05, q);
+                    total += scale * landform.PeakHeightM * (h - 0.04 * caldera);
                     break;
                 }
                 case LandformKind.Stratovolcano:
                 {
+                    // Cratère sommital : quelques centaines de mètres de large, ~150 m de profondeur
+                    // (Etna, Fuji : 500 à 800 m de diamètre)
                     double h = Math.Pow(1 - q, 1.6);
-                    double crater = 1 - SmoothStep(0.03, 0.06, q);
-                    total += scale * landform.PeakHeightM * (h - 0.12 * crater);
+                    double crater = 1 - SmoothStep(0.018, 0.035, q);
+                    total += scale * landform.PeakHeightM * (h - 0.06 * crater);
                     break;
                 }
                 default:

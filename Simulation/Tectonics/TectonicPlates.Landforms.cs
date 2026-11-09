@@ -67,9 +67,13 @@ public sealed partial class TectonicPlates
     // Points chauds
     private const int HotspotCount = 12;
     private const float HotspotSwellKmPerMyr = 0.6f;          // épaississement sous le panache
-    private const float HotspotSpacingFactor = 1.2f;          // nouveau volcan à 1,2 rayon de l'ancien
-    private const float ShieldRadiusM = 70000f;
-    private const float ShieldHeightM = 4500f;                // au-dessus des fonds alentour
+    // Volcans boucliers : du petit bouclier islandais (Skjaldbreiður : ~10 km de large, 600 m de
+    // haut) au géant hawaïen (Mauna Loa : ~120 km de large, 4 km au-dessus des fonds) ; pente
+    // moyenne ~4° (hauteur ≈ 7 % du rayon)
+    private const float ShieldMinRadiusM = 12000f;
+    private const float ShieldMaxRadiusM = 60000f;
+    private const float ShieldAspect = 0.07f;
+    private const float HotspotSpacingM = 84000f;             // distance entre volcans d'une chaîne
     private const float ShieldGrowthMyr = 1.5f;               // temps pour s'édifier
 
     // Arcs volcaniques
@@ -178,7 +182,7 @@ public sealed partial class TectonicPlates
 
     private void UpdateHotspots(float dtMyr)
     {
-        float cosSpacing = MathF.Cos(HotspotSpacingFactor * ShieldRadiusM / (PlanetConstants.RadiusKm * 1000f));
+        float cosSpacing = MathF.Cos(HotspotSpacingM / (PlanetConstants.RadiusKm * 1000f));
         // Volcan emporté loin de tout panache par sa plaque : il s'éteint
         foreach (var landform in _landforms)
             if (landform.Kind == LandformKind.ShieldVolcano && landform.Active)
@@ -206,13 +210,17 @@ public sealed partial class TectonicPlates
                     && landform.Position.Dot(hotspot) > cosSpacing)
                     landform.Active = false;
             if (active == null)
+            {
+                // Taille tirée au hasard sur une échelle logarithmique (beaucoup de petits, peu de géants)
+                float radius = ShieldMinRadiusM * MathF.Pow(ShieldMaxRadiusM / ShieldMinRadiusM, _landformRandom.NextSingle());
                 AddLandform(new Landform
                 {
                     Kind = LandformKind.ShieldVolcano, Position = hotspot, Plate = CellPlate[hint], Cell = hint,
-                    RadiusM = ShieldRadiusM * (0.7f + 0.6f * _landformRandom.NextSingle()),
-                    PeakHeightM = ShieldHeightM * (0.7f + 0.6f * _landformRandom.NextSingle()),
+                    RadiusM = radius,
+                    PeakHeightM = radius * ShieldAspect * (0.8f + 0.4f * _landformRandom.NextSingle()),
                     BirthMyr = TimeMyr, Active = true,
                 });
+            }
         }
     }
 

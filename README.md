@@ -169,6 +169,10 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     bombardement intense des débuts selon la chronologie lunaire), effacés par l'érosion ;
   - volcans et cratères sculptés dans le relief détaillé (cônes, caldeiras, cuvettes, remparts,
     pitons centraux) ;
+  - proportions des volcans d'après les volcans terrestres : boucliers de 25 à 120 km de large,
+    hauts de ~7 % de leur rayon (de Skjaldbreiður au Mauna Loa), caldeira de ~5 % du diamètre ;
+    stratovolcans à cratère de quelques centaines de mètres ; panaches et fumerolles à la mesure
+    de l'édifice (plus hauts et plus larges sur un grand volcan) ;
   - volcans repérables de loin : flancs sombres de lave et de cendres, panache de vapeur des
     volcans actifs (touche L : vue de côté sur un volcan, en éruption s'il y en a une) ;
   - coulées de lave simulées comme un fluide autour de l'éruption la plus proche (automate

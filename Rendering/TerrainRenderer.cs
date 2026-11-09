@@ -748,7 +748,7 @@ uniform float tide_high = 0.0;
 // Glaciations (étape 13c) : refroidissement global (°C, négatif) qui abaisse la limite des neiges
 uniform float glacial_cooling = 0.0;
 // Éruptions en cours (étape 13a), les plus proches de la caméra : direction de la bouche (xyz)
-// et intensité (w) ; forme : rayon des coulées (m), hauteur du panache (m), VEI, altitude de la bouche (m)
+// et intensité (w) ; forme : rayon du volcan (m), hauteur du panache (m), VEI (−1 : vapeur), altitude de la bouche (m)
 uniform int eruption_count = 0;
 uniform vec4 eruption_vents[8];
 uniform vec4 eruption_shapes[8];
@@ -983,9 +983,12 @@ vec2 lava_state(vec3 up, float h, vec4 n128) {
     for (int k = 0; k < eruption_count; k++) {
         vec3 vent = eruption_vents[k].xyz;
         float radius = eruption_shapes[k].x;
-        if (radius <= 0.0 || (lava_active > 0.5 && dot(vent, lava_center) > 0.9999999))
+        // (pas de lave sous les fumerolles ni pour la bouche simulée)
+        if (radius <= 0.0 || eruption_shapes[k].z < -0.5 || (lava_active > 0.5 && dot(vent, lava_center) > 0.9999999))
             continue;
-        float distance = acos(clamp(dot(up, vent), -1.0, 1.0)) * planet_radius;
+        // (corde plutôt qu'arc : en 32 bits, acos d'un cosinus proche de 1 ne distingue pas
+        // les distances de moins de ~2 km ; à cette échelle, corde et arc sont égaux)
+        float distance = length(up - vent) * planet_radius;
         float pool = (1.0 - smoothstep(0.5, 1.0, distance / 350.0 + (n128.y - 0.5) * 0.4)) * eruption_vents[k].w;
         lava = max(lava, vec2(pool));
     }
@@ -1200,8 +1203,9 @@ void fragment() {
     if (volcano_count > 0 && depth <= 0.0 && coloring != 1 && coloring != 3) {
         float volcanic = 0.0;
         for (int k = 0; k < volcano_count; k++) {
-            float distance = acos(clamp(dot(up, volcano_sites[k].xyz), -1.0, 1.0)) * planet_radius;
-            volcanic = max(volcanic, 1.0 - smoothstep(0.45, 0.95, distance / volcano_sites[k].w));
+            float distance = length(up - volcano_sites[k].xyz) * planet_radius;
+            // (bord découpé par le bruit : des langues de lave et de cendres, pas un disque)
+            volcanic = max(volcanic, 1.0 - smoothstep(0.45, 0.95, distance / volcano_sites[k].w + (n128.x - 0.5) * 0.6));
         }
         if (volcanic > 0.0) {
             vec3 ash = mix(vec3(0.17, 0.15, 0.14), vec3(0.33, 0.29, 0.26), smoothstep(-0.3, 0.4, n128.x + 0.5 * n32.x));

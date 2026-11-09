@@ -666,8 +666,9 @@ float hash12(vec2 p) {
 }
 
 // Rayon de la colonne et de l'ombrelle à la hauteur s (m) au-dessus de la bouche
-float plume_radius(float s, float height, bool steam) {
-    float column = (steam ? 120.0 : 500.0) + (steam ? 0.22 : 0.2) * s;
+// (base de la colonne à la mesure du volcan : volcano = rayon de l'édifice, m)
+float plume_radius(float s, float height, bool steam, float volcano) {
+    float column = (steam ? max(120.0, 0.012 * volcano) : max(500.0, 0.015 * volcano)) + (steam ? 0.22 : 0.2) * s;
     // (l'ombrelle est plate : plus large que haute, comme celle du Pinatubo ou du Saint-Helens)
     float umbrella = smoothstep(0.66, 0.86, s / height) * (1.0 - smoothstep(0.93, 1.05, s / height))
                      * (steam ? 0.15 : 0.85) * height;
@@ -678,7 +679,7 @@ float plume_radius(float s, float height, bool steam) {
 }
 
 // Densité (0 à 1) au point p (repère de la planète) pour le panache k
-float plume_density(int k, vec3 p, vec3 vent, vec3 axis, vec3 drift, float height, bool steam, float boil) {
+float plume_density(int k, vec3 p, vec3 vent, vec3 axis, vec3 drift, float height, bool steam, float boil, float volcano) {
     vec3 w = p - vent;
     float s = dot(w, axis);
     if (s < 0.0 || s > height * 1.1)
@@ -686,7 +687,7 @@ float plume_density(int k, vec3 p, vec3 vent, vec3 axis, vec3 drift, float heigh
     // Le vent penche le panache : décalage horizontal qui croît avec la hauteur
     vec3 center = axis * s + drift * (s * s / height);
     float d = length(w - center);
-    float radius = plume_radius(s, height, steam);
+    float radius = plume_radius(s, height, steam, volcano);
     if (d > radius * 1.4)
         return 0.0;
     // Volutes : deux échelles de bruit, entraînées vers le haut (~15 m/s) et qui bouillonnent
@@ -722,12 +723,13 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
             continue;
         bool steam = eruption_shapes[k].z < -0.5;
         float vei = max(eruption_shapes[k].z, 0.0);
+        float volcano = eruption_shapes[k].x;
         vec3 vent = axis * (PLANET_R + eruption_shapes[k].w);
         // Vent dominant à cette latitude (alizés, vents d'ouest) : vers l'est s'il est positif
         vec3 east = normalize(vec3(axis.z, 0.0, -axis.x) + vec3(1e-6, 0.0, 0.0));
         vec3 drift = east * (prevailing_wind(axis.y) * 0.03);
         // Boîte englobante : cylindre autour de l'axe (assez large pour l'ombrelle penchée)
-        float bound = max(plume_radius(height, height, steam), plume_radius(0.8 * height, height, steam)) * 1.5
+        float bound = max(plume_radius(height, height, steam, volcano), plume_radius(0.8 * height, height, steam, volcano)) * 1.5
                       + length(drift) * height;
         vec3 w0 = camera_planet - vent;
         float b = dot(rd, axis);
@@ -765,22 +767,25 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
         float t = t0 + dt * hash12(pixel + vec2(float(k) * 17.0));
         for (int i = 0; i < STEPS; i++) {
             vec3 p = camera_planet + rd * t;
-            float density = plume_density(k, p, vent, axis, drift, height, steam, boil) * intensity;
+            float density = plume_density(k, p, vent, axis, drift, height, steam, boil, volcano) * intensity;
             if (density > 0.01) {
                 float s = dot(p - vent, axis);
-                float radius = plume_radius(s, height, steam);
+                float radius = plume_radius(s, height, steam, volcano);
                 // Ombre propre : deux échantillons vers le Soleil (près et loin), plus une part de
                 // lumière diffusée plusieurs fois, qui éclaire un peu le cœur des volutes
-                float near_sun = plume_density(k, p + sun * radius * 0.2, vent, axis, drift, height, steam, boil);
-                float far_sun = plume_density(k, p + sun * radius * 0.55, vent, axis, drift, height, steam, boil);
+                float near_sun = plume_density(k, p + sun * radius * 0.2, vent, axis, drift, height, steam, boil, volcano);
+                float far_sun = plume_density(k, p + sun * radius * 0.55, vent, axis, drift, height, steam, boil, volcano);
                 float lit = exp(-near_sun * 1.2 - far_sun * 1.8) + 0.12;
                 // Le ciel éclaire mieux le haut du panache que sa base, dans l'ombre de l'ombrelle
                 float sky_view = 0.55 + 0.45 * smoothstep(0.1, 0.9, s / height);
                 // (le haut de la colonne et l'ombrelle, en cendres fines, sont plus clairs que la base)
                 vec3 light = albedo * mix(0.65, 1.2, smoothstep(0.15, 0.9, s / height)) * (sunlight * lit * 1.3 + skylight * sky_view);
                 // Lueur de la lave à la base et éclairs
-                float base = 1.0 - smoothstep(0.0, steam ? 0.0 : 0.18, s / height);
-                light += vec3(1.0, 0.33, 0.06) * base * (vei <= 1.0 ? 1.4 : 0.8) * float(!steam);
+                // (sur ~300 m seulement : au-dessus, la cendre cache la lave ; à peine visible de
+                // jour, éclatante la nuit)
+                float base = 1.0 - smoothstep(0.0, 300.0, s);
+                float night = 1.0 - 0.75 * smoothstep(-0.1, 0.2, mus);
+                light += vec3(1.0, 0.33, 0.06) * base * night * (vei <= 1.0 ? 1.4 : 0.8) * float(!steam);
                 light += vec3(0.75, 0.7, 1.0) * flash * (1.0 - smoothstep(0.2, 0.8, s / height)) * smoothstep(0.3, 0.0, mus + 0.2);
                 float extinction = density * (steam ? 0.004 : 0.01) * (1.0 + 0.5 * vei);
                 float step_t = exp(-extinction * dt);

@@ -179,10 +179,15 @@ public sealed class PlanetActivity
         return u < 0.45 ? 1 : u < 0.8 ? 2 : u < 0.94 ? 3 : u < 0.985 ? 4 : u < 0.998 ? 5 : 6;
     }
 
+    /// <summary>
+    /// Hauteur du panache au-dessus de la bouche (m), d'après Newhall et Self (1982) : VEI 2 :
+    /// 1 à 5 km, VEI 3 : 3 à 15 km, VEI 4 : 10 à 25 km, VEI 5 : plus de 25 km (Saint-Helens 1980 :
+    /// ~24 km), VEI 6 : ~35 km (Pinatubo 1991). Pour VEI 0-1, haut de la fourchette (panache de
+    /// gaz et de vapeur au-dessus des fontaines de lave, comme au Kīlauea en 2018).
+    /// </summary>
     public static float PlumeHeight(int vei) => vei switch
     {
-        // (coulées tranquilles : panache de gaz et de vapeur de 1 à 4 km au-dessus des fontaines de lave)
-        0 => 2000f, 1 => 4000f, 2 => 7000f, 3 => 12000f, 4 => 18000f, _ => 25000f,
+        0 => 2000f, 1 => 4000f, 2 => 7000f, 3 => 12000f, 4 => 20000f, 5 => 28000f, _ => 35000f,
     };
 
     /// <summary>Forçage injecté (W/m²) : seules les éruptions de VEI 4 ou plus atteignent la stratosphère.</summary>

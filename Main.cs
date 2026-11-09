@@ -540,6 +540,12 @@ public partial class Main : Node3D
         Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
         var erupting = new HashSet<Vector3>();
         Eruption nearestOnLand = null;
+        if (climate && _landformByPosition.Count != _tectonics.Landforms.Count)
+        {
+            _landformByPosition.Clear();
+            foreach (var l in _tectonics.Landforms)
+                _landformByPosition[l.Position] = l;
+        }
         if (climate)
         {
             double day = _climate.TimeDays;
@@ -558,13 +564,17 @@ public partial class Main : Node3D
                 if (ventHeight < -SubmarineVisibleDepthM)
                     continue;
                 _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, eruption.IntensityAt(day));
+                // Taille du volcan : un panache à la mesure de l'édifice (un géant hawaïen fume et
+                // crache plus large et plus haut qu'un petit cône)
+                _landformByPosition.TryGetValue(p, out var volcano);
+                float radius = volcano?.RadiusM ?? 15000f, peak = volcano?.PeakHeightM ?? 2000f;
                 if (ventHeight < 0)
                     _eruptionShapes[count] = new Vector4(0f, Math.Min(eruption.PlumeHeightM, 4000f), -1f, 0f);
                 else
                 {
                     nearestOnLand ??= eruption;
-                    float lavaRadius = eruption.Vei <= 1 ? 9000f : 3000f;
-                    _eruptionShapes[count] = new Vector4(lavaRadius, eruption.PlumeHeightM, eruption.Vei, ventHeight);
+                    float height = Math.Max(eruption.PlumeHeightM, peak + 0.05f * radius);
+                    _eruptionShapes[count] = new Vector4(radius, height, eruption.Vei, ventHeight);
                 }
                 count++;
             }
@@ -579,11 +589,16 @@ public partial class Main : Node3D
         foreach (var (landform, _) in volcanoes)
         {
             Vector3 p = landform.Position;
-            _volcanoSites[sites++] = new Vector4(p.X, p.Y, p.Z, landform.RadiusM);
+            // Teinte sombre (lave récente, cendres) près du sommet seulement : un bouclier est
+            // couvert de coulées récentes sur son tiers supérieur, un strato de cendres sur la moitié
+            float tinted = landform.RadiusM * (landform.Kind == LandformKind.ShieldVolcano ? 0.35f : 0.6f);
+            _volcanoSites[sites++] = new Vector4(p.X, p.Y, p.Z, tinted);
             if (landform.Active && count < _eruptionVents.Length && !erupting.Contains(p) && VentHeight(p) >= 0)
             {
                 _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, 0.35f);
-                _eruptionShapes[count] = new Vector4(0f, 1500f, -1f, VentHeight(p));   // VEI −1 : vapeur
+                // VEI −1 : vapeur, d'autant plus haute que le volcan est grand
+                float steamHeight = Math.Max(2000f, 0.6f * landform.PeakHeightM + 0.04f * landform.RadiusM);
+                _eruptionShapes[count] = new Vector4(landform.RadiusM, steamHeight, -1f, VentHeight(p));
                 count++;
             }
         }
@@ -597,6 +612,8 @@ public partial class Main : Node3D
         _sky.SetEruptions(count, _eruptionVents, _eruptionShapes);
         UpdateLava(nearestOnLand, climate);
     }
+
+    private readonly Dictionary<Vector3, Landform> _landformByPosition = new();
 
     /// <summary>Profondeur (m) au-delà de laquelle une éruption sous-marine ne se voit pas en surface.</summary>
     private const float SubmarineVisibleDepthM = 200f;
@@ -1124,7 +1141,8 @@ public partial class Main : Node3D
                 Double3 camera = explorer.Position.Normalized();
                 Vector3? target = null;
                 if (_clock == ClockMode.Climate && _activity.Eruptions.Count > 0)
-                    target = _activity.Eruptions.OrderBy(e => e.Position.AngleTo(camera.ToVector3())).First().Position;
+                    target = _activity.Eruptions.Where(e => VentHeight(e.Position) >= 0)
+                        .OrderBy(e => e.Position.AngleTo(camera.ToVector3())).Select(e => (Vector3?)e.Position).FirstOrDefault();
                 else
                 {
                     var active = _tectonics.Landforms.Where(l => l.Active && l.Kind != LandformKind.ImpactCrater)
@@ -1137,14 +1155,19 @@ public partial class Main : Node3D
                     ShowNotice("Aucun volcan actif sur cette planète pour l'instant");
                     return;
                 }
-                // De côté, à ~35 km, un peu au-dessus du sol, le regard vers le sommet : le cône et
-                // le panache se découpent sur le ciel
+                // De côté, au pied du volcan (à 1,4 fois son rayon), un peu au-dessus du sol, le
+                // regard vers le sommet : tout le cône et le panache se découpent sur le ciel
+                var landform = _tectonics.Landforms.Where(l => l.Kind != LandformKind.ImpactCrater)
+                    .OrderBy(l => l.Position.AngleTo(target.Value)).FirstOrDefault();
+                double radius = landform?.RadiusM ?? 15000;
+                double distance = Math.Clamp(1.4 * radius, 12000, 90000);
                 Double3 vent = Double3.From(target.Value).Normalized();
                 Double3 east = Double3.UnitY.Cross(vent).Normalized();
                 Double3 north = vent.Cross(east);
                 Double3 side = (east * 0.8 + north * 0.6).Normalized();
-                explorer.PlaceAbove((vent - side * (35000 / TerrainHeightField.RadiusMeters)).Normalized(), 1200);
-                explorer.Face(vent - explorer.Position.Normalized(), 0.04);
+                explorer.PlaceAbove((vent - side * (distance / TerrainHeightField.RadiusMeters)).Normalized(), 400);
+                double rise = VentHeight(target.Value) - explorer.GroundHeight - 400;
+                explorer.Face(vent - explorer.Position.Normalized(), 0.6 * Math.Atan2(Math.Max(0, rise) + 1500, distance));
                 detail = _clock == ClockMode.Climate && _activity.Eruptions.Count > 0 ? "en éruption" : "actif";
                 break;
             }
