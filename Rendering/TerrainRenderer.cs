@@ -752,6 +752,9 @@ uniform float glacial_cooling = 0.0;
 uniform int eruption_count = 0;
 uniform vec4 eruption_vents[8];
 uniform vec4 eruption_shapes[8];
+// Volcans proches (direction, rayon de la base en m) : flancs de lave refroidie et de cendres
+uniform int volcano_count = 0;
+uniform vec4 volcano_sites[16];
 
 float sea_surface(vec3 up) {
     float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
@@ -961,7 +964,7 @@ float lava_cover(vec3 up, float h, vec4 n128, vec4 n32, vec4 n8) {
     for (int k = 0; k < eruption_count; k++) {
         float distance = acos(clamp(dot(up, eruption_vents[k].xyz), -1.0, 1.0)) * planet_radius;
         float radius = eruption_shapes[k].x;
-        if (distance > radius)
+        if (distance > radius || radius <= 0.0)
             continue;
         float q = distance / radius;
         // La lave coule vers le bas : rien au-dessus de la bouche, sauf tout près
@@ -1176,6 +1179,18 @@ void fragment() {
         }
     }
 
+    // Volcans : flancs sombres (lave refroidie, cendres), ravines claires et sombres
+    if (volcano_count > 0 && depth <= 0.0 && coloring != 1 && coloring != 3) {
+        float volcanic = 0.0;
+        for (int k = 0; k < volcano_count; k++) {
+            float distance = acos(clamp(dot(up, volcano_sites[k].xyz), -1.0, 1.0)) * planet_radius;
+            volcanic = max(volcanic, 1.0 - smoothstep(0.45, 0.95, distance / volcano_sites[k].w));
+        }
+        if (volcanic > 0.0) {
+            vec3 ash = mix(vec3(0.17, 0.15, 0.14), vec3(0.33, 0.29, 0.26), smoothstep(-0.3, 0.4, n128.x + 0.5 * n32.x));
+            color = mix(color, ash, volcanic * 0.8 * (1.0 - snowEstimate));
+        }
+    }
     // Éruptions : basalte noir sous la lave, lave incandescente qui éclaire d'elle-même
     if (eruption_count > 0 && depth <= 0.0) {
         float lava = lava_cover(up, h, n128, n32, n8);

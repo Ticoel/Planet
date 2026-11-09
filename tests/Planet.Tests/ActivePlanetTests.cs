@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Diagnostics;
 using Godot;
 using Planet.Simulation;
 using Planet.Simulation.Climate;
@@ -187,5 +188,21 @@ public static class ActivePlanetTests
         Assert.InRange(lowest, -135, -70, "mer basse au maximum glaciaire");
         cycles.AdvanceTo(2000, 20.0);
         Assert.Near(cycles.SeaLevelM, 0, 1e-9, "pas de glaciation sur une planète chaude");
+    }
+
+    [Test]
+    public static void EvolvedPlanetHasARealCoastalCliff()
+    {
+        var tectonics = Evolved.Value;
+        var field = new TerrainHeightField(tectonics.Grid, tectonics.CellElevation, 3, null, tectonics.SnapshotLandforms());
+        var watch = Stopwatch.StartNew();
+        var found = CliffFinder.Find(field, tectonics.Grid, tectonics.CellElevation);
+        watch.Stop();
+        Assert.True(found.HasValue, "aucune falaise trouvée");
+        var cliff = found.Value;
+        Console.WriteLine($"    falaise {cliff.HeightM:0} m à {cliff.DistanceM:0} m du rivage ({cliff.SlopeDegrees:0}°), {watch.ElapsedMilliseconds} ms");
+        Assert.True(cliff.HeightM >= 60, $"falaise trop basse : {cliff.HeightM:0} m");
+        Assert.True(cliff.SlopeDegrees >= 15, $"paroi trop douce : {cliff.SlopeDegrees:0}°");
+        Assert.True(watch.ElapsedMilliseconds < 3000, $"recherche trop lente : {watch.ElapsedMilliseconds} ms");
     }
 }

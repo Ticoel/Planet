@@ -146,7 +146,9 @@ public sealed class ExplorerCamera
     /// </summary>
     public static double AutoPitch(double altitude)
     {
-        double t = Math.Clamp((Math.Log10(Math.Max(altitude, 1.0)) - 3.0) / (6.3 - 3.0), 0.0, 1.0);
+        // (regard presque horizontal jusqu'à ~10 km : avant, dès quelques kilomètres, la caméra
+        // plongeait vers le sol et les reliefs, volcans compris, ne se voyaient plus de profil)
+        double t = Math.Clamp((Math.Log10(Math.Max(altitude, 1.0)) - 4.0) / (6.3 - 4.0), 0.0, 1.0);
         t = t * t * (3 - 2 * t);
         return -0.21 + (-1.48 + 0.21) * t;
     }

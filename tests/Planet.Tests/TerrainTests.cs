@@ -696,4 +696,30 @@ public static class TerrainTests
         Console.WriteLine($"     variation par km : en travers des plis {acrossFolds:0} m, le long des plis {alongFolds:0} m");
         Assert.True(acrossFolds > 1.15 * alongFolds, "les plis doivent rendre le relief plus irrégulier en travers qu'en long");
     }
+
+    // --- Falaises (vue Maj + F4) ------------------------------------------------------------------
+
+    [Test]
+    public static void CliffFinderFindsASteepCoastQuickly()
+    {
+        var grid = Fixtures.Grid(5);
+        float[] elevation = Fixtures.DomeContinent(grid, 20f, 30f, 35f, 3);
+        var field = new TerrainHeightField(grid, elevation, 42);
+        var watch = Stopwatch.StartNew();
+        var found = CliffFinder.Find(field, grid, elevation);
+        watch.Stop();
+        Assert.True(found.HasValue, "aucune falaise trouvée");
+        var cliff = found.Value;
+        int hint = 0;
+        double atShore = field.Height(cliff.Shore, 8, ref hint);
+        Double3 offshore = (cliff.Shore - cliff.Inland * (300 / TerrainHeightField.RadiusMeters)).Normalized();
+        double atSea = field.Height(offshore, 8, ref hint);
+        Console.WriteLine($"    falaise {cliff.HeightM:0} m à {cliff.DistanceM:0} m du rivage ({cliff.SlopeDegrees:0}°), " +
+                          $"rivage {atShore:0.0} m, large {atSea:0} m, {watch.ElapsedMilliseconds} ms");
+        Assert.True(Math.Abs(atShore) < 15, $"le point du rivage est à {atShore:0} m");
+        Assert.True(atSea < 0, "le large devrait être sous la mer");
+        Assert.True(cliff.HeightM >= 20, $"falaise trop basse : {cliff.HeightM:0} m");
+        Assert.True(Math.Abs(cliff.Inland.Dot(cliff.Shore)) < 1e-6, "la direction des terres doit être tangente");
+        Assert.True(watch.ElapsedMilliseconds < 3000, $"recherche trop lente : {watch.ElapsedMilliseconds} ms");
+    }
 }

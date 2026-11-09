@@ -651,11 +651,55 @@ uniform int eruption_count = 0;
 uniform vec4 eruption_vents[8];
 uniform vec4 eruption_shapes[8];
 
-// Panaches de cendres : colonne verticale au-dessus de la bouche, qui s'élargit en montant
-// puis s'étale en ombrelle à son sommet. Pour chaque panache, point du rayon le plus proche de
-// l'axe : épaisseur optique d'un cylindre gaussien de rayon r traversé à cette distance.
-// Renvoie la couleur (prémultipliée) et l'opacité ; t_hit : distance du panache.
-vec4 plumes(vec3 rd, float t_scene, vec3 sun, out float t_hit) {
+// Panaches volcaniques, en volume : une colonne convective (elle s'élargit en montant en
+// avalant l'air autour, ~0,15 m par m), penchée par le vent dominant, qui s'étale en ombrelle
+// quand elle atteint l'altitude où elle n'est plus plus légère que l'air ; sous l'ombrelle, des
+// rideaux de cendres retombent. Formes « en chou-fleur » par un bruit qui monte avec le
+// panache ; éclairage par le Soleil avec ombre propre (un échantillon vers le Soleil), lueur de
+// la lave à la base, éclairs volcaniques la nuit dans les colonnes explosives.
+// Renvoie la couleur (prémultipliée) et l'opacité ; t_hit : distance du premier panache touché.
+
+// Rayon de la colonne et de l'ombrelle à la hauteur s (m) au-dessus de la bouche
+float plume_radius(float s, float height, bool steam) {
+    float column = (steam ? 120.0 : 350.0) + (steam ? 0.22 : 0.15) * s;
+    float umbrella = smoothstep(0.62, 0.85, s / height) * (1.0 - smoothstep(0.95, 1.08, s / height))
+                     * (steam ? 0.15 : 0.75) * height;
+    return max(column, umbrella);
+}
+
+// Densité (0 à 1) au point p (repère de la planète) pour le panache k
+float plume_density(int k, vec3 p, vec3 vent, vec3 axis, vec3 drift, float height, bool steam, float boil) {
+    vec3 w = p - vent;
+    float s = dot(w, axis);
+    if (s < 0.0 || s > height * 1.1)
+        return 0.0;
+    // Le vent penche le panache : décalage horizontal qui croît avec la hauteur
+    vec3 center = axis * s + drift * (s * s / height);
+    float d = length(w - center);
+    float radius = plume_radius(s, height, steam);
+    if (d > radius * 1.4)
+        return 0.0;
+    // Volutes : deux échelles de bruit, entraînées vers le haut (~15 m/s) et qui bouillonnent
+    vec3 q = (w - axis * (cloud_time * 15.0)) / (radius * 0.9);
+    float n1 = texture(cloud_noise, q * 0.35 + vec3(float(k) * 0.37)).r;
+    float n2 = texture(cloud_noise, q * 1.1 + vec3(0.21, boil, 0.43)).r;
+    float n3 = texture(cloud_noise, q * 3.1 + vec3(0.77, 0.13, boil)).r;
+    float billow = n1 * 0.55 + n2 * 0.3 + n3 * 0.15;
+    float edge = d / radius + (0.5 - billow) * 1.3;
+    float density = 1.0 - smoothstep(0.5, 0.8, edge);
+    // Sous l'ombrelle : rideaux de cendres qui retombent (plus diffus, en traînées verticales)
+    if (!steam) {
+        float umbrella_radius = 0.75 * height;
+        float under = (1.0 - smoothstep(0.6, 1.0, length(w - axis * s - drift * s * s / height) / umbrella_radius))
+                      * smoothstep(0.1, 0.6, s / height) * (1.0 - smoothstep(0.6, 0.72, s / height));
+        float curtains = smoothstep(0.55, 0.8, texture(cloud_noise, vec3(w.x, w.y * 0.05, w.z) / 4000.0 + vec3(0.7)).r);
+        density = max(density, under * curtains * 0.25);
+    }
+    // Le haut de la colonne s'effiloche
+    return density * (1.0 - smoothstep(1.0, 1.1, s / height));
+}
+
+vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
     vec3 color = vec3(0.0);
     float transmittance = 1.0;
     t_hit = 1e30;
@@ -665,37 +709,66 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, out float t_hit) {
         float intensity = eruption_vents[k].w;
         if (height <= 0.0 || intensity <= 0.0)
             continue;
+        bool steam = eruption_shapes[k].z < -0.5;
+        float vei = max(eruption_shapes[k].z, 0.0);
         vec3 vent = axis * (PLANET_R + eruption_shapes[k].w);
-        // Plus courte distance entre le rayon (camera_planet + t rd) et l'axe (vent + s axis)
+        // Vent dominant à cette latitude (alizés, vents d'ouest) : vers l'est s'il est positif
+        vec3 east = normalize(vec3(axis.z, 0.0, -axis.x) + vec3(1e-6, 0.0, 0.0));
+        vec3 drift = east * (prevailing_wind(axis.y) * 0.03);
+        // Boîte englobante : cylindre autour de l'axe (assez large pour l'ombrelle penchée)
+        float bound = max(plume_radius(height, height, steam), plume_radius(0.8 * height, height, steam)) * 1.5
+                      + length(drift) * height;
         vec3 w0 = camera_planet - vent;
         float b = dot(rd, axis);
-        float d = dot(rd, w0), e = dot(axis, w0);
-        float denom = max(1.0 - b * b, 1e-4);
-        float t = (b * e - d) / denom;
-        float s = (e - b * d) / denom;
-        if (t <= 0.0 || t > t_scene || s < 0.0 || s > height * 1.15)
+        vec3 rp = rd - axis * b, wp = w0 - axis * dot(w0, axis);
+        float qa = dot(rp, rp), qb = 2.0 * dot(rp, wp), qc = dot(wp, wp) - bound * bound;
+        float disc = qb * qb - 4.0 * qa * qc;
+        if (qa < 1e-8 || disc < 0.0)
             continue;
-        float q = s / height;
-        float radius = 250.0 + 0.12 * s + pow(clamp(q, 0.0, 1.2), 4.0) * 0.5 * height;
-        float distance = length(w0 + rd * t - axis * s);
-        float sin_angle = sqrt(denom);
-        // Volutes de cendres qui montent (~20 m/s) : deux échelles de bruit autour du point
-        vec3 hit = camera_planet + rd * t - axis * (cloud_time * 20.0);
-        float billows = texture(cloud_noise, hit / 2600.0).r * 0.65 + texture(cloud_noise, hit / 700.0 + vec3(0.3, 0.7, 0.1)).r * 0.35;
-        float edge = distance / radius + (billows - 0.5) * 1.8;
-        float tau = 3.5 * intensity * exp(-edge * max(edge, 0.0)) * (0.5 + billows) / max(sin_angle, 0.2)
-                    * (1.0 - smoothstep(1.0, 1.15, q));
-        float alpha = 1.0 - exp(-tau);
-        if (alpha < 0.003)
+        float root = sqrt(disc);
+        float t0 = max((-qb - root) / (2.0 * qa), 0.0);
+        float t1 = min((-qb + root) / (2.0 * qa), t_scene);
+        if (t1 <= t0)
             continue;
-        // Cendres grises éclairées par le Soleil (et le ciel), lueur orangée de la lave à la base
-        float day = smoothstep(-0.1, 0.2, dot(axis, sun));
-        vec3 ash = vec3(0.26, 0.245, 0.23) * (0.08 + 0.9 * day);
-        float glow = (1.0 - smoothstep(0.0, 0.12, q)) * (eruption_shapes[k].z < 2.0 ? 1.0 : 0.4);
-        ash += vec3(1.0, 0.35, 0.08) * glow * 1.5 * intensity;
-        color += transmittance * alpha * ash;
-        transmittance *= 1.0 - alpha;
-        t_hit = min(t_hit, t);
+        // Éclairage : lumière du Soleil à mi-hauteur (rougie au couchant), ciel, nuit
+        float mid_height = eruption_shapes[k].w + 0.5 * height;
+        float mus = dot(axis, sun);
+        vec3 sunlight = sun_transmittance(mid_height, mus) * smoothstep(-0.12, 0.05, mus);
+        vec3 skylight = vec3(0.32, 0.38, 0.5) * smoothstep(-0.15, 0.25, mus) + vec3(0.004);
+        vec3 albedo = steam ? vec3(0.9, 0.91, 0.93) : vec3(0.42, 0.395, 0.37);
+        // Éclairs dans les colonnes explosives : brefs, irréguliers, visibles surtout la nuit
+        float flash_slot = floor(cloud_time * 0.5 + float(k) * 13.0);
+        float flash = (!steam && vei >= 3.0 && fract(sin(flash_slot * 91.7 + float(k)) * 4375.85) > 0.93)
+                      ? (1.0 - fract(cloud_time * 0.5 + float(k) * 13.0)) * 6.0 : 0.0;
+        float boil = cloud_time * 0.002;
+        const int STEPS = 40;
+        float dt = (t1 - t0) / float(STEPS);
+        float t = t0 + dt * fract(sin(dot(pixel + float(k), vec2(12.9898, 78.233))) * 43758.5453);
+        for (int i = 0; i < STEPS; i++) {
+            vec3 p = camera_planet + rd * t;
+            float density = plume_density(k, p, vent, axis, drift, height, steam, boil) * intensity;
+            if (density > 0.01) {
+                float s = dot(p - vent, axis);
+                float radius = plume_radius(s, height, steam);
+                // Ombre propre : épaisseur du panache vers le Soleil
+                float toward_sun = plume_density(k, p + sun * radius * 0.6, vent, axis, drift, height, steam, boil);
+                float lit = exp(-toward_sun * 2.5);
+                // (le haut de la colonne et l'ombrelle, en cendres fines, sont plus clairs que la base)
+                vec3 light = albedo * mix(0.75, 1.15, smoothstep(0.2, 0.9, s / height)) * (sunlight * lit * 1.7 + skylight);
+                // Lueur de la lave à la base et éclairs
+                float base = 1.0 - smoothstep(0.0, steam ? 0.0 : 0.18, s / height);
+                light += vec3(1.0, 0.33, 0.06) * base * (vei <= 1.0 ? 1.4 : 0.8) * float(!steam);
+                light += vec3(0.75, 0.7, 1.0) * flash * (1.0 - smoothstep(0.2, 0.8, s / height)) * smoothstep(0.3, 0.0, mus + 0.2);
+                float extinction = density * (steam ? 0.004 : 0.01) * (1.0 + 0.5 * vei);
+                float step_t = exp(-extinction * dt);
+                color += transmittance * (1.0 - step_t) * light;
+                transmittance *= step_t;
+                t_hit = min(t_hit, t);
+                if (transmittance < 0.02)
+                    break;
+            }
+            t += dt;
+        }
     }
     return vec4(color, 1.0 - transmittance);
 }
@@ -813,27 +886,35 @@ void fragment() {
 
     vec3 color = inscatter;
     float alpha = 1.0 - scene_t;
+    // Panaches volcaniques et nuages composés dans l'ordre des distances : un panache sous une
+    // mer de nuages est caché par elle, un panache qui la perce passe devant
+    float t_plume = 1e30;
+    vec4 plume = vec4(0.0);
+    if (eruption_count > 0)
+        plume = plumes(rd, t_scene, sun, FRAGCOORD.xy, t_plume);
+    vec3 cloud_color = vec3(0.0);
+    float cloud_alpha = 0.0, t_first = 1e30;
     if (clouds_enabled) {
-        vec3 cloud_color;
-        float cloud_alpha, t_first;
         march_clouds(up, rd, t_scene, sun, FRAGCOORD.xy, cloud_color, cloud_alpha, t_first);
         if (cloud_alpha > 0.0) {
             // Atmosphère entre l'œil et le nuage
             vec3 ci, ct;
             atmosphere(camera_altitude, up, rd, t_first, sun, ci, ct);
             cloud_color = cloud_color * dot(ct, vec3(1.0 / 3.0)) + ci * cloud_alpha;
-            color = cloud_color + (1.0 - cloud_alpha) * color;
-            alpha = 1.0 - (1.0 - cloud_alpha) * (1.0 - alpha);
         }
     }
-    // Panaches volcaniques, par-dessus le reste (ils sont presque toujours devant les nuages bas)
-    if (eruption_count > 0) {
-        float t_plume;
-        vec4 plume = plumes(rd, t_scene, sun, t_plume);
-        if (plume.a > 0.0) {
-            color = plume.rgb + (1.0 - plume.a) * color;
-            alpha = 1.0 - (1.0 - plume.a) * (1.0 - alpha);
-        }
+    bool plume_in_front = t_plume < t_first;
+    if (plume.a > 0.0 && !plume_in_front) {
+        color = plume.rgb + (1.0 - plume.a) * color;
+        alpha = 1.0 - (1.0 - plume.a) * (1.0 - alpha);
+    }
+    if (cloud_alpha > 0.0) {
+        color = cloud_color + (1.0 - cloud_alpha) * color;
+        alpha = 1.0 - (1.0 - cloud_alpha) * (1.0 - alpha);
+    }
+    if (plume.a > 0.0 && plume_in_front) {
+        color = plume.rgb + (1.0 - plume.a) * color;
+        alpha = 1.0 - (1.0 - plume.a) * (1.0 - alpha);
     }
     ALBEDO = color;
     ALPHA = alpha;

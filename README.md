@@ -97,7 +97,8 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, pluie, neige, puis
-    nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ; L : volcan.
+    nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ;
+    Maj + F4 : la plus haute falaise de la côte, vue du large ; L : volcan.
 
 ## Licence
 
@@ -161,8 +162,14 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     bombardement intense des débuts selon la chronologie lunaire), effacés par l'érosion ;
   - volcans et cratères sculptés dans le relief détaillé (cônes, caldeiras, cuvettes, remparts,
     pitons centraux) ;
-  - dans l'horloge climatique : éruptions (lave incandescente, panaches de cendres, voile
-    d'aérosols qui refroidit la planète après les plus fortes) et séismes aux frontières de plaques
+  - volcans repérables de loin : flancs sombres de lave et de cendres, panache de vapeur des
+    volcans actifs (touche L : vue de côté sur un volcan, en éruption s'il y en a une) ;
+  - panaches d'éruption en volume (lancer de rayons dans une densité bruitée) : colonne qui bouillonne
+    en volutes, poussée par le vent, champignon qui s'étale à sa hauteur d'équilibre, rideaux de
+    cendres, ombre propre, lueur de la lave à la base et éclairs volcaniques la nuit ;
+  - dans l'horloge climatique : une vingtaine d'éruptions en même temps sur la planète, comme sur
+    Terre (lave incandescente, panaches de cendres, voile d'aérosols qui refroidit la planète après
+    les plus fortes) et séismes aux frontières de plaques
     (loi de Gutenberg-Richter, secousse de la caméra quand ils sont ressentis) ;
   - glaciations : cycles de Milankovitch (excentricité, inclinaison, précession), volume des glaces
     (Imbrie), mer jusqu'à ~130 m plus bas et limite des neiges abaissée sur une planète assez froide ;
@@ -192,6 +199,10 @@ Faites :
 - **13** : planète active (volcans, séismes, impacts, glaciations), sons, photos, vidéos et cartes.
 
 À venir :
+
+- **Avant la vie : revoir l'interface ensemble.** Le texte à l'écran est devenu trop présent et
+  trop nombreux (aide, détails, messages, lignes d'état) : on en discute d'abord, puis on la
+  repense (moins de texte, regroupé, plus visuel) avant d'attaquer l'étape 14.
 
 14. **Vie** : apparition et évolution d'espèces simples qui se répartissent selon le climat et
     s'adaptent ; leur action sur le milieu (voir plus bas).

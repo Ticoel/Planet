@@ -51,8 +51,11 @@ public sealed class PlanetActivity
     public const float MinMagnitude = 5f;
     public const float MaxMagnitude = 9.5f;
     // Éruptions : intervalle moyen entre deux éruptions d'un volcan actif (années)
-    private const double ShieldIntervalYears = 3.0;
-    private const double StratoIntervalYears = 25.0;
+    // (sur Terre, une vingtaine de volcans sont en éruption à tout moment, et un volcan de point
+    // chaud comme le Kīlauea est resté en éruption presque sans arrêt de 1983 à 2018 ; avec des
+    // éruptions plus rares, on n'en voyait presque jamais)
+    private const double ShieldIntervalYears = 1.0;
+    private const double StratoIntervalYears = 8.0;
     // Forçage des aérosols volcaniques (W/m²) pour un VEI 6, divisé par ~5 par degré en dessous
     public const float Vei6ForcingWm2 = 3f;
     public const float AerosolLifetimeDays = 365f;
@@ -140,7 +143,12 @@ public sealed class PlanetActivity
             var eruption = new Eruption
             {
                 Position = volcano.Position, Vei = vei, Kind = volcano.Kind, StartDay = start,
-                DurationDays = vei <= 1 ? 20 + 120 * _random.NextDouble() : 2 + 10 * _random.NextDouble() * (7 - vei),
+                // Durées : de quelques mois à plus d'un an pour les coulées tranquilles, quelques
+                // semaines pour une éruption modérée, quelques jours pour une explosion majeure
+                DurationDays = vei <= 1 ? 60 + 340 * _random.NextDouble()
+                    : vei == 2 ? 15 + 185 * _random.NextDouble()
+                    : vei == 3 ? 5 + 55 * _random.NextDouble()
+                    : 2 + 18 * _random.NextDouble(),
                 PlumeHeightM = PlumeHeight(vei),
             };
             _eruptions.Add(eruption);
@@ -173,7 +181,8 @@ public sealed class PlanetActivity
 
     public static float PlumeHeight(int vei) => vei switch
     {
-        0 => 800f, 1 => 2000f, 2 => 5000f, 3 => 12000f, 4 => 18000f, _ => 25000f,
+        // (coulées tranquilles : panache de gaz et de vapeur de 1 à 4 km au-dessus des fontaines de lave)
+        0 => 2000f, 1 => 4000f, 2 => 7000f, 3 => 12000f, 4 => 18000f, _ => 25000f,
     };
 
     /// <summary>Forçage injecté (W/m²) : seules les éruptions de VEI 4 ou plus atteignent la stratosphère.</summary>

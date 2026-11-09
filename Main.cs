@@ -128,7 +128,8 @@ public partial class Main : Node3D
     private float _displaySeaLevel;
     private double _shakeSeconds, _shakeStrength;
     private readonly HashSet<Eruption> _announcedEruptions = new();
-    private readonly Dictionary<Eruption, float> _ventHeights = new();
+    private readonly Dictionary<Vector3, float> _ventHeights = new();
+    private readonly Vector4[] _volcanoSites = new Vector4[16];
     private readonly Vector4[] _eruptionVents = new Vector4[8];
     private readonly Vector4[] _eruptionShapes = new Vector4[8];
     private string _lastQuake;
@@ -196,7 +197,7 @@ public partial class Main : Node3D
     };
     private int _quality;
 
-    // Message affiché quelques secondes (lieu choisi avec F1–F7, F9–F11)
+    // Message affiché quelques secondes (lieu choisi avec F1–F7, Maj+F4, F9–F11, L)
     private string _notice;
     private double _noticeTimer;
     private Label _hud;
@@ -528,13 +529,18 @@ public partial class Main : Node3D
         camera.RotateObjectLocal(Vector3.Right, MathF.Sin(time * 23f) * amplitude * 0.01f);
     }
 
-    /// <summary>Éruptions les plus proches de la caméra, pour la lave du terrain et les panaches.</summary>
+    /// <summary>
+    /// Éruptions les plus proches de la caméra (lave du terrain, panaches), puis fumerolles des
+    /// volcans actifs voisins (panache de vapeur blanche permanent, comme sur l'Etna : on repère
+    /// les volcans de loin) ; volcans proches pour la teinte sombre de leurs flancs.
+    /// </summary>
     private void UpdateEruptionUniforms(bool climate)
     {
         int count = 0;
+        Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
+        var erupting = new HashSet<Vector3>();
         if (climate)
         {
-            Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
             double day = _climate.TimeDays;
             var nearest = _activity.Eruptions
                 .Select(e => (eruption: e, distance: e.Position.AngleTo(camera)))
@@ -542,26 +548,52 @@ public partial class Main : Node3D
                 .OrderBy(x => x.distance).Take(_eruptionVents.Length);
             foreach (var (eruption, _) in nearest)
             {
-                if (!_ventHeights.TryGetValue(eruption, out float height))
-                {
-                    int hint = -1;
-                    height = (float)(_terrain.Field?.Sample(Double3.From(eruption.Position).Normalized(), 100, ref hint).Height ?? 0);
-                    _ventHeights[eruption] = height;
-                }
-                float intensity = eruption.IntensityAt(day);
                 Vector3 p = eruption.Position;
-                _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, intensity);
-                float lavaRadius = eruption.Vei <= 1 ? 6000f : 2500f;
-                _eruptionShapes[count] = new Vector4(lavaRadius, eruption.PlumeHeightM, eruption.Vei, height);
+                erupting.Add(p);
+                _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, eruption.IntensityAt(day));
+                float lavaRadius = eruption.Vei <= 1 ? 9000f : 3000f;
+                _eruptionShapes[count] = new Vector4(lavaRadius, eruption.PlumeHeightM, eruption.Vei, VentHeight(p));
                 count++;
             }
-            if (_ventHeights.Count > 64)
-                _ventHeights.Clear();
         }
+        // Volcans voisins : fumerolles des actifs (places restantes), flancs sombres de tous
+        var volcanoes = _tectonics.Landforms
+            .Where(l => l.Kind != LandformKind.ImpactCrater && l.Growth * l.Freshness > 0.2f)
+            .Select(l => (landform: l, distance: l.Position.AngleTo(camera)))
+            .Where(x => x.distance * PlanetConstants.RadiusKm < 600)
+            .OrderBy(x => x.distance).Take(_volcanoSites.Length).ToArray();
+        int sites = 0;
+        foreach (var (landform, _) in volcanoes)
+        {
+            Vector3 p = landform.Position;
+            _volcanoSites[sites++] = new Vector4(p.X, p.Y, p.Z, landform.RadiusM);
+            if (landform.Active && count < _eruptionVents.Length && !erupting.Contains(p))
+            {
+                _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, 0.35f);
+                _eruptionShapes[count] = new Vector4(0f, 1500f, -1f, VentHeight(p));   // VEI −1 : vapeur
+                count++;
+            }
+        }
+        if (_ventHeights.Count > 256)
+            _ventHeights.Clear();
         _terrain.SetShaderParameter("eruption_count", count);
         _terrain.SetShaderParameter("eruption_vents", _eruptionVents);
         _terrain.SetShaderParameter("eruption_shapes", _eruptionShapes);
+        _terrain.SetShaderParameter("volcano_count", sites);
+        _terrain.SetShaderParameter("volcano_sites", _volcanoSites);
         _sky.SetEruptions(count, _eruptionVents, _eruptionShapes);
+    }
+
+    /// <summary>Altitude du relief détaillé au sommet d'un volcan (m), mémorisée.</summary>
+    private float VentHeight(Vector3 position)
+    {
+        if (!_ventHeights.TryGetValue(position, out float height))
+        {
+            int hint = -1;
+            height = (float)(_terrain.Field?.Sample(Double3.From(position).Normalized(), 100, ref hint).Height ?? 0);
+            _ventHeights[position] = height;
+        }
+        return height;
     }
 
     private void MeasureSpeed(double delta, double simulated)
@@ -922,7 +954,7 @@ public partial class Main : Node3D
     {
         "plus haut sommet", "plus grand fleuve", "grand lac", "côte", "désert venteux",
         "forêt sous la pluie", "neige qui tombe", "au-dessus des nuages", "coucher de soleil", "Lune",
-        "volcan",
+        "volcan", "falaise",
     };
 
     /// <summary>
@@ -934,7 +966,7 @@ public partial class Main : Node3D
         if (index < 0 || index >= PlaceNames.Length)
             return;
         var explorer = _terrain.Explorer;
-        bool needsClimate = index >= 4 && index != 10;
+        bool needsClimate = index >= 4 && index < 10;
         if (needsClimate && _clock != ClockMode.Climate)
             SetClock(ClockMode.Climate);
         if (needsClimate && !_climate.HasTemperature)
@@ -1088,11 +1120,31 @@ public partial class Main : Node3D
                     ShowNotice("Aucun volcan actif sur cette planète pour l'instant");
                     return;
                 }
+                // De côté, à ~35 km, un peu au-dessus du sol, le regard vers le sommet : le cône et
+                // le panache se découpent sur le ciel
                 Double3 vent = Double3.From(target.Value).Normalized();
                 Double3 east = Double3.UnitY.Cross(vent).Normalized();
-                explorer.PlaceAbove((vent - east * 0.004).Normalized(), 2500);
-                explorer.Face(east, -0.05);
+                Double3 north = vent.Cross(east);
+                Double3 side = (east * 0.8 + north * 0.6).Normalized();
+                explorer.PlaceAbove((vent - side * (35000 / TerrainHeightField.RadiusMeters)).Normalized(), 1200);
+                explorer.Face(vent - explorer.Position.Normalized(), 0.04);
                 detail = _clock == ClockMode.Climate && _activity.Eruptions.Count > 0 ? "en éruption" : "actif";
+                break;
+            }
+            case 11 when _terrain.Field != null:
+            {
+                // La plus belle falaise de la côte, vue du large à 700 m, à hauteur de vagues
+                var found = CliffFinder.Find(_terrain.Field, _grid, elevation);
+                if (found is not { } cliff)
+                {
+                    ShowNotice("Aucune falaise sur les côtes de cette planète");
+                    return;
+                }
+                const double offshore = CliffFinder.ViewDistanceM, eye = 25;
+                explorer.PlaceAbove((cliff.Shore - cliff.Inland * (offshore / TerrainHeightField.RadiusMeters)).Normalized(), eye);
+                double pitch = Math.Atan2(cliff.HeightM - eye, offshore + cliff.DistanceM) * 0.7;
+                explorer.Face(cliff.Inland, pitch);
+                detail = $"{cliff.HeightM:N0} m, pente {cliff.SlopeDegrees:0}°";
                 break;
             }
             default:
@@ -1253,7 +1305,7 @@ public partial class Main : Node3D
             lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité d'image (résolution réduite + AMD FSR)");
-            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
+            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
         else
         {
@@ -1701,6 +1753,9 @@ public partial class Main : Node3D
             case Key.Key0 or Key.Kp0: CycleDisplayMode(DisplayMode.Realistic); break;
             case Key.F: _showRivers = !_showRivers; break;
             // Pas de F8 : lancé depuis l'éditeur, le jeu s'arrête sur F8 (raccourci « Arrêter » de Godot)
+            case Key.F4 when key.ShiftPressed:
+                GoToPlace(11);   // Maj + F4 : falaise
+                break;
             case >= Key.F1 and <= Key.F7:
                 GoToPlace((int)(key.Keycode - Key.F1));
                 break;
