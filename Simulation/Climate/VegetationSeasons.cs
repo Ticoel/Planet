@@ -25,6 +25,11 @@ public sealed class VegetationSeasons
     private const float LeafFallDays = 15f;
     private const float LeafGrowthDays = 12f;
     private const float GrassDays = 15f;
+    // Remplissage du sol (0 à 1) sous lequel les arbres perdent leurs feuilles (sécheresse), et
+    // au-dessus duquel elles repoussent. (Avec 0,15 et 0,25, les savanes, au sol toujours assez
+    // sec, gardaient des arbres nus toute l'année.)
+    private const float DroughtSoil = 0.06f;
+    private const float WetSoil = 0.12f;
 
     private readonly float[] _meanTemperature;
     private bool _initialised;
@@ -92,7 +97,7 @@ public sealed class VegetationSeasons
             for (int c = 0; c < count; c++)
             {
                 _meanTemperature[c] = surfaceCelsius[c];
-                Leaves[c] = surfaceCelsius[c] > AutumnCelsius && soilFraction[c] > 0.15f ? 1f : 0f;
+                Leaves[c] = surfaceCelsius[c] > AutumnCelsius && soilFraction[c] > DroughtSoil ? 1f : 0f;
                 Autumn[c] = 0f;
                 Grass[c] = GrassTarget(surfaceCelsius[c], soilFraction[c]);
             }
@@ -106,8 +111,8 @@ public sealed class VegetationSeasons
         {
             float t = _meanTemperature[c] += (surfaceCelsius[c] - _meanTemperature[c]) * memory;
             float soil = soilFraction[c];
-            bool autumn = t < AutumnCelsius || soil < 0.15f;
-            bool spring = t > SpringCelsius && soil > 0.25f;
+            bool autumn = t < AutumnCelsius || soil < DroughtSoil;
+            bool spring = t > SpringCelsius && soil > WetSoil;
             if (autumn && Leaves[c] > 0f)
             {
                 // D'abord les couleurs, puis la chute

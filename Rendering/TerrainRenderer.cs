@@ -220,6 +220,13 @@ public partial class TerrainRenderer : Node3D
         var indexTexture = new Texture2DArray();
         indexTexture.CreateFromImages(faces);
         SetBoth("cell_index", indexTexture);
+        // Fondu entre cellules à l'échelle des cellules de la simulation : un texel de la carte
+        // des numéros vaut π/2 / 512 rad (~20 km) ; avec un fondu fixe de 2 texels, les grandes
+        // cellules (~220 km à 10 242 cellules) restaient des hexagones bien nets vus de l'orbite
+        float texelAngle = MathF.PI / 2f / CellIndexResolutionPixels;
+        int blendStep = Math.Max(2, (int)MathF.Round(0.8f * grid.MeanEdgeAngle / texelAngle));
+        SetBoth("cell_blend_step", blendStep);
+        SetBoth("cell_warp", MathF.Max(0.0035f, 0.35f * grid.MeanEdgeAngle));
 
         _cellColorHeight = (grid.CellCount + CellColorLayer.TextureWidth - 1) / CellColorLayer.TextureWidth;
         _cellColorPixels = new byte[CellColorLayer.TextureWidth * _cellColorHeight * 4];
@@ -713,6 +720,10 @@ uniform sampler2DArray cell_index : filter_nearest, repeat_disable;
 uniform sampler2D cell_colors : source_color, filter_nearest;
 uniform sampler2D cell_data : filter_nearest;
 uniform int texture_width = 1024;
+// Pas du fondu entre cellules (texels de cell_index) et amplitude de la déformation des
+// limites (radians), selon la taille des cellules de la simulation
+uniform int cell_blend_step = 2;
+uniform float cell_warp = 0.0035;
 uniform bool has_climate = false;
 // Position de la caméra modulo NOISE_PERIOD (m), calculée en double sur le processeur : les
 // bruits de texture, périodiques, sont calculés en coordonnées relatives à la caméra (précises
@@ -812,24 +823,29 @@ float detail_weight(float scale, float footprint) {
 // tri la mer « débordait » en carrés bleus sur la terre. Le point est d'abord déplacé par un
 // bruit (~20 km) : les limites entre biomes ondulent au lieu de suivre la grille.
 // Les 4 cellules autour d'un point et leurs poids (interpolation bilinéaire sur un réseau de
-// 2 texels de pas, soit un fondu sur ~40 km, après déplacement du point par un bruit)
+// cell_blend_step texels de pas, ~0,8 fois l'écart entre cellules, après déplacement du point
+// par un bruit)
 void smooth_cells(vec3 d, out ivec4 cells, out vec4 weights) {
-    vec4 w1 = gradient_noise(d * 300.0, 1 << 20);
-    vec4 w2 = gradient_noise(d * 300.0 + vec3(31.7, -12.3, 7.9), 1 << 20);
-    vec4 w3 = gradient_noise(d * 300.0 + vec3(-5.1, 19.4, -27.6), 1 << 20);
-    vec4 w4 = gradient_noise(d * 1100.0, 1 << 20);
-    d = normalize(d + 0.0035 * vec3(w1.x, w2.x, w3.x) + 0.0012 * w4.yzw);
+    // (taille des ondulations proportionnelle à leur amplitude : 300 et 1100 par radian pour
+    // les petites cellules)
+    float wf = 1.05 / cell_warp;
+    vec4 w1 = gradient_noise(d * wf, 1 << 20);
+    vec4 w2 = gradient_noise(d * wf + vec3(31.7, -12.3, 7.9), 1 << 20);
+    vec4 w3 = gradient_noise(d * wf + vec3(-5.1, 19.4, -27.6), 1 << 20);
+    vec4 w4 = gradient_noise(d * wf * 3.7, 1 << 20);
+    d = normalize(d + cell_warp * vec3(w1.x, w2.x, w3.x) + cell_warp * 0.34 * w4.yzw);
     vec3 a = abs(d);
     int f = a.x >= a.y && a.x >= a.z ? (d.x > 0.0 ? 0 : 1) : (a.y >= a.z ? (d.y > 0.0 ? 2 : 3) : (d.z > 0.0 ? 4 : 5));
     float n = dot(d, FACE_NORMAL[f]);
     vec2 st = vec2(atan(dot(d, FACE_S[f]) / n), atan(dot(d, FACE_T[f]) / n)) * 4.0 / PI;
     int size = textureSize(cell_index, 0).x;
-    vec2 texel = ((st * 0.5 + 0.5) * float(size) - 0.5) * 0.5;
-    ivec2 base = ivec2(floor(texel)) * 2;
+    float step_texels = float(cell_blend_step);
+    vec2 texel = ((st * 0.5 + 0.5) * float(size) - 0.5) / step_texels;
+    ivec2 base = ivec2(floor(texel)) * cell_blend_step;
     vec2 t = fract(texel);
     for (int k = 0; k < 4; k++) {
         ivec2 o = ivec2(k & 1, k >> 1);
-        ivec2 c = clamp(base + o * 2, ivec2(0), ivec2(size - 1));
+        ivec2 c = clamp(base + o * cell_blend_step, ivec2(0), ivec2(size - 1));
         weights[k] = (o.x == 1 ? t.x : 1.0 - t.x) * (o.y == 1 ? t.y : 1.0 - t.y);
         cells[k] = int(texelFetch(cell_index, ivec3(c, f), 0).r + 0.5);
     }
@@ -1058,7 +1074,9 @@ void fragment() {
             color = layer_color_smooth(up, true);
             color *= 1.0 + 0.10 * n512.x + 0.08 * n128.x;
             // Déserts de sable (étape 12a) : dunes claires, crêtes et creux
-            color = mix(color, sand * (1.0 + 0.06 * dune_slope * detail_weight(32.0, footprint)), desertSand * (1.0 - rockiness) * 0.85);
+            // (sable des déserts plus ocre que celui des plages : vus de l'espace, ils viraient au blanc)
+            vec3 desert = mix(vec3(0.66, 0.50, 0.32), vec3(0.72, 0.60, 0.42), smoothstep(-0.4, 0.4, n2048.x));
+            color = mix(color, desert * (1.0 + 0.06 * dune_slope * detail_weight(32.0, footprint)), desertSand * (1.0 - rockiness) * 0.7);
             // Forêts : houppiers et trouées d'ombre entre les arbres ; de loin, une teinte plus sombre
             float crowns = 0.5 + 0.5 * clamp(n8.x * 1.4 + n32.x * 0.6, -1.0, 1.0);
             color *= mix(1.0, mix(0.55, 1.12, crowns), canopy * detail_weight(16.0, footprint));

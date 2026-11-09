@@ -445,10 +445,38 @@ public partial class Main : Node3D
     /// de l'horizon) : comme en fin d'après-midi, les pentes s'opposent nettement et le relief, à
     /// l'échelle réelle, reste lisible (avec une lumière haute, il paraissait tout plat).
     /// </summary>
+    // Au-delà de cette vitesse (jours par seconde), jour et nuit se succèdent plusieurs fois par
+    // seconde : le ciel est affiché à une heure fixe de la journée sous la caméra
+    private const float FastSkyDaysPerSecond = 0.1f;
+    private const double FastSkyLocalHour = 13.0;
+
+    private bool IsFastSky => _clock == ClockMode.Climate && _running && ClimateSpeeds[_climateSpeed] >= FastSkyDaysPerSecond;
+
+    /// <summary>
+    /// Instant utilisé pour le ciel (Soleil, Lune, étoiles, marée). Au-delà de ~2 h par seconde,
+    /// le Soleil faisait le tour du ciel plusieurs fois par seconde (clignotement jour / nuit
+    /// pénible) : on montre alors chaque jour à 13 h, heure solaire du lieu de la caméra. Les
+    /// saisons défilent toujours ; le climat, lui, est calculé avec le vrai Soleil.
+    /// </summary>
+    private double SkyTimeDays()
+    {
+        double time = _climate.TimeDays;
+        if (!IsFastSky)
+            return time;
+        Vector3 p = _terrain.Explorer.Position.Normalized().ToVector3();
+        double longitude = Math.Atan2(-p.Z, p.X);
+        double subsolar = _orbit.ComputeSun(time).SubsolarLongitude;
+        // Heure solaire locale ; elle avance de 24 h par jour (le point subsolaire file vers l'ouest)
+        double localHour = 12.0 + (longitude - subsolar) / (2 * Math.PI) * 24.0;
+        double shiftDays = (FastSkyLocalHour - localHour) / 24.0;
+        shiftDays -= Math.Round(shiftDays);
+        return time + shiftDays;
+    }
+
     private Vector3 SunDirection()
     {
         if (_clock == ClockMode.Climate)
-            return _climate.Sun.Direction;
+            return IsFastSky ? _orbit.ComputeSun(SkyTimeDays()).Direction : _climate.Sun.Direction;
         var (up, north, east) = _terrain.Explorer.LocalFrame();
         return (up * 0.36 + north * 0.75 - east * 0.45).Normalized().ToVector3();
     }
@@ -595,7 +623,7 @@ public partial class Main : Node3D
 
         // Nuages : seulement avec un climat simulé, et pas sur les couches de données (ils
         // cacheraient ce qu'on veut lire)
-        bool showClouds = climate && ColoringFor(_displayMode) is TerrainColoring.Geology or TerrainColoring.Realistic;
+        bool showClouds = climate && !_hideClouds && ColoringFor(_displayMode) is TerrainColoring.Geology or TerrainColoring.Realistic;
         // Calcul en tâche de fond (copies des champs du climat), envoi à la carte graphique ici
         _cloudTimer -= delta;
         if (_cloudTask != null && _cloudTask.IsCompleted)
@@ -628,7 +656,8 @@ public partial class Main : Node3D
         }
         _terrain.SetShaderParameter("clouds_enabled", _sky.HasClouds && _cloudsShown);
         // Marées (étape 11b) et niveau de la mer selon la glace des terres (étape 11d)
-        TideState tide = climate ? Tides.Compute(_climate.TimeDays, _orbit) : default;
+        double skyTime = SkyTimeDays();
+        TideState tide = climate ? Tides.Compute(skyTime, _orbit) : default;
         _terrain.SetShaderParameter("tide_moon", new Vector4(tide.MoonDirection.X, tide.MoonDirection.Y, tide.MoonDirection.Z, tide.MoonAmplitude));
         _terrain.SetShaderParameter("tide_sun", new Vector4(tide.SunDirection.X, tide.SunDirection.Y, tide.SunDirection.Z, tide.SunAmplitude));
         _terrain.SetShaderParameter("tide_high", tide.MaxHeight);
@@ -640,8 +669,8 @@ public partial class Main : Node3D
             CameraPosition = explorer.Position,
             AltitudeAboveGround = explorer.AltitudeAboveGround,
             SunDirection = sun,
-            Moon = climate ? MoonOrbit.Compute(_climate.TimeDays, _orbit) : null,
-            StarAngle = climate ? 2 * Math.PI * _climate.TimeDays * (1 + 1 / _orbit.YearLengthDays) : 0,
+            Moon = climate ? MoonOrbit.Compute(skyTime, _orbit) : null,
+            StarAngle = climate ? 2 * Math.PI * skyTime * (1 + 1 / _orbit.YearLengthDays) : 0,
             CloudTime = _climate.TimeDays * 86400.0,
             Weather = climate ? LocalWeatherAtCamera() : null,
         };
@@ -670,6 +699,7 @@ public partial class Main : Node3D
     }
 
     private float[] _canopy;
+    private bool _hideClouds;
 
     // --- Lieux de test (F1 à F7, F9 à F11) -------------------------------------------------------------
 
@@ -940,6 +970,8 @@ public partial class Main : Node3D
         else
         {
             string speed = _running ? ClimateSpeedLabel(ClimateSpeeds[_climateSpeed]) : "EN PAUSE";
+            if (IsFastSky)
+                speed += " (ciel montré chaque jour à 13 h)";
             string temperature = _climate.HasTemperature ? $"   {French(_climate.GlobalMeanTemperature)} °C en moyenne" : "";
             lines.Add($"CLIMAT   {DateLabel(_climate.TimeDays)}   {speed}{temperature}");
         }
@@ -970,7 +1002,7 @@ public partial class Main : Node3D
             lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
             lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
-            lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau");
+            lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages");
             lines.Add("[O] Qualité d'image (résolution réduite + AMD FSR)");
             lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
@@ -1230,8 +1262,9 @@ public partial class Main : Node3D
     private string TideLabel(MoonState moon)
     {
         Vector3 up = _terrain.Explorer.Position.Normalized().ToVector3();
-        float now = Tides.Compute(_climate.TimeDays, _orbit).HeightAt(up);
-        float soon = Tides.Compute(_climate.TimeDays + 10.0 / 1440.0, _orbit).HeightAt(up);
+        double time = SkyTimeDays();
+        float now = Tides.Compute(time, _orbit).HeightAt(up);
+        float soon = Tides.Compute(time + 10.0 / 1440.0, _orbit).HeightAt(up);
         // Vives-eaux à la nouvelle et à la pleine lune, mortes-eaux aux quartiers
         double alignment = Math.Cos(4 * Math.PI * moon.Phase);
         string kind = alignment > 0.5 ? "vives-eaux" : alignment < -0.5 ? "mortes-eaux" : "marée moyenne";
@@ -1376,6 +1409,11 @@ public partial class Main : Node3D
             case Key.U:
                 // Eau masquée : on voit les fonds marins et le fond des lacs
                 _terrain.ShowWater = !_terrain.ShowWater;
+                break;
+            case Key.N:
+                // Nuages masqués : on voit le relief et les couleurs du sol depuis l'orbite
+                _hideClouds = !_hideClouds;
+                ShowNotice(_hideClouds ? "Nuages masqués (N pour les remettre)" : "Nuages affichés");
                 break;
             case Key.H:
                 _showHelp = !_showHelp;

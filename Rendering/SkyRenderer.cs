@@ -84,6 +84,9 @@ public sealed partial class SkyRenderer : Node3D
     private int _cellIndexResolution;
     private Node3D _weatherAnchor;
     private GpuParticles3D _rain, _snow, _dust;
+    // Matériau et couleur de base de chaque sorte de particules : la couleur est assombrie selon
+    // la lumière du moment (sinon, sans éclairage, elles brillaient en pleine nuit)
+    private readonly System.Collections.Generic.List<(Material material, Color color)> _particleLooks = new();
 
     /// <summary>
     /// Crée le ciel. <paramref name="cellIndex"/> : numéro de la cellule la plus proche de
@@ -382,6 +385,7 @@ public sealed partial class SkyRenderer : Node3D
                 BillboardKeepScale = true,
             };
         }
+        _particleLooks.Add((material, color));
         var particles = new GpuParticles3D
         {
             Name = name,
@@ -430,6 +434,7 @@ public sealed partial class SkyRenderer : Node3D
 
         // Brume près du sol (passe plein écran) : averses, poussière, brouillard
         float daylight = Mathf.SmoothStep(-0.1f, 0.2f, up.Dot(sun));
+        LightParticles(up.Dot(sun), daylight, rain + snow, frame.Moon);
         float density = 0.00025f * rain + 0.0002f * snow + 0.0006f * dust + 0.003f * mist;
         var color = new Color(0.62f, 0.66f, 0.72f);
         if (density > 0)
@@ -442,6 +447,26 @@ public sealed partial class SkyRenderer : Node3D
         // Brouillard : nappe mince au fond des vallées ; poussière et averses : plus épaisses
         _postMaterial.SetShaderParameter("fog_height", mist > dust + rain + snow ? 120f : 900f);
         _postMaterial.SetShaderParameter("ground_altitude", (float)(frame.CameraPosition.Length() - TerrainHeightField.RadiusMeters - frame.AltitudeAboveGround));
+    }
+
+    /// <summary>
+    /// Couleur des particules selon la lumière qui les éclaire : plein jour, Soleil bas (lumière
+    /// orangée), ciel couvert sous les averses, nuit (clair de lune selon la phase, sinon presque noir).
+    /// </summary>
+    private void LightParticles(float sunHeight, float daylight, float precipitation, MoonState? moon)
+    {
+        float overcast = Math.Clamp(precipitation, 0f, 1f);
+        var sunColor = new Color(1f, 0.62f, 0.38f).Lerp(Colors.White, SmoothStep(0.02f, 0.3f, sunHeight));
+        float moonlight = moon.HasValue ? 0.015f + 0.06f * moon.Value.IlluminatedFraction : 0.015f;
+        Color light = sunColor * (daylight * (1f - 0.45f * overcast)) + new Color(0.55f, 0.65f, 1f) * moonlight * (1f - daylight);
+        foreach (var (material, color) in _particleLooks)
+        {
+            var lit = new Color(color.R * light.R, color.G * light.G, color.B * light.B, color.A);
+            if (material is ShaderMaterial shader)
+                shader.SetShaderParameter("color", lit);
+            else if (material is StandardMaterial3D standard)
+                standard.AlbedoColor = lit;
+        }
     }
 
     private static void SetParticles(GpuParticles3D particles, float amount, Vector3 velocity)

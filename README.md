@@ -12,23 +12,25 @@ l'échelle réelle. Rien ne vient de la vraie Terre : continents, montagnes, cli
 | | | |
 |:---:|:---:|:---:|
 | ![Vue d'orbite](docs/images/orbite.jpg) | ![Montagnes à l'échelle réelle](docs/images/montagnes.jpg) | ![Coucher de soleil](docs/images/coucher-de-soleil.jpg) |
-| **De l'orbite…** couche altitude, atmosphère, étoiles | **…au sol**, relief à l'échelle réelle | **Coucher de soleil** calculé par diffusion de la lumière |
+| **De l'orbite…** vue réaliste, nuages du climat simulé | **…au sol**, relief à l'échelle réelle | **Coucher de soleil** calculé par diffusion de la lumière |
 | ![Lac](docs/images/lac.jpg) | ![Mer de nuages](docs/images/mer-de-nuages.jpg) | ![Crêtes](docs/images/cretes.jpg) |
 | **Lacs et fleuves** tirés du réseau hydrographique simulé | **Nuages en volume**, vus de 12 km | **Crêtes et vallées** érodées, roche texturée |
 | ![Carte d'altitude](docs/images/couche-altitude.jpg) | ![Lune et étoiles](docs/images/lune.jpg) | ![Vent de poussière](docs/images/poussiere.jpg) |
 | **Couche altitude** vue de 400 km | **Lune** et ses phases, étoiles (Lune agrandie ici) | **Vent de poussière** dans un désert |
 
 *Images produites avec le moteur de rendu du projet (ses propres shaders), en rendu logiciel
-hors carte graphique. La mer de nuages utilise une couverture de test ; dans le jeu, elle vient
-du climat simulé. La Lune est montrée agrandie : dans le jeu, elle a sa vraie taille (un demi-degré).*
+hors carte graphique. La vue d'orbite utilise le climat simulé (couleurs, nuages) ; la mer de
+nuages, une couverture de test. La Lune est montrée agrandie : dans le jeu, elle a sa vraie
+taille (un demi-degré).*
 
 ## Comment ça marche
 
 ```mermaid
 flowchart LR
-    A[Tectonique des plaques<br/>icosphère, 163 842 cellules] --> B[Relief simulé]
+    A[Tectonique des plaques<br/>icosphère de 10 242 cellules] --> B[Relief simulé]
     B --> C[Climat<br/>ensoleillement, températures,<br/>vents, cycle de l'eau]
     C --> D[Fleuves, lacs, glaciers]
+    C --> O[Océans<br/>courants, marées, banquise]
     C --> E[Biomes]
     D -->|érosion| B
     B --> F[Relief détaillé<br/>quadtree sur sphère cubique,<br/>jusqu'à ~1 m]
@@ -36,6 +38,7 @@ flowchart LR
     C --> G[Ciel vivant<br/>atmosphère, nuages, météo]
     F --> H((Exploration<br/>de l'orbite au sol))
     G --> H
+    O --> H
     E --> H
 ```
 
@@ -52,6 +55,16 @@ une **climatique** (du temps réel à des mois par seconde), sur le relief figé
 sous les tropiques, courant circumpolaire vers l'est autour de 50° S. Ils transportent la chaleur
 des eaux de surface.*
 
+![Remontées d'eau froide simulées](docs/images/remontees.jpg)
+
+*Remontées d'eau froide : sous l'équateur (les alizés écartent l'eau vers les pôles) et le long
+des côtes où le vent pousse l'eau vers le large ; elles refroidissent la surface.*
+
+![Saisons et banquise dans la vue réaliste](docs/images/saisons.jpg)
+
+*Vue réaliste en juillet et en novembre : feuillus qui se colorent puis perdent leurs feuilles,
+herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
+
 ## Auteurs
 
 - **Code et conception technique : Claude**, modèle d'intelligence artificielle créé par
@@ -62,6 +75,8 @@ des eaux de surface.*
 
 ## Lancer
 
+- Code source : [github.com/Ticoel/Planet](https://github.com/Ticoel/Planet)
+  (`git clone https://github.com/Ticoel/Planet.git`).
 - Ouvrir le dossier dans Godot 4.7.2 (.NET), lancer la scène `Main.tscn`.
 - Tests : `dotnet run -c Release --project tests/Planet.Tests`.
 - Touches principales (H affiche l'aide complète dans le jeu) :
@@ -71,152 +86,82 @@ des eaux de surface.*
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
   - I : détails (Lune, marée sous la caméra, niveau moyen de la mer…) ;
   - O : qualité d'image (résolution réduite + AMD FSR 1 ou 2 ; FSR 2 qualité au démarrage) ;
-  - U : masquer l'eau ; F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux,
+  - U : masquer l'eau ; N : masquer les nuages ; F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux,
     pluie, neige, puis nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur).
 
 ## Licence
 
 GNU GPL version 3 (voir le fichier `LICENSE`).
 
-# Décisions de conception
+# Conception
 
-Mise à jour : 2026-11-09 (étapes 1 à 12 faites)
+Mise à jour : 2026-11-09 (étapes 1 à 12 faites, 102 tests).
 
-## Vision
-Planète **entièrement procédurale** : tectonique, relief, climat, cycle de l'eau et biomes émergent de la simulation et tournent seuls. Pas de données de la vraie Terre. Exploration de l'orbite jusqu'au sol, à l'échelle réelle.
-
-## Choix techniques
-- Godot 4.7.2 .NET ; C# pour la logique CPU, compute shaders GLSL pour le climat (vérifiés contre la référence CPU au démarrage, repli automatique sur le CPU).
-- **Deux grilles qui cohabitent** :
-  - simulation sur une **icosphère** (163 842 cellules hexagonales de ~60 km à n = 7) : voisines à égale distance, pas de singularité aux pôles ;
-  - affichage sur une **sphère cubique** découpée en quadtree (morceaux carrés de ~2 500 km à 38 m) : niveau de détail selon la distance.
-  - Lien : le relief détaillé interpole les altitudes des cellules et y ajoute les détails ; les couches de couleur sont lues dans les cellules (carte « numéro de cellule » par face du cube) et fondues entre voisines.
-- Séparation stricte simulation (`Simulation/`, sans Godot hors types de base) / rendu (`Rendering/`, `Main.cs`).
+## Principes
+- **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
+  l'échelle réelle, sans données de la vraie Terre.
+- Godot 4.7.2 .NET : C# pour la logique, compute shaders GLSL pour le climat (vérifiés contre le
+  calcul processeur au démarrage, repli automatique). Simulation (`Simulation/`, sans moteur hors
+  types de base) séparée du rendu (`Rendering/`, `Main.cs`).
+- **Deux grilles** : simulation sur une **icosphère** (10 242 cellules hexagonales de ~220 km par
+  défaut, sans singularité aux pôles) ; affichage sur une **sphère cubique** en quadtree (morceaux
+  de ~2 500 km à 38 m). Le relief détaillé interpole les cellules et ajoute les détails ; les
+  couleurs sont lues dans les cellules et fondues entre voisines (~0,8 cellule).
+- **Deux horloges** (touche C) : géologique (0,2 à 1 Ma par pas, avance rapide jusqu'à 4,54 Ga)
+  et climatique (du temps réel à 3 mois/s, relief figé). Un climat moyen estimé tous les 25 Ma
+  pilote l'érosion. Au-delà de ~2 h/s, le ciel est montré chaque jour à 13 h (sinon jour et nuit
+  clignotent) ; le climat suit toujours le vrai Soleil.
 - Conventions : identifiants, fichiers et console en anglais ; commentaires et interface en français.
 
-## Deux horloges (touche C)
-- **Géologique** (pas de 0,2 à 1 Ma) : plaques, croûte, isostasie, érosion. Le relief affiché suit (nouveau relief préparé en arrière-plan puis basculé d'un coup).
-- **Climatique** (du temps réel à 3 mois/s) : ensoleillement, températures, vents, eau, sur un relief figé.
-- Couplage : un climat moyen estimé tous les 25 Ma fournit les précipitations → érosion et vallées.
-- Avance rapide jusqu'à 4,54 Ga (touche T) ; vitesses jusqu'à 500 Ma/s (vitesse réelle limitée par le calcul).
+## Modèles
+- **Tectonique** : plaques tournant autour de pôles d'Euler, croûte océanique et continentale,
+  isostasie, subduction, dorsales, collisions, fracturations et fusions ; stable jusqu'à 4,5 Ga
+  (~15 plaques, 27 à 30 % de terres, sommets ~7 km).
+- **Climat** : ensoleillement (orbite de Kepler, saisons), bilan d'énergie (A = 188, B = 2,09,
+  diffusion 0,35), vents diagnostiques (ceintures de pression, Coriolis, frottement, moussons),
+  cycle de l'eau (évaporation, pluie de convergence et orographique, neige, fonte, sols),
+  biomes de Köppen qui agissent en retour (albédo, eau du sol, évapotranspiration).
+- **Eau douce** : remplissage des cuvettes (priority-flood), débits cumulés, lacs, glaciers.
+- **Océans** :
+  - courants de Stommel (gyres, courants de bord ouest) plus dérive d'Ekman, recalculés tous les
+    5 jours, qui transportent la chaleur ;
+  - remontées d'eau froide (divergence du transport d'Ekman) qui refroidissent la surface ;
+  - marées d'équilibre de la Lune et du Soleil (vives-eaux et mortes-eaux, amplification côtière
+    moyenne ×3), estrans qui se découvrent ;
+  - niveau de la mer selon la glace des terres ; banquise qui dérive avec le courant et ~2 % du
+    vent (règle de Nansen).
+- **Relief détaillé** : plans des cellules mélangés (Shepard, Wendland), fractales (plaines,
+  collines, montagnes « ridged »), plis le long des chaînes, vallées courbes à méandres selon le
+  débit, lacs à rive continue, falaises côtières.
+- **Terrain** : CDLOD (niveaux 0 à 18, morphing exact vers le parent, jupes), morceaux calculés en
+  double précision sur des threads, rendu relatif à la caméra, cache de 3 000 morceaux.
+- **Ciel** : diffusion de Rayleigh, Mie et ozone (couchers de soleil, liseré bleu vu de l'espace,
+  perspective atmosphérique) ; Lune sur son orbite (phases, vraie taille) ; étoiles et Voie lactée.
+- **Nuages** : couverture tirée du climat, découpée par un « temps qu'il fait » procédural
+  (systèmes de 500 à 1 500 km qui dérivent avec les vents) ; nuages en volume de 1,5 à ~9 km,
+  ombres au sol ; pluie, neige et poussière autour de la caméra, éclairées par la lumière du moment.
+- **Sol et saisons** : textures procédurales (strates, roche fissurée, éboulis, dunes et rides de
+  sable, canopée des forêts) ; neige selon le climat ; feuillus qui se colorent puis perdent leurs
+  feuilles, herbes qui jaunissent ; fleuves qui coulent (rapides, cascades), houle et écume.
 
-## Tectonique (réf. Cortial et al. 2019, *Procedural Tectonic Planets*)
-- Chaque cellule appartient à une plaque ; chaque plaque tourne autour d'un pôle d'Euler.
-- Croûte océanique / continentale ; altitude par isostasie ; subduction, dorsales, collisions, fracturations et fusions.
-- Vérifié stable jusqu'à 4,5 Ga (15 plaques, 27 à 30 % de terres, sommets ~7 km).
+## Feuille de route
 
-## Climat (étapes 3 à 8)
-- Bilan d'énergie (A = 188, B = 2,09, D = 0,35, capacité de l'air 2,5e6), vents diagnostiques, cycle de l'eau, réseau hydrographique (priority-flood), biomes de Köppen.
+Faites :
 
-## Terrain (étape 9)
-- **CDLOD** : niveaux 0–18, 32×32 quads par morceau, jupes, élimination hors champ et sous l'horizon, cache LRU de 3 000 morceaux (les parents traversés comptent comme utilisés). Au bout du morphing, chaque morceau coïncide exactement avec son parent (cibles calculées avec les longueurs d'onde du parent).
-- Calcul des morceaux sur des threads, en double précision ; rendu relatif à la caméra ; near = far / 10⁶.
-- **Relief** (`TerrainHeightField.Sample`) :
-  - grandes formes : plans de Shepard + poids de Wendland C2 ;
-  - détail fractal (plaines 80 m, collines 650 m, montagnes « ridged » 2 300 m aux arêtes arrondies sur ~30 m, fonds 300 m) ; érosion par les dérivées du bruit ;
-  - plis le long des chaînes allongées seulement (pente de direction cohérente), crêtes ondulées et morcelées ;
-  - vallées des fleuves : tracés courbes (spline de Catmull-Rom par les cellules + grandes boucles + méandres), largeur et profondeur selon le débit ;
-  - lacs : niveau de l'eau qui s'abaisse vers le bord de la zone du lac (rive continue, relief intact) ; falaises côtières par endroits.
-- **Rendu** :
-  - eau = seconde instance du même maillage, transparente selon la profondeur, vaguelettes ; touche U pour la masquer ;
-  - textures procédurales dans le shader (bruit périodique recalé sur la caméra) : micro-relief jusqu'à ~2 m, variations de couleur, strates, éboulis ;
-  - neige selon le climat simulé (fondue entre cellules) ; ciel avec couchers de soleil ; brume ;
-  - couche altitude calculée point par point ; autres couches fondues entre cellules (~40 km) ; vue réaliste qui ne mélange que des cellules du même milieu (terre ou mer).
-- Caméra : vol à l'horizontale qui suit la courbure, marche, zoom à la molette, glisser à la souris ; direction de marche transportée (pas de singularité aux pôles).
+- **1-2** : grille icosaédrique, tectonique des plaques, relief.
+- **3-8** : ensoleillement et saisons, températures, vents, cycle de l'eau, fleuves et lacs, biomes.
+- **9** : terrain détaillé de l'orbite au sol (CDLOD), eau, caméra.
+- **10** : ciel vivant (Lune, atmosphère, nuages, météo autour de la caméra).
+- **11** : océans (courants, marées, remontées d'eau froide, niveau de la mer, banquise).
+- **12** : sol et saisons en haute définition, eau animée.
 
-## Tests (`tests/Planet.Tests`)
-- `dotnet run -c Release --project tests/Planet.Tests` (~45 s), `-- --quick`, `-- Terrain`. 83 tests.
+À venir :
 
-## Feuille de route (après l'étape 9)
-
-Principe : chaque ajout s'appuie sur des grandeurs déjà simulées (ou ajoute de la physique),
-reste entièrement procédural et à l'échelle réelle. Ordre choisi le 2026-11-09 : d'abord ce qui
-se voit le plus.
-
-### Étape 10 — Ciel vivant (faite)
-- **10a Lune (sans marées)** : orbite propre (mois sidéral 27,32 j, synodique 29,53 j,
-  inclinaison 5,1° sur l'écliptique, excentricité 0,055, distance moyenne 384 400 km, rayon
-  1 737 km). Position calculée pour n'importe quel instant de l'horloge climatique, comme le
-  Soleil. Disque à sa vraie taille dans le ciel (≈ 0,5°), phases éclairées par le Soleil,
-  lumière cendrée, parallaxe depuis l'orbite ; clair de lune (lumière bleutée proportionnelle à
-  la phase). Phase affichée dans les détails.
-- **10b Ciel et atmosphère réalistes** : diffusion de la lumière calculée (Rayleigh pour le bleu,
-  Mie pour le halo blanc, hauteurs d'échelle 8 km et 1,2 km, atmosphère de 100 km) :
-  - ciel bleu, horizon pâle, couchers et levers rouges/orangés, Soleil rougi près de l'horizon ;
-  - vue de l'espace : fin liseré bleu autour de la planète, terminateur coloré ;
-  - perspective atmosphérique sur le relief (remplace la brume artificielle) ;
-  - lumière du Soleil teintée par l'atmosphère traversée ; étoiles et Voie lactée, visibles la nuit
-    et depuis l'espace.
-- **10c Nuages** : couverture calculée depuis le climat (humidité relative, pluie récente,
-  convergence des vents) ; nuages en volume (lancer de rayons dans une couche de 1,5 à ~8 km,
-  plus épaisse là où il pleut), formes par bruit 3D qui dérive avec les vents dominants (alizés,
-  vents d'ouest) ; éclairés par le Soleil (et la Lune), sombres sous les averses ; ombres au sol.
-  Visibles de l'orbite (la planète ressemble enfin à la Terre vue de l'espace) comme du sol.
-- **10d Climat visible** : autour de la caméra, selon le climat de la cellule :
-  - pluie (traits) ou neige (flocons) selon la température, intensité selon les précipitations,
-    poussées par le vent ;
-  - poussière dans les déserts quand le vent forcit (brume ocre, particules) ;
-  - brume et brouillard dans les vallées humides et froides au petit matin.
-
-### Étape 11 — Océans (faite)
-- **11a Courants océaniques** : modèle de Stommel (1948) résolu sur une grille de ~110 km
-  (r ∇²ψ + β ∂ψ/∂x = rot τ / ρH, ψ = 0 sur les côtes, couche de 100 m, courants de bord ouest
-  larges de ~350 km) plus dérive d'Ekman (1,2 % du vent, déviée de 45°) ; recalculés en tâche de
-  fond tous les 5 jours simulés ; transport de la chaleur des eaux de surface couplé au climat (sur
-  la carte graphique et le processeur, efficacité 50 %) ; couche « courants » (touche 7) et flèches (V).
-  Vérifié sur un océan d'école : gyres dans le bon sens dans les deux hémisphères, courant de
-  bord ouest ~4 fois plus rapide qu'à l'est.
-- **11b Marées** : marée d'équilibre de Newton, η = K (cos²θ − 1/3) pour la Lune et pour le
-  Soleil, K = 3/2 (m/M)(R/d)³ R (0,54 m et 0,25 m ; la Lune au périgée donne ~20 % de plus) ;
-  amplification côtière moyenne ×3 faute de modèle de propagation des ondes (marnage de
-  vives-eaux ~2,3 m, de mortes-eaux ~0,6 m). La mer monte et descend dans le shader de l'eau,
-  les côtes basses et les embouchures sont inondées à marée haute, l'estran se découvre (sable
-  mouillé plus sombre et brillant). Marée sous la caméra dans les détails (touche I). Vérifié :
-  une marée haute toutes les 12 h 25, volume d'eau conservé, rapport vives-eaux / mortes-eaux.
-- **11c Remontées d'eau froide** : transport d'Ekman M = τ × k / (ρ f) sur toute la couche
-  entraînée par le vent ; là où il diverge (côte ouest d'un continent avec un vent vers
-  l'équateur, équateur sous les alizés), l'eau de la thermocline remonte (w = div M) et refroidit
-  la surface (au plus 6 °C plus froide, jamais sous 8 °C, efficacité 30 %), sur la carte
-  graphique comme sur le processeur. Couche « remontées d'eau froide » (touche 7). Effet global :
-  tropiques −1,3 °C, planète −0,9 °C.
-- **11d Niveau de la mer** : la neige et la glace posées sur les terres sont prises à l'océan
-  (volume en équivalent eau / surface des océans) ; référence 0 m = aucune glace sur les terres.
-  La côte affichée suit ce niveau (le masque terre/mer du climat, lui, ne change pas). Les grandes
-  variations viendront avec les glaciations (étape 13).
-- **11e Banquise qui dérive** : concentration de glace transportée par le courant de surface et
-  ~2 % du vent dévié de 20° (règle de Nansen), schéma amont conservatif qui ne traverse pas les
-  côtes ; formation en ~10 jours, fonte en ~30 jours (langues de glace à la dérive). Affichée
-  dans la vue réaliste ; le climat garde sa banquise déduite de la température.
-
-### Étape 12 — Sol et saisons en haute définition (faite)
-- **12a Matériaux** : sable des plages et des déserts en dunes dissymétriques (~32 m) et rides
-  (~0,5 m) ; roche fissurée (réseau de diaclases) en plus des strates et des éboulis ; canopée
-  des forêts vue d'avion (houppiers de ~8 m, trouées d'ombre), plus clairsemée quand les feuillus
-  ont perdu leurs feuilles.
-- **12b Saisons** : feuillus qui jaunissent et rougissent quand la température moyenne des
-  10 derniers jours passe sous 9 °C (ou que le sol s'assèche, en forêt tropicale sèche), perdent
-  leurs feuilles en ~1 mois et reverdissent au-dessus de 10 °C ; herbes qui virent à la paille en
-  saison sèche ou en hiver ; neige qui avance et recule (climat simulé). Parts de forêt, de
-  feuillus et d'herbe selon le biome.
-- **12c Eau animée** : courant visible dans les fleuves (vaguelettes entraînées vers l'aval,
-  plus vite sur les pentes), eaux blanches dans les rapides et les cascades ; houle du large
-  (~128 et ~512 m) qui s'atténue sur les hauts-fonds ; rouleaux d'écume qui avancent vers le
-  rivage et frange d'écume au bord de l'eau.
-- **Nuages** (correction) : la couverture du climat, moyenne sur des jours, formait des anneaux
-  le long des latitudes ; un « temps qu'il fait » procédural (systèmes de 500 à 1 500 km qui
-  dérivent avec les vents dominants et se renouvellent en ~1 jour) la découpe en nuages et en
-  éclaircies, les averses se regroupent en amas d'orages.
-
-### Étape 13 — Planète active
-- Volcans (points chauds, arcs de subduction) : éruptions, coulées, panaches ; séismes aux
-  frontières de plaques.
-- Impacts de météorites occasionnels : cratères qui s'effacent avec le temps.
-- Glaciations : calottes, cycles orbitaux de Milankovitch.
-
-### Étape 14 — Vie et confort
-- Végétation en objets (arbres, herbes) instanciés au sol selon le biome.
-- Sauvegarde et chargement d'une planète ; passe sur la fluidité ; vue sous-marine.
-
+13. **Planète active** : volcans (points chauds, arcs de subduction), séismes ; impacts de
+    météorites qui s'effacent avec le temps ; glaciations et cycles de Milankovitch (le niveau
+    de la mer suivra les calottes).
+14. **Vie et confort** : arbres et herbes en objets selon le biome ; sauvegarde et chargement ;
+    passe sur la fluidité ; vue sous-marine.
 
 # Sources et références
 
