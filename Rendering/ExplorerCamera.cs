@@ -93,6 +93,16 @@ public sealed class ExplorerCamera
         UpdateGround();
     }
 
+    /// <summary>Tourne le regard vers une direction (repère de la planète), avec une inclinaison donnée (radians).</summary>
+    public void Face(Double3 target, double pitch)
+    {
+        Double3 up = Position.Normalized();
+        Double3 toward = target - up * target.Dot(up);
+        if (toward.LengthSquared() > 1e-12)
+            _heading = toward.Normalized();
+        Pitch = Math.Clamp(pitch, -MaxPitch, MaxPitch);
+    }
+
     public void ToggleWalking()
     {
         Walking = !Walking;

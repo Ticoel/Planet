@@ -55,7 +55,7 @@ public partial class TerrainRenderer : Node3D
     // Plus haut sommet possible à l'échelle réelle (m)
     public const double MaxMountainHeight = 11000.0;
     // Résolution des textures « numéro de cellule » (pixels par côté de face)
-    private const int CellIndexResolution = 512;
+    private const int CellIndexResolutionPixels = 512;
 
     private sealed class ChunkEntry
     {
@@ -186,7 +186,7 @@ public partial class TerrainRenderer : Node3D
     /// </summary>
     public void SetGrid(PlanetGrid grid)
     {
-        int n = CellIndexResolution;
+        int n = CellIndexResolutionPixels;
         var faces = new Godot.Collections.Array<Image>();
         var data = new float[CubeSphere.FaceCount][];
         for (int face = 0; face < CubeSphere.FaceCount; face++)
@@ -207,6 +207,9 @@ public partial class TerrainRenderer : Node3D
             Buffer.BlockCopy(data[face], 0, bytes, 0, bytes.Length);
             faces.Add(Image.CreateFromData(n, n, false, Image.Format.Rf, bytes));
         }
+        CellIndex = new int[CubeSphere.FaceCount][];
+        for (int face = 0; face < CubeSphere.FaceCount; face++)
+            CellIndex[face] = Array.ConvertAll(data[face], v => (int)v);
         var indexTexture = new Texture2DArray();
         indexTexture.CreateFromImages(faces);
         SetBoth("cell_index", indexTexture);
@@ -225,6 +228,13 @@ public partial class TerrainRenderer : Node3D
         SetBoth("cell_data", _cellDataTexture);
         SetBoth("has_climate", false);
     }
+
+    /// <summary>Numéro de la cellule la plus proche de chaque pixel des 6 faces du cube (CellIndexResolution² par face).</summary>
+    public int[][] CellIndex { get; private set; }
+    public int CellIndexResolution => CellIndexResolutionPixels;
+
+    /// <summary>Paramètre commun aux shaders du sol et de l'eau (ciel, nuages : étape 10).</summary>
+    public void SetShaderParameter(string name, Variant value) => SetBoth(name, value);
 
     private void SetBoth(string name, Variant value)
     {
@@ -485,6 +495,7 @@ public partial class TerrainRenderer : Node3D
         _visible.AddRange(nowVisible);
 
         SetBoth("planet_center", (-camera).ToVector3());
+        SetBoth("camera_planet", camera.ToVector3());
         SetBoth("noise_offset", new Vector3((float)PositiveModulo(camera.X), (float)PositiveModulo(camera.Y), (float)PositiveModulo(camera.Z)));
         VisibleChunkCount = _visible.Count;
         DeepestVisibleLevel = deepest;
@@ -699,9 +710,12 @@ uniform vec3 noise_offset;
 const int NOISE_PERIOD = 8192;
 
 // Repère de chaque face du cube (identique à CubeSphere.cs)
-const vec3 FACE_NORMAL[6] = { vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1) };
-const vec3 FACE_S[6] = { vec3(0, 0, -1), vec3(0, 0, 1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0) };
-const vec3 FACE_T[6] = { vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 1, 0) };
+" + ShaderLibrary.CubeFace + ShaderLibrary.Atmosphere + ShaderLibrary.Clouds + @"
+// Direction du Soleil (repère de la planète)
+uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
+// Lumière du Soleil arrivée jusqu'au point (atmosphère traversée), ombre des nuages
+varying vec3 v_sun;
+varying float v_shade;
 
 varying float v_height;
 varying vec3 v_world;
@@ -890,20 +904,39 @@ float morph_factor(vec3 vertex, mat4 model, vec3 camera) {
     return clamp((d - morph_range.x) / max(morph_range.y - morph_range.x, 1e-3), 0.0, 1.0);
 }
 
-// Brume atmosphérique, seulement dans l'atmosphère ou juste au-dessus
-vec3 haze(vec3 color, vec3 world, vec3 camera) {
-    float distance_to_camera = length(world - camera);
-    float camera_altitude = length(camera - planet_center) - planet_radius;
-    float scale = mix(120000.0, 600000.0, smoothstep(0.0, 60000.0, camera_altitude));
-    float amount = (1.0 - exp(-distance_to_camera / scale)) * 0.55
-                   * (1.0 - smoothstep(40000.0, 400000.0, camera_altitude));
-    return mix(color, vec3(0.62, 0.72, 0.86), amount);
+// Ombre des nuages : densité des nuages là où le rayon du Soleil traverse la couche
+float cloud_shadow(vec3 world, vec3 up, float h) {
+    if (!clouds_enabled)
+        return 1.0;
+    float mus = dot(up, sun_direction);
+    if (mus <= 0.03)
+        return 1.0;
+    vec3 base_point = camera_planet + world;
+    vec2 cover = cloud_cover_at(normalize(base_point + sun_direction * ((CLOUD_BASE + 1000.0 - h) / mus)));
+    float height = mix(CLOUD_BASE, cloud_top(cover), 0.3);
+    vec3 q = base_point + sun_direction * ((height - h) / mus);
+    // (détails estompés selon la distance, comme pour les nuages eux-mêmes)
+    float density = cloud_density(q, height, cover, length(world) * 0.0015);
+    return 1.0 - 0.8 * smoothstep(0.02, 0.4, density);
+}
+
+// Éclairage : Lambert et reflet de Blinn-Phong, la lumière du Soleil étant teintée par
+// l'atmosphère traversée (rouge au coucher, nulle derrière la planète) et par l'ombre des nuages
+void light() {
+    float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+    vec3 tint = v_sun * v_shade;
+    DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR * tint / PI;
+    vec3 half_vector = normalize(VIEW + LIGHT);
+    float shininess = 2.0 / max(pow(ROUGHNESS, 4.0), 1e-4) - 2.0;
+    float spec = pow(max(dot(NORMAL, half_vector), 0.0), shininess) * (shininess + 8.0) / (8.0 * PI);
+    float fresnel = SPECULAR_AMOUNT + (1.0 - SPECULAR_AMOUNT) * pow(1.0 - clamp(dot(VIEW, half_vector), 0.0, 1.0), 5.0);
+    SPECULAR_LIGHT += spec * fresnel * ndl * ATTENUATION * LIGHT_COLOR * tint / PI;
 }
 ";
 
     public const string ShaderCode = @"
 shader_type spatial;
-render_mode cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode cull_back;
 " + CommonShaderCode + @"
 void vertex() {
     float m = morph_factor(VERTEX, MODEL_MATRIX, CAMERA_POSITION_WORLD);
@@ -914,6 +947,7 @@ void vertex() {
     NORMAL = n;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+    v_sun = sun_transmittance(v_height, dot(normalize(v_world - planet_center), sun_direction));
 }
 
 void fragment() {
@@ -998,7 +1032,8 @@ void fragment() {
     }
 
     NORMAL = normalize((VIEW_MATRIX * vec4(normal, 0.0)).xyz);
-    ALBEDO = haze(color, v_world, CAMERA_POSITION_WORLD);
+    v_shade = cloud_shadow(v_world, up, h);
+    ALBEDO = color;
     ROUGHNESS = roughness;
     SPECULAR = specular;
 }
@@ -1012,7 +1047,7 @@ void fragment() {
     /// </summary>
     public static string WaterShaderCode => @"
 shader_type spatial;
-render_mode blend_mix, cull_back, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, cull_back, depth_draw_opaque;
 const int GRID_VERTICES = " + (TerrainChunkBuilder.Side * TerrainChunkBuilder.Side) + @";
 " + CommonShaderCode + @"
 varying float v_depth;
@@ -1032,6 +1067,7 @@ void vertex() {
     VERTEX += up * v_depth;
     NORMAL = up;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    v_sun = sun_transmittance(v_water.x, dot(up, sun_direction));
 }
 
 void fragment() {
@@ -1053,7 +1089,8 @@ void fragment() {
         // Vue réaliste : banquise et teinte de la couche (océans gelés en blanc)
         color = mix(color, layer_color_smooth(up, false), 0.5);
     }
-    ALBEDO = haze(color, v_world, CAMERA_POSITION_WORLD);
+    v_shade = cloud_shadow(v_world, up, v_water.x);
+    ALBEDO = color;
     ROUGHNESS = 0.08;
     SPECULAR = 0.6;
     ALPHA = clamp(0.45 + v_depth / 60.0, 0.45, 0.97);

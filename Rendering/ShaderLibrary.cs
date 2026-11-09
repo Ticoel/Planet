@@ -1,0 +1,203 @@
+namespace Planet.Rendering;
+
+/// <summary>
+/// Morceaux de code GLSL partagés par les shaders du terrain, de l'eau, du ciel et de la passe
+/// atmosphère + nuages (étape 10). Toutes les distances sont en mètres ; les positions sont
+/// relatives à la caméra, la planète étant centrée en <c>-camera</c>.
+/// </summary>
+public static class ShaderLibrary
+{
+    /// <summary>Projection d'une direction sur les 6 faces du cube (identique à CubeSphere.cs).</summary>
+    public const string CubeFace = @"
+const vec3 FACE_NORMAL[6] = { vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1) };
+const vec3 FACE_S[6] = { vec3(0, 0, -1), vec3(0, 0, 1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0) };
+const vec3 FACE_T[6] = { vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 1, 0) };
+
+// Face du cube et coordonnées (0 à 1) d'une direction, en projection équi-angulaire
+vec3 cube_face_uv(vec3 d) {
+    vec3 a = abs(d);
+    int f = a.x >= a.y && a.x >= a.z ? (d.x > 0.0 ? 0 : 1) : (a.y >= a.z ? (d.y > 0.0 ? 2 : 3) : (d.z > 0.0 ? 4 : 5));
+    float n = dot(d, FACE_NORMAL[f]);
+    vec2 st = vec2(atan(dot(d, FACE_S[f]) / n), atan(dot(d, FACE_T[f]) / n)) * 4.0 / PI;
+    return vec3(st * 0.5 + 0.5, float(f));
+}
+";
+
+    /// <summary>
+    /// Diffusion de la lumière par l'atmosphère (diffusion simple) : Rayleigh (molécules : le
+    /// bleu est diffusé ~5 fois plus que le rouge, d'où le ciel bleu et les couchers rouges) et
+    /// Mie (aérosols : halo blanc autour du Soleil). Coefficients de la Terre au niveau de la mer,
+    /// densités qui décroissent exponentiellement avec l'altitude.
+    /// <para>Les altitudes le long d'un rayon sont calculées sans soustraire de grands nombres :
+    /// en float, (R + a)² − R² perdrait toute précision près du sol.</para>
+    /// </summary>
+    public const string Atmosphere = @"
+const float PLANET_R = 6371000.0;
+const float ATMO_H = 100000.0;
+const vec3 RAYLEIGH = vec3(5.8e-6, 13.5e-6, 33.1e-6);
+const float MIE = 21e-6;
+const float MIE_EXTINCTION = 1.11;
+const float RAYLEIGH_H = 8000.0;
+const float MIE_H = 1200.0;
+const float MIE_G = 0.76;
+// Ozone (absorbe surtout le vert et le rouge : bleu profond du crépuscule), couche vers 25 km
+const vec3 OZONE = vec3(0.65e-6, 1.88e-6, 0.085e-6);
+// Intensité du Soleil dans les unités de l'éclairage (sol blanc éclairé de face ≈ 1). La
+// diffusion simple sous-estime la lumière du ciel : 20 pour le ciel, moins pour la
+// perspective atmosphérique sur le relief (sinon la planète vue de l'espace est délavée)
+uniform float sun_intensity = 20.0;
+
+float ozone_density(float h) {
+    return max(0.0, 1.0 - abs(h - 25000.0) / 15000.0);
+}
+
+// Altitude (m) au point situé à la distance t le long d'un rayon partant de l'altitude a,
+// mu = cosinus de l'angle entre le rayon et la verticale du départ
+float ray_height(float a, float mu, float t) {
+    float r0 = PLANET_R + a;
+    float r = sqrt(max(r0 * r0 + 2.0 * r0 * t * mu + t * t, 1.0));
+    return (a * (2.0 * PLANET_R + a) + 2.0 * r0 * t * mu + t * t) / (r + PLANET_R);
+}
+
+// Distances d'entrée et de sortie du rayon dans la sphère d'altitude h (x > y : pas d'intersection)
+vec2 ray_shell(float a, float mu, float h) {
+    float r0 = PLANET_R + a;
+    float b = r0 * mu;
+    float d = b * b - (a - h) * (2.0 * PLANET_R + a + h);
+    if (d < 0.0)
+        return vec2(1e30, -1e30);
+    float s = sqrt(d);
+    return vec2(-b - s, -b + s);
+}
+
+// Épaisseur optique vers le Soleil depuis un point d'altitude h (mus : cosinus de la hauteur
+// du Soleil) ; très grande si la planète cache le Soleil
+vec3 sun_optical_depth(float h, float mus) {
+    vec2 ground = ray_shell(h, mus, -50.0);
+    if (ground.x > 0.0 && ground.y > ground.x)
+        return vec3(1e4);
+    float top = ray_shell(h, mus, ATMO_H).y;
+    float dt = top / 4.0;
+    float r = 0.0, m = 0.0, o = 0.0;
+    for (int i = 0; i < 4; i++) {
+        float hh = ray_height(h, mus, (float(i) + 0.5) * dt);
+        r += exp(-hh / RAYLEIGH_H);
+        m += exp(-hh / MIE_H);
+        o += ozone_density(hh);
+    }
+    return (RAYLEIGH * r + MIE * MIE_EXTINCTION * m + OZONE * o) * dt;
+}
+
+// Lumière du Soleil qui arrive en un point (teintée par l'atmosphère traversée)
+vec3 sun_transmittance(float h, float mus) {
+    return exp(-sun_optical_depth(max(h, 0.0), mus));
+}
+
+float rayleigh_phase(float nu) {
+    return 3.0 / (16.0 * PI) * (1.0 + nu * nu);
+}
+
+float mie_phase(float nu) {
+    float g = MIE_G;
+    return 3.0 / (8.0 * PI) * ((1.0 - g * g) * (1.0 + nu * nu)) / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * nu, 1.5));
+}
+
+// Lumière diffusée vers l'œil (inscatter) et transmission le long d'un rayon, jusqu'à t_max :
+// départ à l'altitude a, verticale up, direction rd (unitaires), Soleil sun
+void atmosphere(float a, vec3 up, vec3 rd, float t_max, vec3 sun, out vec3 inscatter, out vec3 transmittance) {
+    inscatter = vec3(0.0);
+    transmittance = vec3(1.0);
+    float mu = dot(rd, up);
+    vec2 shell = ray_shell(a, mu, ATMO_H);
+    float t0 = max(shell.x, 0.0);
+    float t1 = min(shell.y, t_max);
+    vec2 ground = ray_shell(a, mu, 0.0);
+    if (ground.x > 0.0 && ground.y > ground.x)
+        t1 = min(t1, ground.x);
+    if (t1 <= t0)
+        return;
+    const int STEPS = 12;
+    float dt = (t1 - t0) / float(STEPS);
+    float nu = dot(rd, sun);
+    vec3 depth = vec3(0.0);
+    vec3 sum_r = vec3(0.0), sum_m = vec3(0.0);
+    vec3 origin = up * (PLANET_R + a);
+    for (int i = 0; i < STEPS; i++) {
+        float t = t0 + (float(i) + 0.5) * dt;
+        float h = ray_height(a, mu, t);
+        float dr = exp(-h / RAYLEIGH_H) * dt;
+        float dm = exp(-h / MIE_H) * dt;
+        vec3 step_depth = RAYLEIGH * dr + MIE * MIE_EXTINCTION * dm + OZONE * ozone_density(h) * dt;
+        depth += step_depth * 0.5;
+        float mus = dot(normalize(origin + rd * t), sun);
+        vec3 light = exp(-(depth + sun_optical_depth(h, mus)));
+        sum_r += light * dr;
+        sum_m += light * dm;
+        depth += step_depth * 0.5;
+    }
+    inscatter = sun_intensity * (sum_r * RAYLEIGH * rayleigh_phase(nu) + sum_m * MIE * mie_phase(nu));
+    transmittance = exp(-depth);
+}
+";
+
+    /// <summary>
+    /// Nuages (étape 10c) : couverture lue dans une texture par face du cube (calculée depuis le
+    /// climat), formes par un bruit 3D qui dérive avec les vents dominants, couche entre 1,5 km et
+    /// jusqu'à ~9 km (plus épaisse là où il pleut).
+    /// </summary>
+    public const string Clouds = @"
+// Couverture (r) et averses (g) par face du cube
+uniform sampler2DArray cloud_cover : filter_linear, repeat_disable;
+uniform sampler3D cloud_noise : filter_linear, repeat_enable;
+uniform bool clouds_enabled = false;
+// Temps simulé (s) qui fait dériver les formes des nuages
+uniform float cloud_time = 0.0;
+// Position de la caméra dans le repère de la planète (m)
+uniform vec3 camera_planet;
+
+const float CLOUD_BASE = 1500.0;
+const float CLOUD_TOP_MAX = 9500.0;
+const float CLOUD_EXTINCTION = 0.004;
+
+// Vent dominant (m/s, vers l'est > 0) selon la latitude : alizés, vents d'ouest, vents polaires
+float prevailing_wind(float sin_latitude) {
+    float lat = abs(asin(clamp(sin_latitude, -1.0, 1.0))) * 180.0 / PI;
+    return lat < 30.0 ? -7.0 * sin(lat / 30.0 * PI) : (lat < 60.0 ? 11.0 * sin((lat - 30.0) / 30.0 * PI) : -4.0 * sin((lat - 60.0) / 30.0 * PI));
+}
+
+// Couverture en un point. La direction est d'abord déformée par le bruit (~60 km, ±50 km) :
+// sinon les bords des cellules de la simulation (hexagones de ~60 km) se voyaient de haut
+vec2 cloud_cover_at(vec3 direction) {
+    vec3 q = direction * 25.0;
+    vec3 warp = vec3(texture(cloud_noise, q).r, texture(cloud_noise, q + vec3(0.31, 0.57, 0.13)).r,
+                     texture(cloud_noise, q + vec3(0.71, 0.19, 0.43)).r) - 0.5;
+    return texture(cloud_cover, cube_face_uv(normalize(direction + warp * 0.016))).rg;
+}
+
+// Sommet de la couche nuageuse (m) selon la couverture et les averses
+float cloud_top(vec2 cover) {
+    return CLOUD_BASE + 2000.0 + 6000.0 * clamp(max(cover.g, cover.r * cover.r * 0.6), 0.0, 1.0);
+}
+
+// Densité (0 à 1) en un point p (repère de la planète, m) d'altitude h ; footprint : taille
+// d'un pixel à cette distance (m). Les détails plus petits que quelques pixels sont remplacés
+// par leur moyenne (sinon ils scintillent en grains de sel, vus de loin)
+float cloud_density(vec3 p, float h, vec2 cover, float footprint) {
+    float top = cloud_top(cover);
+    float hn = (h - CLOUD_BASE) / (top - CLOUD_BASE);
+    if (hn <= 0.0 || hn >= 1.0 || cover.r < 0.02)
+        return 0.0;
+    vec3 d = normalize(p);
+    vec3 east = normalize(vec3(d.z, 0.0, -d.x) + vec3(1e-6, 0.0, 0.0));
+    vec3 q = p + east * prevailing_wind(d.y) * cloud_time;
+    // Trois échelles : grands ensembles (~120 km, toujours là, même vus de l'espace), masses
+    // nuageuses (~14 km) et détail (~3 km), estompées quand elles deviennent plus petites qu'un pixel
+    float large = texture(cloud_noise, q / 120000.0 + vec3(0.53, 0.29, 0.07)).r;
+    float base = mix(texture(cloud_noise, q / 14000.0).r, 0.5, smoothstep(450.0, 1200.0, footprint));
+    float detail = mix(texture(cloud_noise, q / 3100.0 + vec3(0.37, 0.11, 0.73)).r, 0.5, smoothstep(100.0, 260.0, footprint));
+    float shape = smoothstep(0.0, 0.1, hn) * (1.0 - smoothstep(0.45, 1.0, hn));
+    float n = large * 0.35 + base * 0.45 + detail * 0.2;
+    return clamp((n - (1.0 - cover.r)) * 2.5, 0.0, 1.0) * shape;
+}
+";
+}

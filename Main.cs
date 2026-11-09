@@ -151,41 +151,14 @@ public partial class Main : Node3D
     private int _hoverCell = -1;
     private bool _showHelp;
     private bool _showDetails;
-    private DirectionalLight3D _sun;
-    private ShaderMaterial _skyMaterial;
-
-    private const string SkyShaderCode = @"
-shader_type sky;
-
-// Verticale du lieu (le ciel n'est pas toujours au-dessus de l'axe Y sur une planète ronde)
-uniform vec3 local_up = vec3(0.0, 1.0, 0.0);
-// 1 près du sol, 0 dans l'espace
-uniform float visibility = 1.0;
-
-void sky() {
-    vec3 up = normalize(local_up);
-    float height = dot(EYEDIR, up);
-    vec3 sun = LIGHT0_ENABLED ? normalize(LIGHT0_DIRECTION) : up;
-    float sun_height = dot(sun, up);
-    float day = smoothstep(-0.15, 0.2, sun_height);
-    float toward = max(dot(EYEDIR, sun), 0.0);
-
-    vec3 zenith = mix(vec3(0.0, 0.0, 0.02), vec3(0.16, 0.36, 0.78), day);
-    vec3 horizon = mix(vec3(0.02, 0.02, 0.05), vec3(0.64, 0.75, 0.90), day);
-    // Coucher de soleil : horizon orangé du côté du Soleil quand il est bas
-    float sunset = (1.0 - smoothstep(0.0, 0.35, abs(sun_height))) * smoothstep(-0.2, 0.05, sun_height);
-    horizon = mix(horizon, vec3(0.95, 0.50, 0.25), sunset * pow(toward, 3.0));
-    vec3 color = mix(horizon, zenith, pow(clamp(height, 0.0, 1.0), 0.45));
-    if (height < 0.0) {
-        color = horizon * mix(1.0, 0.45, clamp(-height * 4.0, 0.0, 1.0));
-    }
-    // Halo et disque du Soleil
-    color += vec3(1.0, 0.8, 0.5) * pow(toward, 8.0) * 0.35 * day;
-    color += vec3(1.0, 0.95, 0.85) * pow(toward, 3000.0) * 15.0 * step(0.0, height);
-    COLOR = color * visibility;
-}
-";
-    private Environment _environment;
+    // Ciel, atmosphère, Lune, nuages, météo (étape 10)
+    private SkyRenderer _sky;
+    private double _cloudTimer;
+    private bool _cloudsShown;
+    private int _weatherHint = -1;
+    // Message affiché quelques secondes (lieu choisi avec F1–F10)
+    private string _notice;
+    private double _noticeTimer;
     private Label _hud;
 
     private bool _running = true;
@@ -215,13 +188,13 @@ void sky() {
         };
         _climate = new ClimateSimulation(_grid, _orbit, UseGpu, ClimateStartDay);
 
-        SetupEnvironment();
         stopwatch.Restart();
         _terrain = new TerrainRenderer { Name = "Terrain" };
         AddChild(_terrain);
         _terrain.SetGrid(_grid);
         _terrain.Camera.MakeCurrent();
         GD.Print($"Terrain: cell index textures in {stopwatch.ElapsedMilliseconds} ms");
+        SetupSky();
         SetupOverlays();
         SetupHud();
         GeneratePlanet();
@@ -272,8 +245,8 @@ void sky() {
         }
         _terrain.Coloring = ColoringFor(_displayMode);
         _terrain.Tick(delta, ReadInput());
-        UpdateSunLight();
-        UpdateSky();
+        _noticeTimer -= delta;
+        UpdateSky(delta);
         UpdateOverlays(delta);
         UpdateHover();
         UpdateHud();
@@ -448,26 +421,17 @@ void sky() {
     };
 
     /// <summary>
-    /// Lumière. Horloge climatique : le vrai Soleil (jour, nuit, saisons). Horloge géologique :
-    /// une lumière qui suit la caméra, venue du nord-ouest et rasante (~22° au-dessus de
-    /// l'horizon) : comme en fin d'après-midi, les pentes s'opposent nettement et le relief, à
+    /// Direction du Soleil. Horloge climatique : le vrai Soleil (jour, nuit, saisons). Horloge
+    /// géologique : une lumière qui suit la caméra, venue du nord-ouest et rasante (~22° au-dessus
+    /// de l'horizon) : comme en fin d'après-midi, les pentes s'opposent nettement et le relief, à
     /// l'échelle réelle, reste lisible (avec une lumière haute, il paraissait tout plat).
     /// </summary>
-    private void UpdateSunLight()
+    private Vector3 SunDirection()
     {
-        Vector3 towardSun;
         if (_clock == ClockMode.Climate)
-        {
-            towardSun = _climate.Sun.Direction;
-        }
-        else
-        {
-            var (up, north, east) = _terrain.Explorer.LocalFrame();
-            towardSun = (up * 0.36 + north * 0.75 - east * 0.45).Normalized().ToVector3();
-        }
-        Vector3 reference = Mathf.Abs(towardSun.Y) > 0.99f ? Vector3.Right : Vector3.Up;
-        // La lumière éclaire selon son axe −Z : on la fait regarder du Soleil vers la planète
-        _sun.Basis = Basis.LookingAt(-towardSun, reference);
+            return _climate.Sun.Direction;
+        var (up, north, east) = _terrain.Explorer.LocalFrame();
+        return (up * 0.36 + north * 0.75 - east * 0.45).Normalized().ToVector3();
     }
 
     // --- Planète et relief ------------------------------------------------------------------------
@@ -565,25 +529,13 @@ void sky() {
 
     // --- Scène -------------------------------------------------------------------------------
 
-    private void SetupEnvironment()
+    private void SetupSky()
     {
-        _sun = new DirectionalLight3D { Name = "Sun" };
-        AddChild(_sun);
-
-        // Ciel calculé par un petit shader (dégradé, coucher de soleil, disque solaire), orienté
-        // selon la verticale locale et éteint dans l'espace
-        _skyMaterial = new ShaderMaterial { Shader = new Shader { Code = SkyShaderCode } };
-        var sky = new Sky { SkyMaterial = _skyMaterial };
-        _environment = new Environment
-        {
-            BackgroundMode = Environment.BGMode.Sky,
-            Sky = sky,
-            BackgroundColor = Colors.Black,
-            AmbientLightSource = Environment.AmbientSource.Color,
-            AmbientLightColor = Colors.White,
-            AmbientLightEnergy = 0.2f,
-        };
-        AddChild(new WorldEnvironment { Name = "WorldEnvironment", Environment = _environment });
+        _sky = new SkyRenderer { Name = "Sky" };
+        AddChild(_sky);
+        _sky.Setup(_terrain.Camera, _terrain.CellIndex, _terrain.CellIndexResolution);
+        _terrain.SetShaderParameter("cloud_cover", _sky.CloudCover);
+        _terrain.SetShaderParameter("cloud_noise", _sky.CloudNoise);
     }
 
     private void SetupOverlays()
@@ -612,22 +564,240 @@ void sky() {
     }
 
     /// <summary>
-    /// Ciel : bleu le jour, orangé au coucher du soleil, noir la nuit, qui s'éteint en montant ;
-    /// noir dans l'espace.
+    /// Ciel vivant (étape 10) : Soleil, Lune et étoiles (horloge climatique), nuages calculés
+    /// depuis le climat deux fois par seconde, météo autour de la caméra.
     /// </summary>
-    private void UpdateSky()
+    private void UpdateSky(double delta)
     {
-        Vector3 up = _terrain.Explorer.Position.Normalized().ToVector3();
-        Vector3 towardSun = _sun.GlobalBasis.Z;
-        float daylight = Mathf.SmoothStep(-0.12f, 0.25f, up.Dot(towardSun));
-        float lowAltitude = 1f - Mathf.SmoothStep(15000f, 120000f, (float)_terrain.Explorer.AltitudeAboveGround);
-        float sky = daylight * lowAltitude;
-        _skyMaterial.SetShaderParameter("local_up", up);
-        _skyMaterial.SetShaderParameter("visibility", lowAltitude);
-        // Lumière ambiante faible : trop forte, elle éclaire autant les pentes à l'ombre que
-        // celles au soleil et efface le relief. Nuit plus sombre avec le vrai Soleil
-        float night = _clock == ClockMode.Climate ? 0.06f : 0.08f;
-        _environment.AmbientLightEnergy = night + 0.14f * sky;
+        var explorer = _terrain.Explorer;
+        bool climate = _clock == ClockMode.Climate && _climate.HasTemperature;
+        Vector3 sun = SunDirection();
+        _terrain.SetShaderParameter("sun_direction", sun);
+
+        // Nuages : seulement avec un climat simulé, et pas sur les couches de données (ils
+        // cacheraient ce qu'on veut lire)
+        bool showClouds = climate && ColoringFor(_displayMode) is TerrainColoring.Geology or TerrainColoring.Realistic;
+        _cloudTimer -= delta;
+        if (showClouds && _cloudTimer <= 0)
+        {
+            var (cover, showers) = SkyRenderer.ComputeCloudCover(_climate);
+            _sky.UpdateCloudCover(cover, showers);
+            _cloudTimer = 0.5;
+            _cloudsShown = true;
+        }
+        else if (!showClouds && _cloudsShown)
+        {
+            _sky.UpdateCloudCover(null, null);
+            _cloudsShown = false;
+        }
+        _terrain.SetShaderParameter("clouds_enabled", _sky.HasClouds && _cloudsShown);
+        _terrain.SetShaderParameter("cloud_time", (float)((_climate.TimeDays * 86400.0) % 200000.0));
+
+        var frame = new SkyFrame
+        {
+            CameraPosition = explorer.Position,
+            AltitudeAboveGround = explorer.AltitudeAboveGround,
+            SunDirection = sun,
+            Moon = climate ? MoonOrbit.Compute(_climate.TimeDays, _orbit) : null,
+            StarAngle = climate ? 2 * Math.PI * _climate.TimeDays * (1 + 1 / _orbit.YearLengthDays) : 0,
+            CloudTime = _climate.TimeDays * 86400.0,
+            Weather = climate ? LocalWeatherAtCamera() : null,
+        };
+        _sky.Update(frame, delta);
+    }
+
+    // --- Lieux de test (F1 à F10) -------------------------------------------------------------
+
+    private static readonly string[] PlaceNames =
+    {
+        "plus haut sommet", "plus grand fleuve", "grand lac", "côte", "désert venteux",
+        "forêt sous la pluie", "neige qui tombe", "au-dessus des nuages", "coucher de soleil", "Lune",
+    };
+
+    /// <summary>
+    /// Emmène la caméra vers un lieu choisi d'après la simulation, pour tester les nouveautés :
+    /// relief, eau, météo, ciel. Les lieux liés au climat passent en horloge climatique.
+    /// </summary>
+    private void GoToPlace(int index)
+    {
+        if (index < 0 || index >= PlaceNames.Length)
+            return;
+        var explorer = _terrain.Explorer;
+        bool needsClimate = index >= 4;
+        if (needsClimate && _clock != ClockMode.Climate)
+            SetClock(ClockMode.Climate);
+        if (needsClimate && !_climate.HasTemperature)
+        {
+            ShowNotice("Climat pas encore prêt : réessayez dans un instant");
+            return;
+        }
+        float[] elevation = _tectonics.CellElevation;
+        int count = _grid.CellCount;
+        Double3 Cell(int c) => Double3.From(_grid.Positions[c]).Normalized();
+        int Best(Func<int, double> score)
+        {
+            int best = -1;
+            double bestScore = double.MinValue;
+            for (int c = 0; c < count; c++)
+            {
+                double value = score(c);
+                if (value > bestScore)
+                {
+                    bestScore = value;
+                    best = c;
+                }
+            }
+            return best;
+        }
+        string detail = "";
+        var hydrology = _terrain.Field?.Hydrology;
+        switch (index)
+        {
+            case 0:
+            {
+                int c = Best(c => elevation[c]);
+                Double3 east = Double3.UnitY.Cross(Cell(c)).Normalized();
+                explorer.PlaceAbove((Cell(c) - east * 0.004).Normalized(), 2500);
+                explorer.Face(east, -0.12);
+                detail = $"{elevation[c] * 1000:N0} m (relief simulé)";
+                break;
+            }
+            case 1 when hydrology != null:
+            {
+                int c = Best(c => elevation[c] > 0 && hydrology.Downstream[c] >= 0 && elevation[hydrology.Downstream[c]] > 0 ? hydrology.Discharge[c] : -1);
+                Double3 down = Cell(hydrology.Downstream[c]);
+                explorer.PlaceAbove((Cell(c) * 0.6 + down * 0.4).Normalized(), 500);
+                explorer.Face(down - Cell(c), -0.15);
+                detail = $"{hydrology.Discharge[c]:N0} m³/s";
+                break;
+            }
+            case 2 when hydrology != null:
+            {
+                int c = Best(c => hydrology.Lake[c] ? hydrology.Discharge[c] : -1);
+                if (c < 0 || !hydrology.Lake[c])
+                {
+                    ShowNotice("Pas de lac sur cette planète");
+                    return;
+                }
+                explorer.PlaceAbove(Cell(c), 1200);
+                explorer.Face(Double3.UnitY, -0.2);
+                break;
+            }
+            case 3:
+            {
+                int c = Best(c =>
+                {
+                    if (elevation[c] <= 0 || elevation[c] > 0.15)
+                        return -1;
+                    int sea = 0;
+                    foreach (int n in _grid.Neighbors[c])
+                        if (elevation[n] < 0) sea++;
+                    return sea == 0 ? -1 : sea - Math.Abs(Math.Asin(Cell(c).Y)) * 2;
+                });
+                int ocean = Array.Find(_grid.Neighbors[c], n => elevation[n] < 0);
+                explorer.PlaceAbove(Cell(c), 150);
+                explorer.Face(Cell(ocean) - Cell(c), -0.08);
+                break;
+            }
+            case 4:
+            {
+                var annual = _climate.Statistics.AnnualPrecipitation;
+                int c = Best(c => elevation[c] > 0 && elevation[c] < 1.5f && _climate.Snow[c] < 1
+                    ? _climate.Winds.Wind[c].Length() * (1 - Mathf.SmoothStep(100f, 400f, annual[c])) : -1);
+                explorer.PlaceAbove(Cell(c), 40);
+                explorer.Face(Double3.From(_climate.Winds.Wind[c]), 0.02);
+                detail = $"vent {_climate.Winds.Wind[c].Length():0} m/s, {annual[c]:N0} mm/an";
+                break;
+            }
+            case 5:
+            case 6:
+            {
+                bool snow = index == 6;
+                var rain = _climate.Statistics.RecentPrecipitation;
+                int c = Best(c => elevation[c] > 0 && (snow ? _climate.SurfaceTemperature[c] < -2 : _climate.SurfaceTemperature[c] > 4) ? rain[c] : -1);
+                if (c < 0 || rain[c] < 0.5f)
+                {
+                    ShowNotice(snow ? "Il ne neige nulle part en ce moment" : "Il ne pleut nulle part en ce moment");
+                    return;
+                }
+                explorer.PlaceAbove(Cell(c), 40);
+                explorer.Face(Double3.UnitY, 0.05);
+                detail = $"{rain[c]:0.0} mm/jour, {_climate.SurfaceTemperature[c]:0} °C";
+                break;
+            }
+            case 7:
+            {
+                var (cover, _) = SkyRenderer.ComputeCloudCover(_climate);
+                int c = Best(c => cover[c] - Math.Abs(Math.Asin(Cell(c).Y)) * 0.3 + Mathf.SmoothStep(-0.1f, 0.3f, Cell(c).ToVector3().Dot(_climate.Sun.Direction)));
+                explorer.PlaceAbove(Cell(c), 13000);
+                explorer.Face(Double3.UnitY, -0.12);
+                break;
+            }
+            case 8:
+            {
+                // Le Soleil se couche à l'est du point où il est au zénith, à ~90° de lui
+                Double3 sun = Double3.From(_climate.Sun.Direction);
+                Double3 east = Double3.UnitY.Cross(sun).Normalized();
+                explorer.PlaceAbove((sun * Math.Sin(0.06) + east * Math.Cos(0.06)).Normalized(), 1500);
+                explorer.Face(sun, 0.03);
+                break;
+            }
+            case 9:
+            {
+                var moon = MoonOrbit.Compute(_climate.TimeDays, _orbit);
+                Double3 moonDirection = Double3.From(moon.Direction);
+                Double3 sun = Double3.From(_climate.Sun.Direction);
+                // De préférence là où il fait nuit et où la Lune est haute
+                Double3 place = (moonDirection - sun * 0.5).Normalized();
+                if (place.Dot(moonDirection) < 0.3)
+                    place = moonDirection;
+                explorer.PlaceAbove(place, 300);
+                Double3 toMoon = moonDirection * (moon.DistanceKm * 1000) - explorer.Position;
+                double elevationAngle = Math.Asin(toMoon.Normalized().Dot(explorer.Position.Normalized()));
+                explorer.Face(toMoon, Math.Min(elevationAngle, 1.2));
+                detail = $"{MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100:0} %";
+                break;
+            }
+            default:
+                ShowNotice("Réseau des fleuves pas encore calculé");
+                return;
+        }
+        ShowNotice($"Lieu : {PlaceNames[index]}{(detail.Length > 0 ? $" ({detail})" : "")}");
+    }
+
+    private void ShowNotice(string text)
+    {
+        _notice = text;
+        _noticeTimer = 5;
+    }
+
+    /// <summary>Climat de la cellule sous la caméra : pluie, neige, vent, poussière, brume.</summary>
+    private LocalWeather LocalWeatherAtCamera()
+    {
+        Double3 position = _terrain.Explorer.Position;
+        Vector3 direction = position.Normalized().ToVector3();
+        int cell = _grid.NearestCell(direction, Math.Max(_weatherHint, 0));
+        _weatherHint = cell;
+        bool land = _tectonics.CellElevation[cell] > 0;
+        float annual = _climate.Statistics.AnnualPrecipitation[cell];
+        float aridity = land ? 1f - Mathf.SmoothStep(150f, 450f, annual) : 0f;
+        if (_climate.Snow[cell] > 5f)
+            aridity = 0;
+        // Heure solaire : écart de longitude entre la caméra et le point sous le Soleil
+        Vector3 sun = _climate.Sun.Direction;
+        double cameraLongitude = Math.Atan2(-direction.Z, direction.X);
+        double sunLongitude = Math.Atan2(-sun.Z, sun.X);
+        double hour = 12 + (cameraLongitude - sunLongitude) / (2 * Math.PI) * 24;
+        hour = ((hour % 24) + 24) % 24;
+        return new LocalWeather
+        {
+            PrecipitationMmPerDay = _climate.Statistics.RecentPrecipitation[cell],
+            TemperatureC = _climate.SurfaceTemperature[cell],
+            RelativeHumidity = _climate.RelativeHumidity[cell],
+            Wind = _climate.Winds.Wind[cell],
+            Aridity = aridity,
+            SolarHour = (float)hour,
+        };
     }
 
     /// <summary>
@@ -709,6 +879,8 @@ void sky() {
             lines.Add("");
             DetailLines(lines);
         }
+        if (_noticeTimer > 0 && _notice != null)
+            lines.Add(_notice);
         if (_showHelp)
         {
             lines.Add("");
@@ -718,6 +890,7 @@ void sky() {
             lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau");
+            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [F5] désert venteux  [F6] pluie  [F7] neige  [F8] nuages  [F9] coucher de soleil  [F10] Lune");
         }
         else
         {
@@ -742,6 +915,8 @@ void sky() {
             var sun = _climate.Sun;
             lines.Add($"{SeasonLabel(sun.EclipticLongitude)}   Soleil au zénith à {SignedDegrees(sun.Declination)} de latitude   " +
                       $"Relief figé à {French(_tectonics.TimeMyr)} Ma   Calcul : {_climate.ComputeBackend}");
+            var moon = MoonOrbit.Compute(_climate.TimeDays, _orbit);
+            lines.Add($"Lune : {MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100f:0} %, à {moon.DistanceKm:N0} km");
             if (_climate.HasTemperature)
             {
                 lines.Add($"Extrêmes : {French(_climate.SurfaceTemperature.Min())} °C / {French(_climate.SurfaceTemperature.Max())} °C   " +
@@ -1056,6 +1231,9 @@ void sky() {
             case Key.Key9 or Key.Kp9: CycleDisplayMode(DisplayMode.Biomes); break;
             case Key.Key0 or Key.Kp0: CycleDisplayMode(DisplayMode.Realistic); break;
             case Key.F: _showRivers = !_showRivers; break;
+            case >= Key.F1 and <= Key.F10:
+                GoToPlace((int)(key.Keycode - Key.F1));
+                break;
             case Key.C:
                 SetClock(_clock == ClockMode.Geological ? ClockMode.Climate : ClockMode.Geological);
                 break;
