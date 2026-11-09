@@ -60,11 +60,12 @@ des eaux de surface.*
 *Remontées d'eau froide : sous l'équateur (les alizés écartent l'eau vers les pôles) et le long
 des côtes où le vent pousse l'eau vers le large ; elles refroidissent la surface.*
 
-![Éruption volcanique : panache en champignon le jour et au soleil bas, coulée de lave la nuit](docs/images/eruption.jpg)
+![Éruption volcanique : panache et sa traînée, son ombre vue d'avion, coulée de lave la nuit](docs/images/eruption.jpg)
 
-*Éruption : panache calculé en volume, colonne qui bouillonne puis ombrelle qui s'étale à sa
-hauteur d'équilibre (de jour et soleil bas) ; la nuit, coulée de lave simulée comme un fluide,
-qui descend du cratère en suivant le relief, croûte sombre et fissures incandescentes. Rendu du
+*Éruption : panache calculé en volume, colonne qui bouillonne au-dessus d'un nuage de cendres
+roulant sur le sommet, puis ombrelle que le vent étire en une longue traînée (à gauche) ; vue
+d'avion, la traînée et son ombre sur le relief (au milieu) ; la nuit, coulée de lave simulée
+comme un fluide, qui descend du cratère en suivant le relief (à droite). Rendu du
 moteur du projet ; les éruptions sont placées ici pour l'image, dans le jeu elles naissent sur
 les volcans simulés.*
 
@@ -180,9 +181,12 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     remplit les creux, ne coule que plus épaisse qu'une épaisseur critique (fluide de Bingham),
     refroidit par sa surface et se fige en basalte noir ; volcans sous-marins : rien en surface
     sous 200 m d'eau, panache de vapeur au-dessus (type Surtsey) ;
-  - panaches d'éruption en volume (lancer de rayons dans une densité bruitée) : colonne qui bouillonne
-    en volutes, poussée par le vent, champignon qui s'étale à sa hauteur d'équilibre, rideaux de
-    cendres, ombre propre, lueur de la lave à la base et éclairs volcaniques la nuit ;
+  - panaches d'éruption en volume (lancer de rayons adaptatif dans une densité bruitée) : colonne
+    qui bouillonne en volutes, penchée par le vent simulé à la bouche, ombrelle à sa hauteur
+    d'équilibre que le vent étire en une traînée persistante (plus longue si le vent est fort),
+    qui s'élargit et s'éclaircit en s'éloignant ; nuage de cendres au pied des colonnes
+    explosives ; ombre propre et ombre portée sur le relief ; fumerolles de vapeur couchées par
+    le vent ; lueur de la lave à la base et éclairs la nuit (horloge climatique seulement) ;
   - dans l'horloge climatique : une vingtaine d'éruptions en même temps sur la planète, comme sur
     Terre (lave incandescente, panaches de cendres, voile d'aérosols qui refroidit la planète après
     les plus fortes) et séismes aux frontières de plaques
@@ -372,6 +376,8 @@ de ces mêmes ouvrages.
   253-267 ; Vicari A. et al. (2007). *Modeling of the 2001 lava flow at Etna volcano by a Cellular
   Automata approach.* Environmental Modelling & Software 22, 1465-1471. — coulées par automate
   cellulaire (échanges entre voisines selon les dénivelés, refroidissement, solidification).
+- Bonadonna C., Phillips J. C. (2003). *Sedimentation from strong volcanic plumes.* Journal of
+  Geophysical Research 108(B7), 2340. — étalement de l'ombrelle et de la traînée sous le vent.
 - Sparks R. S. J. (1986). *The dimensions and dynamics of volcanic eruption columns.* Bulletin of
   Volcanology 48, 3-15. — colonne convective et ombrelle qui s'étale à sa hauteur d'équilibre.
 - Robock A. (2000). *Volcanic eruptions and climate.* Reviews of Geophysics 38(2), 191-219. —

@@ -735,7 +735,7 @@ uniform vec3 noise_offset;
 const int NOISE_PERIOD = 8192;
 
 // Repère de chaque face du cube (identique à CubeSphere.cs)
-" + ShaderLibrary.CubeFace + ShaderLibrary.Atmosphere + ShaderLibrary.Clouds + @"
+" + ShaderLibrary.CubeFace + ShaderLibrary.Atmosphere + ShaderLibrary.Clouds + ShaderLibrary.Plumes + @"
 // Direction du Soleil (repère de la planète)
 uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
 // Marée (étape 11b) : direction de chaque astre (xyz) et amplitude K en m (w) ; la mer monte
@@ -747,11 +747,7 @@ uniform float sea_level = 0.0;
 uniform float tide_high = 0.0;
 // Glaciations (étape 13c) : refroidissement global (°C, négatif) qui abaisse la limite des neiges
 uniform float glacial_cooling = 0.0;
-// Éruptions en cours (étape 13a), les plus proches de la caméra : direction de la bouche (xyz)
-// et intensité (w) ; forme : rayon du volcan (m), hauteur du panache (m), VEI (−1 : vapeur), altitude de la bouche (m)
-uniform int eruption_count = 0;
-uniform vec4 eruption_vents[8];
-uniform vec4 eruption_shapes[8];
+// (éruptions en cours : uniformes eruption_* de ShaderLibrary.Plumes)
 // Volcans proches (direction, rayon de la base en m) : flancs de lave refroidie et de cendres
 uniform int volcano_count = 0;
 uniform vec4 volcano_sites[16];
@@ -1022,6 +1018,29 @@ float cloud_shadow(vec3 world, vec3 up, float h) {
     return 1.0 - 0.8 * smoothstep(0.02, 0.4, density);
 }
 
+// Ombre des panaches volcaniques : on remonte vers le Soleil jusqu'à l'altitude de la traînée,
+// puis jusqu'à mi-hauteur de la colonne, et on regarde si l'on tombe dans la forme du panache
+float plume_shadow(vec3 world, vec3 up, float h) {
+    float mus = dot(up, sun_direction);
+    if (eruption_count == 0 || mus <= 0.05)
+        return 1.0;
+    vec3 base_point = camera_planet + world;
+    float shade = 1.0;
+    for (int k = 0; k < eruption_count; k++) {
+        if (eruption_vents[k].w <= 0.0 || eruption_shapes[k].y <= 0.0)
+            continue;
+        Plume P = plume_params(k);
+        float feature, thin, trail, safe;
+        float vent_height = eruption_shapes[k].w;
+        float e = plume_envelope(P, base_point + sun_direction * ((vent_height + P.top - h) / mus), feature, thin, trail, safe);
+        float density = (1.0 - smoothstep(0.6, 1.1, e)) * thin;
+        e = plume_envelope(P, base_point + sun_direction * ((vent_height + 0.4 * P.height - h) / mus), feature, thin, trail, safe);
+        density = max(density, 1.0 - smoothstep(0.6, 1.1, e));
+        shade *= 1.0 - (P.steam ? 0.3 : 0.75) * density * eruption_vents[k].w;
+    }
+    return shade;
+}
+
 // Éclairage : Lambert et reflet de Blinn-Phong, la lumière du Soleil étant teintée par
 // l'atmosphère traversée (rouge au coucher, nulle derrière la planète) et par l'ombre des nuages
 void light() {
@@ -1225,7 +1244,7 @@ void fragment() {
         }
     }
     NORMAL = normalize((VIEW_MATRIX * vec4(normal, 0.0)).xyz);
-    v_shade = cloud_shadow(v_world, up, h);
+    v_shade = cloud_shadow(v_world, up, h) * plume_shadow(v_world, up, h);
     ALBEDO = color;
     ROUGHNESS = roughness;
     SPECULAR = specular;
@@ -1304,7 +1323,7 @@ void fragment() {
         foam = mix(shore * 0.35, foam, detail_weight(4.0, footprint));
     }
     color = mix(color, vec3(0.92, 0.95, 0.97), foam);
-    v_shade = cloud_shadow(v_world, up, v_water.x);
+    v_shade = cloud_shadow(v_world, up, v_water.x) * plume_shadow(v_world, up, v_water.x);
     ALBEDO = color;
     ROUGHNESS = mix(0.08, 0.7, foam);
     SPECULAR = 0.6;

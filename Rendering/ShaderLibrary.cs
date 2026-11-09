@@ -241,4 +241,95 @@ float cloud_density(vec3 p, float h, vec2 cover, float footprint) {
     return clamp((n - (1.0 - cover.r)) * 2.5, 0.0, 1.0) * shape;
 }
 ";
+
+    /// <summary>
+    /// Forme des panaches volcaniques, partagée par le ciel (le volume lui-même) et le terrain
+    /// (son ombre portée) : une colonne convective qui monte en s'élargissant et que le vent
+    /// penche, puis un nuage qui s'étale à l'altitude où la colonne n'est plus plus légère que
+    /// l'air (l'ombrelle) et que le vent étire en une longue traînée qui s'élargit, s'épaissit et
+    /// s'éclaircit en s'éloignant (Sparks 1986 ; Bonadonna et Phillips 2003). Repère local : axe
+    /// vertical à la bouche, direction du vent, et la perpendiculaire.
+    /// </summary>
+    public const string Plumes = @"
+// Éruptions en cours : direction de la bouche + intensité ; rayon du volcan (m), hauteur du
+// panache (m), VEI (−1 : vapeur), altitude de la bouche (m) ; vent à la bouche (direction, m/s)
+uniform int eruption_count = 0;
+uniform vec4 eruption_vents[8];
+uniform vec4 eruption_shapes[8];
+uniform vec4 eruption_winds[8];
+
+struct Plume {
+    vec3 vent, up, wind, side;
+    float height, base, bend, top, thick, spread, len, x0, speed, vei;
+    bool steam;
+};
+
+Plume plume_params(int k) {
+    Plume P;
+    P.up = eruption_vents[k].xyz;
+    P.vent = P.up * (PLANET_R + eruption_shapes[k].w);
+    vec3 w = eruption_winds[k].xyz - P.up * dot(eruption_winds[k].xyz, P.up);
+    P.wind = dot(w, w) > 1e-8 ? normalize(w) : normalize(cross(vec3(0.0, 1.0, 0.0), P.up) + vec3(1e-6, 0.0, 0.0));
+    P.side = cross(P.up, P.wind);
+    P.speed = eruption_winds[k].w;
+    float f = clamp(P.speed / 10.0, 0.2, 3.0);
+    P.steam = eruption_shapes[k].z < -0.5;
+    P.vei = max(eruption_shapes[k].z, 0.0);
+    P.height = eruption_shapes[k].y;
+    float volcano = eruption_shapes[k].x;
+    // Base de la colonne à la mesure du volcan ; la vapeur, légère, se couche vite dans le vent
+    P.base = P.steam ? max(100.0, 0.01 * volcano) : max(450.0, 0.015 * volcano);
+    P.bend = (P.steam ? 0.7 : 0.15) * f;
+    P.top = (P.steam ? 0.85 : 0.8) * P.height;
+    P.thick = (P.steam ? 0.1 : 0.14) * P.height;
+    P.spread = (P.steam ? 0.15 : 0.45) * P.height;
+    // Traînée d'autant plus longue que l'éruption est forte et le vent rapide
+    P.len = P.height * (P.steam ? 3.0 : 5.0) * (0.4 + 0.6 * eruption_vents[k].w) * clamp(f, 0.5, 2.0);
+    P.x0 = P.height * P.bend * (P.top / P.height) * (P.top / P.height);
+    return P;
+}
+
+// Forme sans les volutes : 1 au bord, < 1 dedans ; feature = taille des volutes (m), thin =
+// densité relative (la traînée s'éclaircit), trail = 0 dans la colonne, 1 dans la traînée ;
+// safe = distance (m) qu'on peut parcourir sans risquer d'entrer dans le panache, volutes comprises
+float plume_envelope(Plume P, vec3 p, out float feature, out float thin, out float trail, out float safe) {
+    vec3 w = p - P.vent;
+    float s = dot(w, P.up), x = dot(w, P.wind), y = dot(w, P.side);
+    feature = P.base; thin = 1.0; trail = 0.0;
+    safe = max(max(-50.0 - s, s - 1.15 * P.height), P.base);
+    if (s < -50.0 || s > 1.15 * P.height)
+        return 9.0;
+    // Colonne : penchée par le vent (décalage qui croît comme le carré de la hauteur)
+    float sc = clamp(s, 0.0, P.height);
+    float offset = P.height * P.bend * (sc / P.height) * (sc / P.height);
+    float r = P.base + (P.steam ? 0.22 : 0.2) * sc;
+    float column_top = P.steam ? P.height : P.top + 0.5 * P.thick;
+    float e_column = length(vec2(x - offset, y)) / r + smoothstep(0.9 * column_top, 1.05 * column_top, s) * 4.0;
+    // Ombrelle et traînée : demi-ellipsoïde au-dessus de la colonne côté amont, puis section
+    // elliptique qui s'élargit (~0,3 m par m) et s'épaissit vers l'aval, en descendant un peu
+    float xt = x - P.x0;
+    float along = max(xt, 0.0);
+    float half_width = P.spread + 0.3 * along;
+    float half_thick = P.thick * (1.0 + 0.6 * along / P.len);
+    float z = s - (P.top - 0.06 * P.height * along / P.len);
+    float e_trail = xt < 0.0 ? length(vec3(xt / P.spread, y / P.spread, z / P.thick))
+                             : length(vec2(y / half_width, z / half_thick));
+    e_trail += smoothstep(0.5, 1.0, along / P.len) * 3.0;
+    // Nuage de cendres au pied de la colonne (éruptions explosives) : la colonne aspire l'air
+    // autour, des bouffées retombent et roulent sur les flancs
+    float e_skirt = 9.0;
+    if (P.vei >= 2.0) {
+        float skirt_radius = 3.0 * P.base + 0.04 * P.height;
+        e_skirt = length(vec2(length(vec2(x - offset, y)) / skirt_radius, s / (0.05 * P.height + 300.0)));
+        e_column = min(e_column, e_skirt);
+    }
+    trail = smoothstep(-0.2, 0.2, e_column - e_trail);
+    // (les distances se mesurent séparément : la colonne, fine, ne doit pas être sautée en
+    // avançant au pas de la traînée, épaisse)
+    safe = max(min(max(e_column - 1.45, 0.0) * r, max(e_trail - 1.45, 0.0) * min(half_thick, P.spread)), 0.0);
+    feature = mix(r, 1.4 * half_thick, trail);
+    thin = mix(1.0, mix(1.0, 0.3, smoothstep(0.0, 1.0, along / P.len)), trail);
+    return min(e_column, e_trail);
+}
+";
 }

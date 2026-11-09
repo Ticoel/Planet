@@ -132,6 +132,7 @@ public partial class Main : Node3D
     private readonly Vector4[] _volcanoSites = new Vector4[16];
     private readonly Vector4[] _eruptionVents = new Vector4[8];
     private readonly Vector4[] _eruptionShapes = new Vector4[8];
+    private readonly Vector4[] _eruptionWinds = new Vector4[8];
     private string _lastQuake;
     private SoundscapePlayer _sound;
     private CaptureManager _capture;
@@ -567,6 +568,7 @@ public partial class Main : Node3D
                 // Taille du volcan : un panache à la mesure de l'édifice (un géant hawaïen fume et
                 // crache plus large et plus haut qu'un petit cône)
                 _landformByPosition.TryGetValue(p, out var volcano);
+                _eruptionWinds[count] = WindAt(volcano);
                 float radius = volcano?.RadiusM ?? 15000f, peak = volcano?.PeakHeightM ?? 2000f;
                 if (ventHeight < 0)
                     _eruptionShapes[count] = new Vector4(0f, Math.Min(eruption.PlumeHeightM, 4000f), -1f, 0f);
@@ -593,8 +595,11 @@ public partial class Main : Node3D
             // couvert de coulées récentes sur son tiers supérieur, un strato de cendres sur la moitié
             float tinted = landform.RadiusM * (landform.Kind == LandformKind.ShieldVolcano ? 0.35f : 0.6f);
             _volcanoSites[sites++] = new Vector4(p.X, p.Y, p.Z, tinted);
-            if (landform.Active && count < _eruptionVents.Length && !erupting.Contains(p) && VentHeight(p) >= 0)
+            // (seulement dans l'horloge climatique : à des millions d'années par seconde, une
+            // fumerolle n'a pas de sens)
+            if (climate && landform.Active && count < _eruptionVents.Length && !erupting.Contains(p) && VentHeight(p) >= 0)
             {
+                _eruptionWinds[count] = WindAt(landform);
                 _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, 0.35f);
                 // VEI −1 : vapeur, d'autant plus haute que le volcan est grand
                 float steamHeight = Math.Max(2000f, 0.6f * landform.PeakHeightM + 0.04f * landform.RadiusM);
@@ -607,13 +612,26 @@ public partial class Main : Node3D
         _terrain.SetShaderParameter("eruption_count", count);
         _terrain.SetShaderParameter("eruption_vents", _eruptionVents);
         _terrain.SetShaderParameter("eruption_shapes", _eruptionShapes);
+        _terrain.SetShaderParameter("eruption_winds", _eruptionWinds);
         _terrain.SetShaderParameter("volcano_count", sites);
         _terrain.SetShaderParameter("volcano_sites", _volcanoSites);
-        _sky.SetEruptions(count, _eruptionVents, _eruptionShapes);
+        _sky.SetEruptions(count, _eruptionVents, _eruptionShapes, _eruptionWinds);
         UpdateLava(nearestOnLand, climate);
     }
 
     private readonly Dictionary<Vector3, Landform> _landformByPosition = new();
+
+    /// <summary>Vent simulé à la cellule d'un volcan : direction (tangente) et vitesse (m/s).</summary>
+    private Vector4 WindAt(Landform volcano)
+    {
+        var winds = _climate.Winds.Wind;
+        if (volcano == null || volcano.Cell < 0 || volcano.Cell >= winds.Length)
+            return Vector4.Zero;
+        Vector3 wind = winds[volcano.Cell];
+        float speed = wind.Length();
+        // (en altitude, le vent est plus fort qu'au sol : ~2 fois vers 5 à 10 km)
+        return speed < 1e-3f ? Vector4.Zero : new Vector4(wind.X / speed, wind.Y / speed, wind.Z / speed, 2f * speed);
+    }
 
     /// <summary>Profondeur (m) au-delà de laquelle une éruption sous-marine ne se voit pas en surface.</summary>
     private const float SubmarineVisibleDepthM = 200f;
