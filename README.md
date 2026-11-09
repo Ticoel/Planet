@@ -1,8 +1,50 @@
 # Planet
 
+![Planet : la planète vue d'orbite, ses montagnes, un coucher de soleil, une mer de nuages](docs/images/banniere.jpg)
+
 Une planète **entièrement procédurale** et autonome dans Godot 4.7 (.NET) : tectonique des
 plaques, climat, cycle de l'eau, fleuves, biomes, puis exploration de l'orbite jusqu'au sol à
-l'échelle réelle.
+l'échelle réelle. Rien ne vient de la vraie Terre : continents, montagnes, climats et nuages
+émergent de la simulation.
+
+## Aperçu
+
+| | | |
+|:---:|:---:|:---:|
+| ![Vue d'orbite](docs/images/orbite.jpg) | ![Montagnes à l'échelle réelle](docs/images/montagnes.jpg) | ![Coucher de soleil](docs/images/coucher-de-soleil.jpg) |
+| **De l'orbite…** couche altitude, atmosphère, étoiles | **…au sol**, relief à l'échelle réelle | **Coucher de soleil** calculé par diffusion de la lumière |
+| ![Lac](docs/images/lac.jpg) | ![Mer de nuages](docs/images/mer-de-nuages.jpg) | ![Crêtes](docs/images/cretes.jpg) |
+| **Lacs et fleuves** tirés du réseau hydrographique simulé | **Nuages en volume**, vus de 12 km | **Crêtes et vallées** érodées, roche texturée |
+| ![Carte d'altitude](docs/images/couche-altitude.jpg) | ![Lune et étoiles](docs/images/lune.jpg) | ![Vent de poussière](docs/images/poussiere.jpg) |
+| **Couche altitude** vue de 400 km | **Lune** et ses phases, étoiles (Lune agrandie ici) | **Vent de poussière** dans un désert |
+
+*Images produites avec le moteur de rendu du projet (ses propres shaders), en rendu logiciel
+hors carte graphique. La mer de nuages utilise une couverture de test ; dans le jeu, elle vient
+du climat simulé. La Lune est montrée agrandie : dans le jeu, elle a sa vraie taille (un demi-degré).*
+
+## Comment ça marche
+
+```mermaid
+flowchart LR
+    A[Tectonique des plaques<br/>icosphère, 163 842 cellules] --> B[Relief simulé]
+    B --> C[Climat<br/>ensoleillement, températures,<br/>vents, cycle de l'eau]
+    C --> D[Fleuves, lacs, glaciers]
+    C --> E[Biomes]
+    D -->|érosion| B
+    B --> F[Relief détaillé<br/>quadtree sur sphère cubique,<br/>jusqu'à ~1 m]
+    D --> F
+    C --> G[Ciel vivant<br/>atmosphère, nuages, météo]
+    F --> H((Exploration<br/>de l'orbite au sol))
+    G --> H
+    E --> H
+```
+
+Deux horloges : une **géologique** (des centaines de millions d'années en quelques minutes) et
+une **climatique** (du temps réel à des mois par seconde), sur le relief figé.
+
+| Tectonique : 750 millions d'années | Températures : janvier et juillet | Climat : biomes, pluie, pression |
+|:---:|:---:|:---:|
+| ![Évolution des plaques et du relief](docs/images/tectonique.jpg) | ![Températures de janvier et juillet](docs/images/temperatures.jpg) | ![Cartes du climat simulé](docs/images/climat.jpg) |
 
 ## Auteurs
 
