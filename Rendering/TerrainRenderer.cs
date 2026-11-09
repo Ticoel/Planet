@@ -548,7 +548,28 @@ public partial class TerrainRenderer : Node3D
         RenderingServer.MeshAddSurfaceFromArrays(mesh, RenderingServer.PrimitiveType.Triangles, arrays,
                                                  EmptyBlendShapes, EmptyLods, (RenderingServer.ArrayFormat)format);
         RenderingServer.MeshSurfaceSetMaterial(mesh, 0, _material.GetRid());
+
+        // Boîte englobante qui contient aussi ce que les shaders déplacent : sommets « morphés »
+        // et surface de l'eau (posée jusqu'à des centaines de mètres au-dessus du fond d'un lac).
+        // Avec la boîte du seul maillage, Godot jetait l'eau dès que le fond sortait du champ :
+        // des carrés d'eau disparaissaient sous la caméra
+        Aabb bounds = new(vertices[0], Vector3.Zero);
+        for (int v = 0; v < count; v++)
+        {
+            Vector3 p = vertices[v];
+            bounds = bounds.Expand(p);
+            bounds = bounds.Expand(p + new Vector3(chunk.Custom0[v * 4], chunk.Custom0[v * 4 + 1], chunk.Custom0[v * 4 + 2]));
+            float rise = chunk.Water[v * 2] - chunk.Custom0[v * 4 + 3];
+            if (rise > 0)
+            {
+                Vector3 up = (chunk.Center + new Double3(p.X, p.Y, p.Z)).Normalized().ToVector3();
+                bounds = bounds.Expand(p + up * rise);
+            }
+        }
+        bounds = bounds.Grow(1f);
+
         Rid instance = RenderingServer.InstanceCreate2(mesh, GetWorld3D().Scenario);
+        RenderingServer.InstanceSetCustomAabb(instance, bounds);
         RenderingServer.InstanceSetVisible(instance, false);
         RenderingServer.InstanceGeometrySetCastShadowsSetting(instance, RenderingServer.ShadowCastingSetting.Off);
         // Surface de l'eau : même maillage, autre matériau (le shader pose les sommets au niveau de l'eau)
@@ -556,6 +577,7 @@ public partial class TerrainRenderer : Node3D
         if (chunk.HasWater)
         {
             waterInstance = RenderingServer.InstanceCreate2(mesh, GetWorld3D().Scenario);
+            RenderingServer.InstanceSetCustomAabb(waterInstance, bounds);
             RenderingServer.InstanceGeometrySetMaterialOverride(waterInstance, _waterMaterial.GetRid());
             RenderingServer.InstanceSetVisible(waterInstance, false);
             RenderingServer.InstanceGeometrySetCastShadowsSetting(waterInstance, RenderingServer.ShadowCastingSetting.Off);

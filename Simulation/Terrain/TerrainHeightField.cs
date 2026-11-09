@@ -467,7 +467,9 @@ public sealed class TerrainHeightField
                         + folds * (1 - valley.floor);
         // Le fond des vallées reste au-dessus de la mer tant que le sol l'est : le fleuve coule
         // jusqu'à la côte au lieu de transformer toute la plaine en bras de mer
-        height = height > 1.0 ? Math.Max(height - valley.depth, 1.0) : height - valley.depth;
+        // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait
+        // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
+        height = Math.Max(height - valley.depth, Math.Min(height, 1.0));
         height = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
 
         // Lacs : au cœur de leur zone, l'eau est au niveau du lac ; vers le bord de la zone, ce
@@ -660,7 +662,9 @@ public sealed class TerrainHeightField
             double floorHalf = Math.Max(channel, 0.12 * width);  // demi-largeur du fond plat
             double depth = Math.Min(60 + 6 * Math.Sqrt(q), 0.6 * Math.Max(baseHeight, 0) + 15);
             double profile = 1 - SmoothStep(floorHalf, width, distance);
-            double carve = depth * profile + (distance < channel * 0.5 ? 3.0 : 0.0);
+            // Lit du fleuve : 3 m de plus, avec une transition douce (une marche nette dessinait
+            // des dents de scie le long des berges)
+            double carve = depth * profile + 3.0 * (1 - SmoothStep(channel * 0.35, channel * 0.6, distance));
             if (carve > bestDepth)
             {
                 bestDepth = carve;
