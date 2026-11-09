@@ -24,6 +24,8 @@ public enum DisplayMode
     Humidity,
     Biomes,
     Realistic,
+    /// <summary>Courants océaniques de surface (étape 11a).</summary>
+    OceanCurrents,
 }
 
 /// <summary>Calcule la couleur de chaque cellule selon le mode d'affichage.</summary>
@@ -97,6 +99,17 @@ public static class PlanetColorizer
     };
 
     // Vitesse du vent (m/s) : calme bleu sombre, puis cyan, vert, jaune, rouge pour la tempête
+    // Courants (m/s) : eaux calmes bleu nuit, courants forts jaunes puis rouges
+    private static readonly (float value, Color color)[] CurrentGradient =
+    {
+        (0f, new Color(0.03f, 0.06f, 0.2f)),
+        (0.03f, new Color(0.08f, 0.25f, 0.55f)),
+        (0.08f, new Color(0.15f, 0.6f, 0.75f)),
+        (0.15f, new Color(0.45f, 0.85f, 0.4f)),
+        (0.25f, new Color(1f, 0.85f, 0.2f)),
+        (0.4f, new Color(0.95f, 0.3f, 0.1f)),
+    };
+
     private static readonly (float value, Color color)[] WindGradient =
     {
         (0f, new Color(0.05f, 0.08f, 0.25f)),
@@ -186,6 +199,9 @@ public static class PlanetColorizer
                     ? Sample(WindGradient, climate.Winds.Wind[cell].Length())
                         .Lerp(Sample(ElevationGradient, tectonics.CellElevation[cell]), ReliefBlend)
                     : Sample(ElevationGradient, tectonics.CellElevation[cell]),
+                DisplayMode.OceanCurrents => climate.HasTemperature && tectonics.CellElevation[cell] < 0f
+                    ? Sample(CurrentGradient, climate.Ocean.Current[cell].Length())
+                    : Sample(ElevationGradient, tectonics.CellElevation[cell]).Lerp(new Color(0.5f, 0.5f, 0.5f), 0.6f),
                 DisplayMode.Pressure => climate.HasTemperature
                     ? Sample(PressureGradient, climate.Winds.Pressure[cell])
                         .Lerp(Sample(ElevationGradient, tectonics.CellElevation[cell]), ReliefBlend)

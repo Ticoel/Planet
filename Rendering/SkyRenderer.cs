@@ -156,25 +156,27 @@ public sealed partial class SkyRenderer : Node3D
     /// Couverture nuageuse de chaque cellule d'après le climat du moment : air proche de la
     /// saturation, pluie récente, convergence du vent (l'air monte et se condense).
     /// </summary>
-    public static (float[] cover, float[] showers) ComputeCloudCover(ClimateSimulation climate)
+    public static (float[] cover, float[] showers) ComputeCloudCover(ClimateSimulation climate) =>
+        ComputeCloudCover(climate.Grid, climate.RelativeHumidity, climate.Statistics.RecentPrecipitation, climate.Winds.Convergence);
+
+    /// <summary>Même calcul à partir de copies des champs du climat (utilisable en tâche de fond).</summary>
+    public static (float[] cover, float[] showers) ComputeCloudCover(PlanetGrid grid, float[] relativeHumidity, float[] rain, float[] convergence)
     {
-        int count = climate.Grid.CellCount;
+        int count = grid.CellCount;
         var cover = new float[count];
         var showers = new float[count];
-        var rain = climate.Statistics.RecentPrecipitation;
-        var convergence = climate.Winds.Convergence;
         for (int c = 0; c < count; c++)
         {
-            float humidity = SmoothStep(0.55f, 0.95f, climate.RelativeHumidity[c]);
+            float humidity = SmoothStep(0.55f, 0.95f, relativeHumidity[c]);
             float wet = SmoothStep(0.3f, 6f, rain[c]);
             float rising = SmoothStep(0f, 6e-6f, convergence[c]);
             cover[c] = Math.Clamp(0.75f * humidity + 0.55f * wet + 0.2f * rising, 0f, 1f);
             showers[c] = SmoothStep(3f, 25f, rain[c]);
         }
         // Lissage entre cellules voisines (deux passes) : contours moins anguleux
-        Smooth(climate.Grid, cover);
-        Smooth(climate.Grid, cover);
-        Smooth(climate.Grid, showers);
+        Smooth(grid, cover);
+        Smooth(grid, cover);
+        Smooth(grid, showers);
         return (cover, showers);
     }
 
@@ -215,28 +217,52 @@ public sealed partial class SkyRenderer : Node3D
     /// <summary>Met à jour la texture des nuages (null : pas de nuages, horloge géologique).</summary>
     public void UpdateCloudCover(float[] cover, float[] showers)
     {
-        HasClouds = cover != null;
         if (cover == null)
+        {
+            HasClouds = false;
             return;
+        }
+        ApplyCloudPixels(BuildCloudPixels(cover, showers));
+    }
+
+    /// <summary>
+    /// Pixels des 6 faces de la texture des nuages (sans appel à Godot : utilisable en tâche de fond).
+    /// </summary>
+    public byte[][] BuildCloudPixels(float[] cover, float[] showers)
+    {
         int n = CloudResolution, step = _cellIndexResolution / n;
+        var faces = new byte[CubeSphere.FaceCount][];
         for (int face = 0; face < CubeSphere.FaceCount; face++)
         {
+            var pixels = new byte[n * n * 2];
             int[] index = _cellIndex[face];
             for (int j = 0; j < n; j++)
                 for (int i = 0; i < n; i++)
                 {
                     int cell = index[(j * step + step / 2) * _cellIndexResolution + i * step + step / 2];
                     int o = (j * n + i) * 2;
-                    _cloudPixels[o] = (byte)(Math.Clamp(cover[cell], 0f, 1f) * 255f);
-                    _cloudPixels[o + 1] = (byte)(Math.Clamp(showers[cell], 0f, 1f) * 255f);
+                    pixels[o] = (byte)(Math.Clamp(cover[cell], 0f, 1f) * 255f);
+                    pixels[o + 1] = (byte)(Math.Clamp(showers[cell], 0f, 1f) * 255f);
                 }
             // Flou (deux passes 3×3) : chaque pixel prenait la valeur de la cellule la plus proche,
             // les contours des nuages suivaient les hexagones de la grille
-            BoxBlur(_cloudPixels, n);
-            BoxBlur(_cloudPixels, n);
-            _cloudImages[face].SetData(n, n, false, Image.Format.Rg8, _cloudPixels);
+            BoxBlur(pixels, n);
+            BoxBlur(pixels, n);
+            faces[face] = pixels;
+        }
+        return faces;
+    }
+
+    /// <summary>Envoie les pixels préparés à la carte graphique (fil principal).</summary>
+    public void ApplyCloudPixels(byte[][] faces)
+    {
+        int n = CloudResolution;
+        for (int face = 0; face < CubeSphere.FaceCount; face++)
+        {
+            _cloudImages[face].SetData(n, n, false, Image.Format.Rg8, faces[face]);
             CloudCover.UpdateLayer(_cloudImages[face], face);
         }
+        HasClouds = true;
     }
 
     // --- Image ------------------------------------------------------------------------------------
@@ -595,10 +621,16 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
         t0 = max(t0, base.y);
     if (a > CLOUD_BASE && base.x > 0.0 && base.y > base.x)
         t1 = min(t1, base.x);
-    t1 = min(t1, t0 + 150000.0);
+    t1 = min(t1, t0 + 120000.0);
     if (t1 <= t0)
         return;
-    const int STEPS = 48;
+    // Rien à faire si aucun nuage aux deux bouts ni au milieu du trajet (cas le plus courant)
+    float probe = max(max(cloud_cover_at(normalize(camera_planet + rd * t0)).r,
+                          cloud_cover_at(normalize(camera_planet + rd * t1)).r),
+                      cloud_cover_at(normalize(camera_planet + rd * (0.5 * (t0 + t1)))).r);
+    if (probe < 0.03)
+        return;
+    const int STEPS = 36;
     float dt = (t1 - t0) / float(STEPS);
     float t = t0 + dt * hash12(pixel);
     float transmittance = 1.0;
@@ -606,6 +638,8 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
     // Diffusion vers l'avant (halo lumineux des nuages à contre-jour)
     float phase = mix(0.8, 2.2, pow(max(nu, 0.0), 6.0));
     vec3 sky_light = vec3(0.35, 0.45, 0.65);
+    // Lumière du Soleil au niveau des nuages : calculée une fois par rayon (elle varie peu)
+    vec3 sunlight = vec3(-1.0);
     for (int i = 0; i < STEPS; i++) {
         vec3 p = camera_planet + rd * t;
         float h = ray_height(a, mu, t);
@@ -618,13 +652,10 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
                 t_first = t;
             // Lumière du Soleil : atmosphère au-dessus du nuage, puis le nuage lui-même
             float mus = dot(d, sun);
-            vec3 sunlight = sun_transmittance(h, mus);
-            float light_depth = 0.0;
-            for (int k = 1; k <= 2; k++) {
-                vec3 q = p + sun * (float(k) * 450.0);
-                float hq = h + mus * float(k) * 450.0;
-                light_depth += cloud_density(q, hq, cover, footprint) * 450.0;
-            }
+            if (sunlight.x < 0.0)
+                sunlight = sun_transmittance(h, mus);
+            // Épaisseur de nuage vers le Soleil : un échantillon à 700 m
+            float light_depth = cloud_density(p + sun * 700.0, h + mus * 700.0, cover, footprint) * 1400.0;
             float beer = exp(-CLOUD_EXTINCTION * light_depth);
             float powder = 1.0 - exp(-CLOUD_EXTINCTION * light_depth * 2.0);
             float day = smoothstep(-0.1, 0.15, mus);

@@ -77,9 +77,9 @@ vec3 sun_optical_depth(float h, float mus) {
     if (ground.x > 0.0 && ground.y > ground.x)
         return vec3(1e4);
     float top = ray_shell(h, mus, ATMO_H).y;
-    float dt = top / 4.0;
+    float dt = top / 3.0;
     float r = 0.0, m = 0.0, o = 0.0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         float hh = ray_height(h, mus, (float(i) + 0.5) * dt);
         r += exp(-hh / RAYLEIGH_H);
         m += exp(-hh / MIE_H);
@@ -116,7 +116,7 @@ void atmosphere(float a, vec3 up, vec3 rd, float t_max, vec3 sun, out vec3 insca
         t1 = min(t1, ground.x);
     if (t1 <= t0)
         return;
-    const int STEPS = 12;
+    const int STEPS = 10;
     float dt = (t1 - t0) / float(STEPS);
     float nu = dot(rd, sun);
     vec3 depth = vec3(0.0);
@@ -168,10 +168,10 @@ float prevailing_wind(float sin_latitude) {
 // Couverture en un point. La direction est d'abord déformée par le bruit (~60 km, ±50 km) :
 // sinon les bords des cellules de la simulation (hexagones de ~60 km) se voyaient de haut
 vec2 cloud_cover_at(vec3 direction) {
-    vec3 q = direction * 25.0;
-    vec3 warp = vec3(texture(cloud_noise, q).r, texture(cloud_noise, q + vec3(0.31, 0.57, 0.13)).r,
-                     texture(cloud_noise, q + vec3(0.71, 0.19, 0.43)).r) - 0.5;
-    return texture(cloud_cover, cube_face_uv(normalize(direction + warp * 0.016))).rg;
+    // (une seule lecture du bruit : la passe des nuages lit la couverture des dizaines de fois par pixel)
+    float n = texture(cloud_noise, direction * 25.0).r - 0.5;
+    vec3 warp = n * vec3(1.0, -0.7, 0.45) + (n * n - 0.08) * vec3(-0.6, 0.9, 1.1);
+    return texture(cloud_cover, cube_face_uv(normalize(direction + warp * 0.02))).rg;
 }
 
 // Sommet de la couche nuageuse (m) selon la couverture et les averses

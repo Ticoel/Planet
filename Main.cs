@@ -154,9 +154,25 @@ public partial class Main : Node3D
     // Ciel, atmosphère, Lune, nuages, météo (étape 10)
     private SkyRenderer _sky;
     private double _cloudTimer;
+    private Task<byte[][]> _cloudTask;
     private bool _cloudsShown;
     private int _weatherHint = -1;
-    // Message affiché quelques secondes (lieu choisi avec F1–F10)
+    // Qualité d'image (touche O) : rendu 3D à résolution réduite, agrandi par AMD FSR. FSR 1
+    // (spatial) ne demande rien de plus ; FSR 2 (temporel) est plus net mais peut laisser des
+    // traînées sur ce qui n'a pas de vecteurs de mouvement (nuages, pluie)
+    private static readonly (string label, Viewport.Scaling3DModeEnum mode, float scale)[] QualityModes =
+    {
+        // Le premier mode est celui du démarrage
+        ("FSR 2 qualité (67 %)", Viewport.Scaling3DModeEnum.Fsr2, 0.67f),
+        ("FSR 2 performance (50 %)", Viewport.Scaling3DModeEnum.Fsr2, 0.5f),
+        ("FSR 1 qualité (77 %)", Viewport.Scaling3DModeEnum.Fsr, 0.77f),
+        ("FSR 1 équilibré (67 %)", Viewport.Scaling3DModeEnum.Fsr, 0.67f),
+        ("FSR 1 performance (50 %)", Viewport.Scaling3DModeEnum.Fsr, 0.5f),
+        ("pleine résolution", Viewport.Scaling3DModeEnum.Bilinear, 1f),
+    };
+    private int _quality;
+
+    // Message affiché quelques secondes (lieu choisi avec F1–F7, F9–F11)
     private string _notice;
     private double _noticeTimer;
     private Label _hud;
@@ -195,6 +211,7 @@ public partial class Main : Node3D
         _terrain.Camera.MakeCurrent();
         GD.Print($"Terrain: cell index textures in {stopwatch.ElapsedMilliseconds} ms");
         SetupSky();
+        ApplyQuality();
         SetupOverlays();
         SetupHud();
         GeneratePlanet();
@@ -407,7 +424,8 @@ public partial class Main : Node3D
     /// <summary>Couches calculées par la simulation du climat (sur un relief figé).</summary>
     private static bool IsClimateLayer(DisplayMode mode) => mode is DisplayMode.Temperature
         or DisplayMode.WindSpeed or DisplayMode.Pressure or DisplayMode.RecentPrecipitation
-        or DisplayMode.AnnualPrecipitation or DisplayMode.Humidity or DisplayMode.Biomes or DisplayMode.Realistic;
+        or DisplayMode.AnnualPrecipitation or DisplayMode.Humidity or DisplayMode.Biomes or DisplayMode.Realistic
+        or DisplayMode.OceanCurrents;
 
     /// <summary>Coloration du terrain selon la couche choisie.</summary>
     private TerrainColoring ColoringFor(DisplayMode mode) => mode switch
@@ -577,13 +595,30 @@ public partial class Main : Node3D
         // Nuages : seulement avec un climat simulé, et pas sur les couches de données (ils
         // cacheraient ce qu'on veut lire)
         bool showClouds = climate && ColoringFor(_displayMode) is TerrainColoring.Geology or TerrainColoring.Realistic;
+        // Calcul en tâche de fond (copies des champs du climat), envoi à la carte graphique ici
         _cloudTimer -= delta;
-        if (showClouds && _cloudTimer <= 0)
+        if (_cloudTask != null && _cloudTask.IsCompleted)
         {
-            var (cover, showers) = SkyRenderer.ComputeCloudCover(_climate);
-            _sky.UpdateCloudCover(cover, showers);
+            if (_cloudTask.IsCompletedSuccessfully && showClouds)
+            {
+                _sky.ApplyCloudPixels(_cloudTask.Result);
+                _cloudsShown = true;
+            }
+            _cloudTask = null;
+        }
+        if (showClouds && _cloudTimer <= 0 && _cloudTask == null)
+        {
+            var grid = _grid;
+            var humidity = (float[])_climate.RelativeHumidity.Clone();
+            var rain = (float[])_climate.Statistics.RecentPrecipitation.Clone();
+            var convergence = (float[])_climate.Winds.Convergence.Clone();
+            var sky = _sky;
+            _cloudTask = Task.Run(() =>
+            {
+                var (cover, showers) = SkyRenderer.ComputeCloudCover(grid, humidity, rain, convergence);
+                return sky.BuildCloudPixels(cover, showers);
+            });
             _cloudTimer = 0.5;
-            _cloudsShown = true;
         }
         else if (!showClouds && _cloudsShown)
         {
@@ -606,7 +641,7 @@ public partial class Main : Node3D
         _sky.Update(frame, delta);
     }
 
-    // --- Lieux de test (F1 à F10) -------------------------------------------------------------
+    // --- Lieux de test (F1 à F7, F9 à F11) -------------------------------------------------------------
 
     private static readonly string[] PlaceNames =
     {
@@ -765,6 +800,15 @@ public partial class Main : Node3D
         ShowNotice($"Lieu : {PlaceNames[index]}{(detail.Length > 0 ? $" ({detail})" : "")}");
     }
 
+    private void ApplyQuality()
+    {
+        var (_, mode, scale) = QualityModes[_quality];
+        var viewport = GetViewport();
+        viewport.Scaling3DMode = mode;
+        viewport.Scaling3DScale = scale;
+        viewport.FsrSharpness = 0.3f;
+    }
+
     private void ShowNotice(string text)
     {
         _notice = text;
@@ -832,8 +876,15 @@ public partial class Main : Node3D
         _windRebuildTimer -= delta;
         if (_windMesh.Visible && _windRebuildTimer <= 0)
         {
-            _windMesh.Mesh = ClimateOverlays.BuildWinds(_grid, _climate.Winds, _tectonics.CellElevation);
-            _windRebuildTimer = 0.1;
+            // Flèches des courants sur la couche des courants, des vents sinon (maillage réutilisé :
+            // en recréer un dix fois par seconde accumulait de la mémoire graphique)
+            var arrows = _windMesh.Mesh as ImmediateMesh ?? new ImmediateMesh();
+            if (_displayMode == DisplayMode.OceanCurrents)
+                ClimateOverlays.BuildVectors(arrows, _grid, _climate.Ocean.Current, _tectonics.CellElevation, 40f, 0.01f, 0.4f);
+            else
+                ClimateOverlays.BuildVectors(arrows, _grid, _climate.Winds.Wind, _tectonics.CellElevation, 1f, 0.3f, 15f);
+            _windMesh.Mesh = arrows;
+            _windRebuildTimer = 1.0;
         }
     }
 
@@ -890,7 +941,8 @@ public partial class Main : Node3D
             lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau");
-            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [F5] désert venteux  [F6] pluie  [F7] neige  [F8] nuages  [F9] coucher de soleil  [F10] Lune");
+            lines.Add("[O] Qualité d'image (résolution réduite + AMD FSR)");
+            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
         else
         {
@@ -936,7 +988,7 @@ public partial class Main : Node3D
         string stale = _terrain.StaleChunkCount > 0 ? $", {_terrain.StaleChunkCount} en mise à jour" : "";
         lines.Add($"Terrain : {_terrain.VisibleChunkCount} morceaux (niveau max {_terrain.DeepestVisibleLevel}{stale}), " +
                   $"{_terrain.CachedChunkCount} en mémoire, {_terrain.PendingChunkCount} en calcul   " +
-                  $"Vitesse de la caméra : {SpeedLabel(_terrain.Explorer.Speed)}");
+                  $"Vitesse de la caméra : {SpeedLabel(_terrain.Explorer.Speed)}   Image : {QualityModes[_quality].label}");
     }
 
     private string LayerName() => _displayMode switch
@@ -951,6 +1003,7 @@ public partial class Main : Node3D
         DisplayMode.Temperature => "température (bleu : froid, rouge : chaud)",
         DisplayMode.WindSpeed => "vitesse du vent",
         DisplayMode.Pressure => "pression (bleu : dépression, rouge : anticyclone)",
+        DisplayMode.OceanCurrents => "courants océaniques",
         DisplayMode.RecentPrecipitation => "pluie des derniers jours",
         DisplayMode.AnnualPrecipitation => "pluie annuelle",
         DisplayMode.Humidity => "humidité de l'air",
@@ -994,6 +1047,7 @@ public partial class Main : Node3D
         DisplayMode.Temperature => "Température de surface (violet : −50 °C, bleu, blanc : 0 °C, vert, jaune, rouge : +40 °C)",
         DisplayMode.WindSpeed => "Vitesse du vent (bleu sombre : calme, cyan, vert, jaune, rouge : plus de 18 m/s)",
         DisplayMode.Pressure => "Pression au niveau de la mer (bleu : dépressions, blanc : 1013 hPa, rouge : anticyclones)",
+        DisplayMode.OceanCurrents => "Courants de surface (bleu nuit : calme, cyan, vert, jaune, rouge : plus de 0,4 m/s) ; flèches avec V",
         DisplayMode.RecentPrecipitation => "Précipitations des derniers jours, en rythme annuel (beige : sec, vert, bleu, violet : plus de 4 m/an)",
         DisplayMode.AnnualPrecipitation => "Précipitations annuelles (beige : désert, < 250 mm ; vert : 1 m ; bleu : 2 m et plus)",
         DisplayMode.Humidity => "Humidité relative de l'air (brun : sec, blanc : 60 %, bleu : saturé)",
@@ -1224,15 +1278,19 @@ public partial class Main : Node3D
                 CycleDisplayMode(DisplayMode.InstantInsolation, DisplayMode.DailyInsolation);
                 break;
             case Key.Key6 or Key.Kp6: CycleDisplayMode(DisplayMode.Temperature); break;
-            case Key.Key7 or Key.Kp7: CycleDisplayMode(DisplayMode.WindSpeed, DisplayMode.Pressure); break;
+            case Key.Key7 or Key.Kp7: CycleDisplayMode(DisplayMode.WindSpeed, DisplayMode.Pressure, DisplayMode.OceanCurrents); break;
             case Key.Key8 or Key.Kp8:
                 CycleDisplayMode(DisplayMode.RecentPrecipitation, DisplayMode.AnnualPrecipitation, DisplayMode.Humidity);
                 break;
             case Key.Key9 or Key.Kp9: CycleDisplayMode(DisplayMode.Biomes); break;
             case Key.Key0 or Key.Kp0: CycleDisplayMode(DisplayMode.Realistic); break;
             case Key.F: _showRivers = !_showRivers; break;
-            case >= Key.F1 and <= Key.F10:
+            // Pas de F8 : lancé depuis l'éditeur, le jeu s'arrête sur F8 (raccourci « Arrêter » de Godot)
+            case >= Key.F1 and <= Key.F7:
                 GoToPlace((int)(key.Keycode - Key.F1));
+                break;
+            case >= Key.F9 and <= Key.F11:
+                GoToPlace(7 + (int)(key.Keycode - Key.F9));
                 break;
             case Key.C:
                 SetClock(_clock == ClockMode.Geological ? ClockMode.Climate : ClockMode.Geological);
@@ -1261,6 +1319,11 @@ public partial class Main : Node3D
                 break;
             case Key.T:
                 ToggleFastForward();
+                break;
+            case Key.O:
+                _quality = (_quality + 1) % QualityModes.Length;
+                ApplyQuality();
+                ShowNotice($"Qualité d'image : {QualityModes[_quality].label}");
                 break;
             case Key.U:
                 // Eau masquée : on voit les fonds marins et le fond des lacs

@@ -68,9 +68,9 @@ des eaux de surface.*
   - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : zoom ; G : vol / marche ;
   - C : horloge géologique / climatique ; + / − : vitesse ; T : avance rapide jusqu'à 4,5 milliards d'années ;
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
-  - O : qualité d'image (résolution réduite + AMD FSR 1 ou 2) ;
-  - U : masquer l'eau ; F1 à F10 : lieux de test (sommet, fleuve, lac, côte, désert venteux, pluie,
-    neige, nuages, coucher de soleil, Lune).
+  - O : qualité d'image (résolution réduite + AMD FSR 1 ou 2 ; FSR 2 qualité au démarrage) ;
+  - U : masquer l'eau ; F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux,
+    pluie, neige, puis nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur).
 
 ## Licence
 

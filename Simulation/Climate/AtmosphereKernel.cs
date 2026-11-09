@@ -36,6 +36,8 @@ layout(set = 0, binding = 8, std430) restrict writeonly buffer StateOut { vec4 s
 layout(set = 0, binding = 9, std430) restrict buffer Accumulation { vec4 accumulation[]; };
 // Longueur de face / aire de la cellule (1/m), 6 cases par cellule
 layout(set = 0, binding = 10, std430) restrict readonly buffer FaceWeights { float face_weights[]; };
+// xyz : courant océanique de surface (m/s)
+layout(set = 0, binding = 11, std430) restrict readonly buffer Current { vec4 current[]; };
 
 layout(push_constant, std430) uniform Parameters {
     float dt;
@@ -59,6 +61,9 @@ void main() {
     float count = 0.0;
     float advection_t = 0.0;
     float advection_w = 0.0;
+    float ocean_advection_t = 0.0;
+    bool ocean_here = surface[cell].w > 0.5;
+    vec3 current_here = current[cell].xyz;
     for (int k = 0; k < 6; k++) {
         int n = neighbors[cell * 6u + uint(k)];
         if (n < 0) {
@@ -77,6 +82,13 @@ void main() {
             advection_t += -face * (tn - here.x);
         }
         advection_w += face > 0.0 ? -face * here.y : -face * wn;
+        // Courants océaniques : entre cellules de mer, forme advective amont
+        if (ocean_here && surface[n].w > 0.5) {
+            float flow = 0.5 * dot(current_here + current[n].xyz, direction) * face_weights[cell * 6u + uint(k)];
+            if (flow < 0.0) {
+                ocean_advection_t += -flow * (tn - here.x);
+            }
+        }
     }
     float mean_t = sum_t / count;
     float mean_w = sum_w / count;
@@ -100,7 +112,7 @@ void main() {
               - (OLR_A + OLR_B * t)
               + COUPLING * (mean_t - t)
               + ATMOSPHERE_CAPACITY * advection_t;
-    float new_t = t + dt * net / capacity;
+    float new_t = t + dt * net / capacity + (ocean ? dt * OCEAN_TRANSPORT * ocean_advection_t : 0.0);
 
     // Vapeur d'eau (mm/s)
     float saturation = min(MAX_SATURATION, SATURATION_REF * exp(CLAUSIUS_CLAPEYRON * (surface_t - SATURATION_REF_T)));
@@ -157,6 +169,7 @@ void main() {
     private readonly Rid _slope;
     private readonly Rid _positions;
     private readonly Rid _wind;
+    private readonly Rid _oceanCurrent;
     private readonly Rid[] _state = new Rid[2];
     private readonly Rid _accumulation;
     private readonly ComputeKernel _kernel;
@@ -189,6 +202,7 @@ void main() {
         _slope = context.CreateBuffer(vec4Bytes);
         _positions = context.CreateBuffer(vec4Bytes, GpuComputeContext.PackVec4(model.Grid.Positions));
         _wind = context.CreateBuffer(vec4Bytes);
+        _oceanCurrent = context.CreateBuffer(vec4Bytes);
         _state[0] = context.CreateBuffer(vec4Bytes);
         _state[1] = context.CreateBuffer(vec4Bytes);
         _accumulation = context.CreateBuffer(vec4Bytes);
@@ -200,7 +214,7 @@ void main() {
             for (int direction = 0; direction < 2; direction++)
                 _sets[source, direction] = _kernel.CreateUniformSet(
                     _neighbors, _surface, _landCover, _slope, insolation[source], _positions, _wind,
-                    _state[direction], _state[1 - direction], _accumulation, _faceWeights);
+                    _state[direction], _state[1 - direction], _accumulation, _faceWeights, _oceanCurrent);
     }
 
     /// <summary>Envoie surface, couverture du sol et pentes (après changement du relief ou des biomes).</summary>
@@ -213,6 +227,9 @@ void main() {
 
     /// <summary>Envoie le vent (vec4 : vent, convergence).</summary>
     public void UploadWind(float[] windPacked) => _context.WriteBuffer(_wind, windPacked);
+
+    /// <summary>Envoie les courants océaniques (vec4 : courant, 0).</summary>
+    public void UploadCurrent(float[] currentPacked) => _context.WriteBuffer(_oceanCurrent, currentPacked);
 
     /// <summary>Remplace l'état courant et remet les cumuls à zéro.</summary>
     public void UploadState(float[] state)
@@ -252,7 +269,7 @@ void main() {
     public void Dispose()
     {
         _kernel.Dispose();
-        foreach (var rid in new[] { _faceWeights, _accumulation, _state[1], _state[0], _wind, _positions, _slope, _landCover, _surface, _neighbors })
+        foreach (var rid in new[] { _oceanCurrent, _faceWeights, _accumulation, _state[1], _state[0], _wind, _positions, _slope, _landCover, _surface, _neighbors })
             _context.Free(rid);
     }
 }

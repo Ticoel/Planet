@@ -16,7 +16,7 @@ public static class AtmosphereTests
 
     /// <summary>Un sous-pas d'une cellule isolée (voisines identiques, sans vent).</summary>
     private static Vector4 Step(Vector4 state, Vector4 surface, float insolation, out Vector4 accumulation) =>
-        AtmosphereModel.StepCell(state, state.X, state.Y, 0f, 0f, insolation, surface, Soil, Vector3.Zero,
+        AtmosphereModel.StepCell(state, state.X, state.Y, 0f, 0f, 0f, insolation, surface, Soil, Vector3.Zero,
                                  Vector4.Zero, 0f, 0f, Dt, out accumulation);
 
     [Test]
@@ -136,7 +136,7 @@ public static class AtmosphereTests
             var accumulation = new float[state.Length];
             for (int k = 0; k < (int)(86400 / dt); k++)
             {
-                model.StepCpu(state, next, accumulation, insolation, winds.WindPacked, dt);
+                model.StepCpu(state, next, accumulation, insolation, winds.WindPacked, null, dt);
                 (state, next) = (next, state);
             }
             for (int c = 0; c < grid.CellCount; c++)
@@ -158,8 +158,8 @@ public static class AtmosphereTests
         UpdateWinds(winds, state);
         var a = new float[state.Length];
         var b = new float[state.Length];
-        model.StepCpu(state, a, new float[state.Length], insolation, winds.WindPacked, dt);
-        model.StepCpu(state, b, new float[state.Length], insolation, winds.WindPacked, dt);
+        model.StepCpu(state, a, new float[state.Length], insolation, winds.WindPacked, null, dt);
+        model.StepCpu(state, b, new float[state.Length], insolation, winds.WindPacked, null, dt);
         Assert.True(a.SequenceEqual(b), "deux calculs identiques doivent donner le même résultat au bit près");
     }
 
@@ -179,7 +179,7 @@ public static class AtmosphereTests
             UpdateWinds(winds, state);
             for (int k = 0; k < (int)(86400 / dt); k++)
             {
-                model.StepCpu(state, next, accumulation, daily, winds.WindPacked, dt);
+                model.StepCpu(state, next, accumulation, daily, winds.WindPacked, null, dt);
                 (state, next) = (next, state);
             }
         }

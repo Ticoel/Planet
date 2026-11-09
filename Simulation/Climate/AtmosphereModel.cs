@@ -58,6 +58,9 @@ public sealed class AtmosphereModel
     // d'air froid : tropiques à 24 °C et moyennes latitudes à 19 °C (test LatitudeGradient)
     public const float AtmosphereHeatCapacity = 2.5e6f;
     public const float LapseRateKPerKm = 6.5f;
+    // Part de la chaleur des eaux de surface effectivement transportée par les courants (le
+    // modèle n'a qu'une couche : une partie de la chaleur transportée reste en profondeur)
+    public const float OceanTransportEfficiency = 0.5f;
 
     // --- Eau ------------------------------------------------------------------------------------
     // Capacité de l'air (mm d'eau précipitable à saturation) : 25 mm à 15 °C, ×e^(0,065 ΔT)
@@ -128,6 +131,9 @@ public sealed class AtmosphereModel
     /// <summary>Voisines de chaque cellule, 6 cases (−1 pour la 6e d'un pentagone).</summary>
     public int[] NeighborTable { get; }
 
+    /// <summary>Direction tangente de chaque cellule vers chacune de ses voisines (6 cases par cellule).</summary>
+    public Vector3[] NeighborDirections { get; }
+
     /// <summary>Surface (vec4) : capacité thermique, albédo hors glace/neige, altitude (km, ≥ 0), 1 si océan.</summary>
     public float[] Surface { get; }
 
@@ -154,12 +160,19 @@ public sealed class AtmosphereModel
             0.5f * CondensationTimeHours * 3600f);
 
         NeighborTable = new int[grid.CellCount * 6];
+        NeighborDirections = new Vector3[grid.CellCount * 6];
         for (int cell = 0; cell < grid.CellCount; cell++)
         {
             int[] neighbors = grid.Neighbors[cell];
+            Vector3 p = grid.Positions[cell];
             for (int k = 0; k < 6; k++)
             {
                 NeighborTable[cell * 6 + k] = k < neighbors.Length ? neighbors[k] : -1;
+                if (k < neighbors.Length)
+                {
+                    Vector3 d = grid.Positions[neighbors[k]] - p;
+                    NeighborDirections[cell * 6 + k] = (d - p * d.Dot(p)).Normalized();
+                }
                 FaceWeightTable[cell * 6 + k] = k < neighbors.Length ? faceWeights[cell][k] / radiusMeters : 0f;
             }
         }
@@ -256,7 +269,7 @@ public sealed class AtmosphereModel
     /// (AtmosphereKernel), pour que la vérification carte graphique / processeur soit fiable.
     /// </summary>
     public static Vector4 StepCell(
-        Vector4 state, float meanT, float meanW, float advectionT, float advectionW,
+        Vector4 state, float meanT, float meanW, float advectionT, float advectionW, float oceanAdvectionT,
         float insolation, Vector4 surface, Vector4 landCover, Vector3 slope, Vector4 wind,
         float coupling, float moistureCoupling, float dt, out Vector4 accumulation)
     {
@@ -274,7 +287,8 @@ public sealed class AtmosphereModel
                     - (OutgoingA + OutgoingB * t)
                     + coupling * (meanT - t)
                     + AtmosphereHeatCapacity * advectionT;
-        float newT = t + dt * net / capacity;
+        // Courants océaniques : l'eau apporte sa température (K/s), même sous la banquise
+        float newT = t + dt * net / capacity + (ocean ? dt * OceanTransportEfficiency * oceanAdvectionT : 0f);
 
         // Vapeur d'eau (taux en mm/s)
         float saturation = Saturation(surfaceT);
@@ -324,8 +338,9 @@ public sealed class AtmosphereModel
     /// <param name="accumulation">Cumuls (vec4 : précipitations, évaporation, ruissellement,
     /// chute de neige, en mm), incrémentés.</param>
     /// <param name="wind">Vent (vec4 : x, y, z, convergence), ou null sans vent.</param>
+    /// <param name="current">Courant océanique (vec4 : x, y, z, 0), ou null sans courants.</param>
     public void StepCpu(float[] state, float[] next, float[] accumulation, float[] insolation,
-                        float[] wind, float dt)
+                        float[] wind, float[] current, float dt)
     {
         var positions = Grid.Positions;
         Parallel.For(0, Grid.CellCount, cell =>
@@ -336,7 +351,9 @@ public sealed class AtmosphereModel
             Vector3 windVector = new(windHere.X, windHere.Y, windHere.Z);
             Vector3 p = positions[cell];
 
-            float sumT = 0f, sumW = 0f, count = 0f, advectionT = 0f, advectionW = 0f;
+            float sumT = 0f, sumW = 0f, count = 0f, advectionT = 0f, advectionW = 0f, oceanAdvectionT = 0f;
+            bool ocean = Surface[i + 3] > 0.5f;
+            Vector3 currentHere = current == null ? Vector3.Zero : new Vector3(current[i], current[i + 1], current[i + 2]);
             for (int k = 0; k < 6; k++)
             {
                 int n = NeighborTable[cell * 6 + k];
@@ -346,11 +363,10 @@ public sealed class AtmosphereModel
                 sumT += tn;
                 sumW += wn;
                 count += 1f;
+                Vector3 direction = NeighborDirections[cell * 6 + k];
                 if (wind != null)
                 {
                     // Advection amont : seul l'air qui arrive de la voisine compte
-                    Vector3 d = positions[n] - p;
-                    Vector3 direction = (d - p * d.Dot(p)).Normalized();
                     Vector3 windThere = new(wind[n * 4], wind[n * 4 + 1], wind[n * 4 + 2]);
                     float face = 0.5f * (windVector + windThere).Dot(direction) * FaceWeightTable[cell * 6 + k];
                     // Chaleur : forme advective amont (seul l'air entrant compte)
@@ -360,9 +376,17 @@ public sealed class AtmosphereModel
                     // dans sa voisine) ; la vapeur s'accumule là où les vents convergent
                     advectionW += face > 0f ? -face * here.Y : -face * wn;
                 }
+                // Courants : entre cellules de mer, forme advective amont
+                if (current != null && ocean && Surface[n * 4 + 3] > 0.5f)
+                {
+                    Vector3 currentThere = new(current[n * 4], current[n * 4 + 1], current[n * 4 + 2]);
+                    float flow = 0.5f * (currentHere + currentThere).Dot(direction) * FaceWeightTable[cell * 6 + k];
+                    if (flow < 0f)
+                        oceanAdvectionT += -flow * (tn - here.X);
+                }
             }
 
-            Vector4 result = StepCell(here, sumT / count, sumW / count, advectionT, advectionW,
+            Vector4 result = StepCell(here, sumT / count, sumW / count, advectionT, advectionW, oceanAdvectionT,
                 insolation[cell],
                 new Vector4(Surface[i], Surface[i + 1], Surface[i + 2], Surface[i + 3]),
                 new Vector4(LandCover[i], LandCover[i + 1], LandCover[i + 2], LandCover[i + 3]),
@@ -491,6 +515,7 @@ public sealed class AtmosphereModel
         Const("SEA_ICE_CAPACITY", SeaIceHeatCapacity);
         Const("ATMOSPHERE_CAPACITY", AtmosphereHeatCapacity);
         Const("LAPSE_RATE", LapseRateKPerKm);
+        Const("OCEAN_TRANSPORT", OceanTransportEfficiency);
         Const("SATURATION_REF", SaturationReferenceMm);
         Const("SATURATION_REF_T", SaturationReferenceCelsius);
         Const("CLAUSIUS_CLAPEYRON", ClausiusClapeyron);

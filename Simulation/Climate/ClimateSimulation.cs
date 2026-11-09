@@ -37,6 +37,9 @@ public sealed class ClimateSimulation : IDisposable
 
     // Les vents sont recalculés quand au moins ce temps a été simulé (jours)
     private const double WindUpdateIntervalDays = 0.1;
+    // Les courants océaniques changent lentement : recalculés tous les 5 jours simulés
+    private const double OceanUpdateIntervalDays = 5.0;
+    private double _sinceOceanUpdateDays = double.MaxValue;
 
     public PlanetGrid Grid { get; }
     public OrbitalParameters Orbit { get; }
@@ -69,6 +72,8 @@ public sealed class ClimateSimulation : IDisposable
     public int LastSubsteps { get; private set; }
 
     public WindModel Winds { get; }
+    /// <summary>Courants océaniques (étape 11a), recalculés en tâche de fond après chaque mise à jour des vents.</summary>
+    public OceanCurrents Ocean { get; }
     public ClimateStatistics Statistics { get; }
     public AtmosphereModel Model => _model;
 
@@ -95,6 +100,7 @@ public sealed class ClimateSimulation : IDisposable
     private readonly float[] _biomeEvapotranspiration;
     private readonly float[] _biomeSnowAlbedo;
     private Task<HydrologyResult> _hydrologyTask;
+    private Task _oceanTask;
 
     private GpuComputeContext _gpu;
     private InsolationKernel _insolationKernel;
@@ -123,6 +129,7 @@ public sealed class ClimateSimulation : IDisposable
 
         _model = new AtmosphereModel(grid);
         Winds = new WindModel(grid);
+        Ocean = new OceanCurrents(grid);
         Statistics = new ClimateStatistics(count, orbit.YearLengthDays);
 
         if (useGpu)
@@ -167,6 +174,10 @@ public sealed class ClimateSimulation : IDisposable
         var stopwatch = Stopwatch.StartNew();
         _elevation = (float[])elevationKm.Clone();
         _model.SetSurface(_elevation);
+        // Courants : repartent de zéro sur le nouveau relief (calculés en tâche de fond)
+        _oceanTask?.Wait();
+        Ocean.SetSurface(_elevation);
+        _sinceOceanUpdateDays = double.MaxValue;
 
         // Biomes initiaux d'après une estimation rapide du climat moyen
         var estimate = FastClimateEstimator.Estimate(Grid, _elevation, Orbit);
@@ -182,6 +193,7 @@ public sealed class ClimateSimulation : IDisposable
         {
             _atmosphereKernel.UploadSurface();
             _atmosphereKernel.UploadWind(Winds.WindPacked);
+            _atmosphereKernel.UploadCurrent(Ocean.CurrentPacked);
             if (VerifyAtmosphere(out float temperatureError, out float waterError))
             {
                 SimulationLog.Info($"Climate: GPU atmosphere check vs CPU OK (max error {temperatureError:0.00000} K, {waterError:0.00000} mm)");
@@ -207,6 +219,7 @@ public sealed class ClimateSimulation : IDisposable
     public double Step(double dtDays)
     {
         CollectHydrology();
+        CollectOcean();
         if (dtDays <= 0)
             return 0;
 
@@ -251,7 +264,7 @@ public sealed class ClimateSimulation : IDisposable
             float[] insolation = dailyMean ? DailyInsolation : InstantInsolation;
             for (int i = 0; i < substeps; i++)
             {
-                _model.StepCpu(_state, _scratch, _accumulation, insolation, Winds.WindPacked, dtSeconds);
+                _model.StepCpu(_state, _scratch, _accumulation, insolation, Winds.WindPacked, Ocean.CurrentPacked, dtSeconds);
                 (_state, _scratch) = (_scratch, _state);
             }
         }
@@ -290,7 +303,31 @@ public sealed class ClimateSimulation : IDisposable
             temperature[cell] = _state[cell * 4];
         Winds.Update(temperature);
         _atmosphereKernel?.UploadWind(Winds.WindPacked);
+        _sinceOceanUpdateDays += _sinceWindUpdateDays;
         _sinceWindUpdateDays = 0;
+        if (_sinceOceanUpdateDays >= OceanUpdateIntervalDays)
+            StartOcean();
+    }
+
+    /// <summary>Courants recalculés en tâche de fond à partir des nouveaux vents.</summary>
+    private void StartOcean()
+    {
+        if (_oceanTask != null && !_oceanTask.IsCompleted)
+            return;
+        var wind = (Vector3[])Winds.Wind.Clone();
+        _sinceOceanUpdateDays = 0;
+        _oceanTask = Task.Run(() => Ocean.Compute(wind));
+    }
+
+    private void CollectOcean()
+    {
+        if (_oceanTask == null || !_oceanTask.IsCompleted)
+            return;
+        if (_oceanTask.IsFaulted)
+            SimulationLog.Warning($"Ocean currents failed: {_oceanTask.Exception?.GetBaseException().Message}");
+        _oceanTask = null;
+        if (Ocean.Publish())
+            _atmosphereKernel?.UploadCurrent(Ocean.CurrentPacked);
     }
 
     private void UpdateInsolation()
@@ -415,7 +452,7 @@ public sealed class ClimateSimulation : IDisposable
         var accumulation = new float[_state.Length];
         for (int i = 0; i < substeps; i++)
         {
-            _model.StepCpu(cpu, scratch, accumulation, DailyInsolation, Winds.WindPacked, dt);
+            _model.StepCpu(cpu, scratch, accumulation, DailyInsolation, Winds.WindPacked, Ocean.CurrentPacked, dt);
             (cpu, scratch) = (scratch, cpu);
         }
 
@@ -444,6 +481,7 @@ public sealed class ClimateSimulation : IDisposable
     public void Dispose()
     {
         _hydrologyTask?.Wait();
+        _oceanTask?.Wait();
         DisposeGpu();
     }
 }

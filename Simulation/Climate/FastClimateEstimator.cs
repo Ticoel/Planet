@@ -68,7 +68,7 @@ public static class FastClimateEstimator
                 Array.Clear(accumulation);
             for (int k = 0; k < substepsPerDay; k++)
             {
-                model.StepCpu(state, next, accumulation, annual, winds.WindPacked, dt);
+                model.StepCpu(state, next, accumulation, annual, winds.WindPacked, null, dt);
                 (state, next) = (next, state);
             }
         }
