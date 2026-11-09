@@ -94,7 +94,7 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
 - Ouvrir le dossier dans Godot 4.7.2 (.NET), lancer la scène `Main.tscn`.
 - Tests : `dotnet run -c Release --project tests/Planet.Tests`.
 - Touches principales (H affiche l'aide complète dans le jeu) :
-  - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : zoom ; G : vol / marche ;
+  - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : avancer / reculer dans l'axe du regard ; G : vol / marche ;
   - C : horloge géologique / climatique ; + / − : vitesse ; T : avance rapide jusqu'à 4,5 milliards d'années ;
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;

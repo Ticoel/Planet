@@ -223,6 +223,8 @@ public sealed class TerrainHeightField
     // Reliefs ponctuels qui touchent chaque cellule (index des reliefs, null : aucun)
     private Landform[] _landforms = Array.Empty<Landform>();
     private int[][] _cellLandforms;
+    private VolcanoDetail[] _volcanoDetails;
+    private (Double3 x, Double3 y)[] _landformFrames;
 
     /// <summary>Volcans et cratères pris en compte par ce relief.</summary>
     public int LandformCount => _landforms.Length;
@@ -233,6 +235,14 @@ public sealed class TerrainHeightField
     {
         _landforms = landforms ?? Array.Empty<Landform>();
         _cellLandforms = new int[Grid.CellCount][];
+        _volcanoDetails = new VolcanoDetail[_landforms.Length];
+        _landformFrames = new (Double3, Double3)[_landforms.Length];
+        for (int i = 0; i < _landforms.Length; i++)
+        {
+            _landformFrames[i] = LavaFlow.TangentFrame(Double3.From(_landforms[i].Position).Normalized());
+            if (_landforms[i].Kind != LandformKind.ImpactCrater)
+                _volcanoDetails[i] = VolcanoDetail.For(_landforms[i]);
+        }
         if (_landforms.Length == 0)
             return;
         var lists = new System.Collections.Generic.List<int>[Grid.CellCount];
@@ -274,7 +284,7 @@ public sealed class TerrainHeightField
     /// plat et piton central.</item>
     /// </list>
     /// </summary>
-    private double LandformHeight(Double3 direction, int cell)
+    private double LandformHeight(Double3 direction, int cell, double minWavelength)
     {
         int[] list = _cellLandforms?[cell];
         if (list == null)
@@ -296,9 +306,9 @@ public sealed class TerrainHeightField
                 {
                     // Caldeira sommitale : ~5 % du diamètre, profonde de ~4 % de la hauteur
                     // (Mauna Loa : Mokuʻāweoweo, 3 × 5 km, 180 m de profondeur)
+                    // (caldeira, coulées, rifts, cônes : VolcanoDetail)
                     double h = Math.Pow(1 - q * q, 1.5);
-                    double caldera = 1 - SmoothStep(0.03, 0.05, q);
-                    total += scale * landform.PeakHeightM * (h - 0.04 * caldera);
+                    total += scale * landform.PeakHeightM * h + VolcanoDetailAt(i, direction, center, q, minWavelength);
                     break;
                 }
                 case LandformKind.Stratovolcano:
@@ -306,8 +316,7 @@ public sealed class TerrainHeightField
                     // Cratère sommital : quelques centaines de mètres de large, ~150 m de profondeur
                     // (Etna, Fuji : 500 à 800 m de diamètre)
                     double h = Math.Pow(1 - q, 1.6);
-                    double crater = 1 - SmoothStep(0.018, 0.035, q);
-                    total += scale * landform.PeakHeightM * (h - 0.06 * crater);
+                    total += scale * landform.PeakHeightM * h + VolcanoDetailAt(i, direction, center, q, minWavelength);
                     break;
                 }
                 default:
@@ -334,6 +343,15 @@ public sealed class TerrainHeightField
             }
         }
         return total;
+    }
+
+    /// <summary>Détails du volcan i (rifts, cônes, coulées, ravines ; voir <see cref="VolcanoDetail"/>).</summary>
+    private double VolcanoDetailAt(int i, Double3 direction, Double3 center, double q, double minWavelength)
+    {
+        var landform = _landforms[i];
+        var (x, y) = _landformFrames[i];
+        Double3 offset = (direction - center) * RadiusMeters;
+        return _volcanoDetails[i].Height(landform, offset.Dot(x), offset.Dot(y), q, landform.Freshness * landform.Growth, minWavelength);
     }
 
     /// <summary>
@@ -594,7 +612,7 @@ public sealed class TerrainHeightField
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
         height = Math.Max(height - valley.depth, Math.Min(height, 1.0));
         height = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
-        height += LandformHeight(direction, near[0]);
+        height += LandformHeight(direction, near[0], minWavelength);
 
         // Lacs : au cœur de leur zone, l'eau est au niveau du lac ; vers le bord de la zone, ce
         // niveau s'abaisse progressivement jusqu'à passer sous le sol. La rive tombe là où le

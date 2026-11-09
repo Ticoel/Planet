@@ -33,7 +33,7 @@ public sealed class ExplorerCamera
     private const double ClimbSpeedPerMeter = 0.8;  // à la verticale
     private const double MaxAngularSpeed = 0.3;     // rad/s : vu de très haut, on ne fait pas le tour en 2 s
     private const double RunFactor = 3.0;           // touche Maj en vol
-    private const double ZoomStep = 0.85;           // molette : altitude × 0,85 ou ÷ 0,85
+    private const double ZoomFraction = 0.15;       // molette : pas = 15 % de la distance regardée
     private const double PanFactor = 1.4;           // glisser : mètres par pixel = hauteur × facteur / hauteur d'écran
     private const double TurnRate = 1.6;            // rad/s (flèches gauche/droite)
     private const double PitchRate = 1.0;           // rad/s
@@ -153,15 +153,25 @@ public sealed class ExplorerCamera
         return -0.21 + (-1.48 + 0.21) * t;
     }
 
-    /// <summary>Molette : +1 rapproche du sol, −1 éloigne. Le regard suit l'inclinaison conseillée.</summary>
+    /// <summary>
+    /// Molette : +1 avance dans l'axe du regard, −1 recule, sans changer l'orientation. Le pas est
+    /// une fraction de la distance de ce qu'on regarde (le sol devant soi), pour avancer vite de
+    /// loin et finement de près.
+    /// </summary>
     public void Zoom(int direction)
     {
         if (Walking)
             return;
         double height = Math.Max(AltitudeAboveGround, 2.0);
-        double newHeight = Math.Clamp(height * Math.Pow(ZoomStep, direction), 2.0, MaxAltitude);
-        Position = Position.Normalized() * (Position.Length() + newHeight - height);
-        Pitch = AutoPitch(newHeight);
+        // Distance du sol dans l'axe du regard (vers l'horizon : quelques fois l'altitude)
+        double target = Pitch < -0.05 ? height / Math.Sin(-Pitch) : Math.Max(5 * height, 2000);
+        double step = ZoomFraction * Math.Min(target, 4 * height + 2000) * direction;
+        Double3 moved = Position + Forward() * step;
+        // Jamais sous le sol ni trop loin
+        Double3 up = moved.Normalized();
+        double minimum = TerrainHeightField.RadiusMeters + SampleGround(up) + 2.0;
+        Position = up * Math.Clamp(moved.Length(), minimum, TerrainHeightField.RadiusMeters + MaxAltitude);
+        TransportHeading();
         UpdateGround();
     }
 

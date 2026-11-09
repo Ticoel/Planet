@@ -27,7 +27,7 @@ public enum ClockMode
 /// Scène principale : génère la planète, fait tourner l'horloge géologique ou climatique, et
 /// l'affiche dans une vue unique, de l'orbite jusqu'au sol, à l'échelle réelle (le relief est
 /// exagéré automatiquement vu de loin).
-/// Souris : molette = zoom, clic gauche + glisser = déplacer, clic droit + glisser = regarder.
+/// Souris : molette = avancer / reculer dans l'axe du regard, clic gauche + glisser = déplacer, clic droit + glisser = regarder.
 /// Clavier : flèches = avancer / tourner, Page préc. / suiv. = monter / descendre,
 /// C = horloge géologique / climatique, 1 à 0 = couches, E = exagération du relief,
 /// V = flèches (plaques ou vents), F = fleuves, G = vol / marche, X = retour en orbite,
@@ -1354,7 +1354,7 @@ public partial class Main : Node3D
         if (_showHelp)
         {
             lines.Add("");
-            lines.Add("Molette : zoom   Clic gauche + glisser : déplacer   Clic droit + glisser : regarder");
+            lines.Add("Molette : avancer / reculer dans l'axe du regard   Clic gauche + glisser : déplacer   Clic droit + glisser : regarder");
             lines.Add("[↑ ↓] Avancer / reculer   [← →] Tourner   [Page préc. / suiv.] Monter / descendre   [Origine / Fin] Regard haut / bas");
             lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
             lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
@@ -1792,8 +1792,11 @@ public partial class Main : Node3D
                 return;
         }
 
-        // Le reste : touche physique, pour que la rangée des chiffres marche en AZERTY sans Maj
-        switch (key.PhysicalKeycode)
+        // Le reste : touche physique pour les chiffres et les touches de fonction (la rangée des
+        // chiffres marche ainsi en AZERTY sans Maj) ; mais la lettre tapée pour les lettres : en
+        // AZERTY, la touche M est à la place du « ; » d'un clavier QWERTY
+        Key code = key.Keycode is >= Key.A and <= Key.Z ? key.Keycode : key.PhysicalKeycode;
+        switch (code)
         {
             case Key.Key1 or Key.Kp1: CycleDisplayMode(DisplayMode.Geology, DisplayMode.Elevation); break;
             case Key.Key2 or Key.Kp2: SetDisplayMode(DisplayMode.Plates); break;

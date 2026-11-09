@@ -161,29 +161,39 @@ public sealed partial class CaptureManager : Node
         const int width = 2048, height = 1024;
         string path = Path.Combine(CaptureDirectory(), $"carte_{label}_{Stamp()}.png");
         var colorsCopy = (Color[])colors.Clone();
+        Notify?.Invoke("Carte en cours de calcul…");
         Task.Run(() =>
         {
-            var pixels = new byte[width * height * 3];
-            System.Threading.Tasks.Parallel.For(0, height, j =>
+            try
             {
-                double latitude = Math.PI / 2 - (j + 0.5) / height * Math.PI;
-                int hint = 0;
-                for (int i = 0; i < width; i++)
+                var pixels = new byte[width * height * 3];
+                System.Threading.Tasks.Parallel.For(0, height, j =>
                 {
-                    // Longitude 0 au centre, l'est à droite (repère de la planète : l'est vers −Z)
-                    double longitude = (i + 0.5) / width * 2 * Math.PI - Math.PI;
-                    var direction = new Vector3((float)(Math.Cos(latitude) * Math.Cos(longitude)), (float)Math.Sin(latitude),
-                                                (float)(-Math.Cos(latitude) * Math.Sin(longitude)));
-                    hint = grid.NearestCell(direction, hint);
-                    Color c = colorsCopy[hint];
-                    int o = (j * width + i) * 3;
-                    pixels[o] = (byte)c.R8;
-                    pixels[o + 1] = (byte)c.G8;
-                    pixels[o + 2] = (byte)c.B8;
-                }
-            });
-            Image.CreateFromData(width, height, false, Image.Format.Rgb8, pixels).SavePng(path);
+                    double latitude = Math.PI / 2 - (j + 0.5) / height * Math.PI;
+                    int hint = 0;
+                    for (int i = 0; i < width; i++)
+                    {
+                        // Longitude 0 au centre, l'est à droite (repère de la planète : l'est vers −Z)
+                        double longitude = (i + 0.5) / width * 2 * Math.PI - Math.PI;
+                        var direction = new Vector3((float)(Math.Cos(latitude) * Math.Cos(longitude)), (float)Math.Sin(latitude),
+                                                    (float)(-Math.Cos(latitude) * Math.Sin(longitude)));
+                        hint = grid.NearestCell(direction, hint);
+                        Color c = colorsCopy[hint];
+                        int o = (j * width + i) * 3;
+                        pixels[o] = (byte)c.R8;
+                        pixels[o + 1] = (byte)c.G8;
+                        pixels[o + 2] = (byte)c.B8;
+                    }
+                });
+                Error error = Image.CreateFromData(width, height, false, Image.Format.Rgb8, pixels).SavePng(path);
+                string message = error == Error.Ok ? $"Carte enregistrée : {path}" : $"Carte non enregistrée ({error}) : {path}";
+                Callable.From(() => Notify?.Invoke(message)).CallDeferred();
+            }
+            catch (Exception exception)
+            {
+                // (message sur le fil principal : l'interface ne se touche pas depuis une tâche de fond)
+                Callable.From(() => Notify?.Invoke($"Carte non enregistrée : {exception.Message}")).CallDeferred();
+            }
         });
-        Notify?.Invoke($"Carte enregistrée : {path}");
     }
 }

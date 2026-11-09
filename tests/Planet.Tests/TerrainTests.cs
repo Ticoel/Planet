@@ -530,19 +530,32 @@ public static class TerrainTests
     }
 
     [Test]
-    public static void WheelZoomsAndTiltsTowardHorizon()
+    public static void WheelMovesAlongTheViewAxis()
     {
         var camera = new ExplorerCamera();
         camera.SetField(Field.Value);
+        // Depuis l'espace, regard vers le bas : la molette rapproche du sol sans changer le regard
         camera.PlaceAbove(At(-30, -100), 1.3e7);
-        Assert.True(camera.Pitch < -1.3, "vu de l'espace, on regarde vers le bas");
+        double pitch = camera.Pitch;
         for (int i = 0; i < 60; i++)
             camera.Zoom(+1);
         Assert.True(camera.AltitudeAboveGround < 2.0e4, $"60 crans de molette : {camera.AltitudeAboveGround:0} m");
-        Assert.True(camera.Pitch > -0.5, "près du sol, le regard se relève vers l'horizon");
-        for (int i = 0; i < 60; i++)
-            camera.Zoom(-1);
-        Assert.Near(camera.AltitudeAboveGround, 1.3e7, 1.3e7 * 0.01, "retour à l'altitude de départ");
+        Assert.Near(camera.Pitch, pitch, 1e-9, "l'inclinaison du regard ne change pas");
+
+        // Près du sol, regard un peu plongeant : on avance dans l'axe du regard
+        camera.PlaceAbove(At(-30, -100), 3000);
+        camera.Face(Double3.UnitY, -0.3);
+        double yaw = camera.Yaw;
+        Double3 forward = camera.Forward();
+        Double3 start = camera.Position;
+        camera.Zoom(+1);
+        Double3 move = camera.Position - start;
+        Assert.True(move.Length() > 100, $"un cran doit avancer nettement : {move.Length():0} m");
+        Assert.True(move.Normalized().Dot(forward) > 0.999, "le déplacement suit l'axe du regard");
+        Assert.Near(camera.Yaw, yaw, 1e-4, "le cap ne change pas");
+        Assert.Near(camera.Pitch, -0.3, 1e-9, "l'inclinaison ne change pas");
+        camera.Zoom(-1);
+        Assert.True((camera.Position - start).Dot(forward) < move.Dot(forward) * 0.5, "un cran en arrière recule dans l'axe");
     }
 
     [Test]
