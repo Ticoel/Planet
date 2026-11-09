@@ -16,7 +16,7 @@ public static class AtmosphereTests
 
     /// <summary>Un sous-pas d'une cellule isolée (voisines identiques, sans vent).</summary>
     private static Vector4 Step(Vector4 state, Vector4 surface, float insolation, out Vector4 accumulation) =>
-        AtmosphereModel.StepCell(state, state.X, state.Y, 0f, 0f, 0f, insolation, surface, Soil, Vector3.Zero,
+        AtmosphereModel.StepCell(state, state.X, state.Y, 0f, 0f, 0f, 0f, insolation, surface, Soil, Vector3.Zero,
                                  Vector4.Zero, 0f, 0f, Dt, out accumulation);
 
     [Test]

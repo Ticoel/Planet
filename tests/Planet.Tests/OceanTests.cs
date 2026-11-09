@@ -87,6 +87,57 @@ public static class OceanTests
         }
     }
 
+    /// <summary>Même océan, vent uniforme (m/s) donné par une fonction du point.</summary>
+    private static OceanCurrents BasinWithWind(Func<Vector3, Vector3> windAt)
+    {
+        var grid = Fixtures.Grid(5);
+        var elevation = new float[grid.CellCount];
+        var wind = new Vector3[grid.CellCount];
+        for (int c = 0; c < grid.CellCount; c++)
+        {
+            Vector3 p = grid.Positions[c];
+            double lat = Fixtures.LatitudeDeg(p), lon = Longitude(p);
+            elevation[c] = Math.Abs(lon) < 60 && Math.Abs(lat) < 65 ? -4f : 0.5f;
+            wind[c] = windAt(p);
+        }
+        var currents = new OceanCurrents(grid);
+        currents.SetSurface(elevation);
+        currents.Compute(wind);
+        currents.Publish();
+        return currents;
+    }
+
+    private static float UpwellingAt(OceanCurrents currents, double latDeg, double lonDeg) =>
+        currents.Upwelling[currents.FineGrid.NearestCell(Pos(latDeg, lonDeg), 0)];
+
+    [Test]
+    public static void EquatorwardWindRaisesColdWaterOnEasternShores()
+    {
+        // Vent du nord le long de la côte est de l'océan (côte ouest du continent voisin) :
+        // l'eau part vers le large (à droite du vent) et de l'eau profonde remonte ; contre la
+        // côte d'en face, l'eau s'accumule et plonge
+        var currents = BasinWithWind(p => -Fixtures.North(p) * 7f * (p.Y > 0 ? 1f : 0f));
+        // (cellule la plus côtière : la plus forte remontée, ou plongée, entre 54° et 60°)
+        float east = Enumerable.Range(0, 13).Max(k => UpwellingAt(currents, 30, 54 + k * 0.5));
+        float west = Enumerable.Range(0, 13).Min(k => UpwellingAt(currents, 30, -54 - k * 0.5));
+        float middle = UpwellingAt(currents, 30, 0);
+        Console.WriteLine($"     remontée à 30° N : côte est {east * 86400:0.00} m/jour, milieu {middle * 86400:0.00}, côte ouest {west * 86400:0.00}");
+        Assert.True(east * 86400 > 0.2f, "remontée d'eau froide le long de la côte est de l'océan");
+        Assert.True(west < 0f, "plongée le long de la côte ouest");
+        Assert.True(MathF.Abs(middle) < 0.2f * east, "rien au large");
+    }
+
+    [Test]
+    public static void TradeWindsRaiseColdWaterAtTheEquator()
+    {
+        // Alizés d'est : l'eau part vers le nord au nord de l'équateur, vers le sud au sud
+        var currents = BasinWithWind(p => -Fixtures.East(p) * 7f);
+        float equator = UpwellingAt(currents, 0, 0), off = UpwellingAt(currents, 20, 0);
+        Console.WriteLine($"     remontée : équateur {equator * 86400:0.00} m/jour, 20° N {off * 86400:0.00} m/jour");
+        Assert.True(equator * 86400 > 0.3f, "remontée équatoriale");
+        Assert.True(equator > 5f * MathF.Abs(off), "concentrée à l'équateur");
+    }
+
     private static Vector3 Pos(double latDeg, double lonDeg)
     {
         double la = latDeg * Math.PI / 180, lo = lonDeg * Math.PI / 180;

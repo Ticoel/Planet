@@ -58,6 +58,11 @@ public sealed partial class SkyRenderer : Node3D
 {
     // Résolution des textures de couverture nuageuse (pixels par côté de face du cube)
     private const int CloudResolution = 256;
+    /// <summary>
+    /// Le temps des nuages (s) revient à zéro tous les 16 motifs météo de 100 000 s (shader :
+    /// WEATHER_PERIOD × WEATHER_CYCLES) : en float, de plus grands nombres perdraient en précision.
+    /// </summary>
+    public const double CloudTimeWrapSeconds = 1.6e6;
     private const float MoonVisibilityBoost = 2.5f;   // l'œil s'habitue à la nuit
     // Intensité du Soleil pour la perspective atmosphérique (voir ShaderLibrary.Atmosphere)
     private const float AerialPerspectiveIntensity = 10f;
@@ -167,10 +172,13 @@ public sealed partial class SkyRenderer : Node3D
         var showers = new float[count];
         for (int c = 0; c < count; c++)
         {
-            float humidity = SmoothStep(0.55f, 0.95f, relativeHumidity[c]);
+            // (moins couvrant qu'avant : le shader y ajoute le « temps qu'il fait », qui découpe
+            // la couche en systèmes nuageux et en éclaircies ; avec une couverture proche de 1,
+            // il n'y avait plus que des anneaux continus)
+            float humidity = SmoothStep(0.6f, 0.97f, relativeHumidity[c]);
             float wet = SmoothStep(0.3f, 6f, rain[c]);
             float rising = SmoothStep(0f, 6e-6f, convergence[c]);
-            cover[c] = Math.Clamp(0.75f * humidity + 0.55f * wet + 0.2f * rising, 0f, 1f);
+            cover[c] = Math.Clamp(0.6f * humidity + 0.45f * wet + 0.2f * rising, 0f, 1f);
             showers[c] = SmoothStep(3f, 25f, rain[c]);
         }
         // Lissage entre cellules voisines (deux passes) : contours moins anguleux
@@ -307,7 +315,7 @@ public sealed partial class SkyRenderer : Node3D
         float viewportHeight = Math.Max(GetViewport().GetVisibleRect().Size.Y, 1f);
         _postMaterial.SetShaderParameter("pixel_angle", 2f * Mathf.Tan(Mathf.DegToRad(_camera.Fov) / 2f) / viewportHeight);
         _postMaterial.SetShaderParameter("clouds_enabled", HasClouds);
-        _postMaterial.SetShaderParameter("cloud_time", (float)(frame.CloudTime % 200000.0));
+        _postMaterial.SetShaderParameter("cloud_time", (float)(frame.CloudTime % CloudTimeWrapSeconds));
 
         // Lumière ambiante : ciel le jour (bleutée, plus faible en altitude et dans l'espace),
         // clair de lune la nuit
@@ -659,8 +667,10 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
             float beer = exp(-CLOUD_EXTINCTION * light_depth);
             float powder = 1.0 - exp(-CLOUD_EXTINCTION * light_depth * 2.0);
             float day = smoothstep(-0.1, 0.15, mus);
-            // Nuages d'orage plus sombres
-            float storm = mix(1.0, 0.45, cover.g);
+            // Nuages d'orage sombres vus d'en dessous (leur épaisseur arrête la lumière) ; vus
+            // d'au-dessus, leur sommet éclairé par le Soleil reste blanc
+            float below = 1.0 - smoothstep(CLOUD_BASE, CLOUD_TOP_MAX, a);
+            float storm = mix(1.0, 0.45, cover.g * below);
             vec3 light = (sunlight * beer * mix(1.0, powder, 0.5) * phase * 1.2 + sky_light * day * 0.5 + vec3(0.01)) * storm;
             float extinction = CLOUD_EXTINCTION * density;
             float step_t = exp(-extinction * dt);

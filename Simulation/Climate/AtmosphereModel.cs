@@ -61,6 +61,14 @@ public sealed class AtmosphereModel
     // Part de la chaleur des eaux de surface effectivement transportée par les courants (le
     // modèle n'a qu'une couche : une partie de la chaleur transportée reste en profondeur)
     public const float OceanTransportEfficiency = 0.5f;
+    // Remontées d'eau froide (étape 11c) : l'eau qui remonte vient de sous la couche de surface
+    // (~50 m, celle de la capacité calorifique de l'océan), de la thermocline : au plus ~6 °C
+    // plus froide que la surface, jamais sous ~8 °C ; efficacité du mélange 30 %. (Avec une eau
+    // profonde à 8 °C partout et 50 %, la planète perdait 3 °C de moyenne : trop.)
+    public const float UpwellingEfficiency = 0.3f;
+    public const float MixedLayerDepthMeters = OceanHeatCapacity / 4.1e6f;
+    public const float DeepWaterCelsius = 8f;
+    public const float MaxUpwellingContrast = 6f;
 
     // --- Eau ------------------------------------------------------------------------------------
     // Capacité de l'air (mm d'eau précipitable à saturation) : 25 mm à 15 °C, ×e^(0,065 ΔT)
@@ -269,7 +277,7 @@ public sealed class AtmosphereModel
     /// (AtmosphereKernel), pour que la vérification carte graphique / processeur soit fiable.
     /// </summary>
     public static Vector4 StepCell(
-        Vector4 state, float meanT, float meanW, float advectionT, float advectionW, float oceanAdvectionT,
+        Vector4 state, float meanT, float meanW, float advectionT, float advectionW, float oceanAdvectionT, float upwelling,
         float insolation, Vector4 surface, Vector4 landCover, Vector3 slope, Vector4 wind,
         float coupling, float moistureCoupling, float dt, out Vector4 accumulation)
     {
@@ -289,6 +297,9 @@ public sealed class AtmosphereModel
                     + AtmosphereHeatCapacity * advectionT;
         // Courants océaniques : l'eau apporte sa température (K/s), même sous la banquise
         float newT = t + dt * net / capacity + (ocean ? dt * OceanTransportEfficiency * oceanAdvectionT : 0f);
+        // Remontées d'eau froide (m/s) : l'eau profonde, plus froide, se mélange à la surface
+        if (ocean && upwelling > 0f)
+            newT -= dt * UpwellingEfficiency * upwelling / MixedLayerDepthMeters * Math.Clamp(surfaceT - DeepWaterCelsius, 0f, MaxUpwellingContrast);
 
         // Vapeur d'eau (taux en mm/s)
         float saturation = Saturation(surfaceT);
@@ -338,7 +349,7 @@ public sealed class AtmosphereModel
     /// <param name="accumulation">Cumuls (vec4 : précipitations, évaporation, ruissellement,
     /// chute de neige, en mm), incrémentés.</param>
     /// <param name="wind">Vent (vec4 : x, y, z, convergence), ou null sans vent.</param>
-    /// <param name="current">Courant océanique (vec4 : x, y, z, 0), ou null sans courants.</param>
+    /// <param name="current">Courant océanique (vec4 : x, y, z, remontée d'eau en m/s), ou null sans courants.</param>
     public void StepCpu(float[] state, float[] next, float[] accumulation, float[] insolation,
                         float[] wind, float[] current, float dt)
     {
@@ -386,7 +397,8 @@ public sealed class AtmosphereModel
                 }
             }
 
-            Vector4 result = StepCell(here, sumT / count, sumW / count, advectionT, advectionW, oceanAdvectionT,
+            float upwelling = current == null || !ocean ? 0f : current[i + 3];
+            Vector4 result = StepCell(here, sumT / count, sumW / count, advectionT, advectionW, oceanAdvectionT, upwelling,
                 insolation[cell],
                 new Vector4(Surface[i], Surface[i + 1], Surface[i + 2], Surface[i + 3]),
                 new Vector4(LandCover[i], LandCover[i + 1], LandCover[i + 2], LandCover[i + 3]),
@@ -516,6 +528,10 @@ public sealed class AtmosphereModel
         Const("ATMOSPHERE_CAPACITY", AtmosphereHeatCapacity);
         Const("LAPSE_RATE", LapseRateKPerKm);
         Const("OCEAN_TRANSPORT", OceanTransportEfficiency);
+        Const("UPWELLING_EFFICIENCY", UpwellingEfficiency);
+        Const("MIXED_LAYER_DEPTH", MixedLayerDepthMeters);
+        Const("DEEP_WATER_T", DeepWaterCelsius);
+        Const("UPWELLING_CONTRAST", MaxUpwellingContrast);
         Const("SATURATION_REF", SaturationReferenceMm);
         Const("SATURATION_REF_T", SaturationReferenceCelsius);
         Const("CLAUSIUS_CLAPEYRON", ClausiusClapeyron);

@@ -62,6 +62,12 @@ public sealed class ClimateSimulation : IDisposable
 
     public bool HasTemperature { get; private set; }
     public float GlobalMeanTemperature { get; private set; }
+    /// <summary>Banquise qui dérive avec les courants et le vent (étape 11e).</summary>
+    public SeaIce SeaIce { get; }
+    /// <summary>Saisons de la végétation : feuillus, herbes (étape 12b).</summary>
+    public VegetationSeasons Seasons { get; private set; }
+    /// <summary>Niveau moyen de la mer (m) selon la glace des terres (étape 11d).</summary>
+    public float SeaLevelMeters { get; private set; }
     /// <summary>Précipitations moyennes mondiales sur le dernier intervalle (mm/jour).</summary>
     public float GlobalPrecipitation { get; private set; }
     /// <summary>Part des terres enneigées (plus de 1 cm d'équivalent eau).</summary>
@@ -92,6 +98,8 @@ public sealed class ClimateSimulation : IDisposable
     private float[] _scratch;
     private readonly float[] _accumulation;
     private float[] _elevation;
+    private readonly float[] _cellAreas;
+    private readonly float[] _soilFraction;
     private int _substepCap = 400;
     private double _sinceWindUpdateDays;
 
@@ -130,6 +138,10 @@ public sealed class ClimateSimulation : IDisposable
         _model = new AtmosphereModel(grid);
         Winds = new WindModel(grid);
         Ocean = new OceanCurrents(grid);
+        SeaIce = new SeaIce(grid);
+        Seasons = new VegetationSeasons(count);
+        _cellAreas = grid.ComputeCellAreas();
+        _soilFraction = new float[count];
         Statistics = new ClimateStatistics(count, orbit.YearLengthDays);
 
         if (useGpu)
@@ -209,6 +221,9 @@ public sealed class ClimateSimulation : IDisposable
         HasTemperature = true;
         StartHydrology();
         UpdateDerivedFields(null, 0);
+        SeaIce.Reset(_elevation, SurfaceTemperature);
+        Seasons = new VegetationSeasons(Grid.CellCount);
+        UpdateSurfaceStates(0);
         SimulationLog.Info($"Climate: initialised in {stopwatch.ElapsedMilliseconds} ms (substep {_model.MaxSubstepSeconds:0} s, " +
                            $"global mean {GlobalMeanTemperature:0.0} C)");
     }
@@ -272,6 +287,7 @@ public sealed class ClimateSimulation : IDisposable
         LastSubsteps = substeps;
 
         UpdateDerivedFields(_accumulation, simulatedDays);
+        UpdateSurfaceStates(simulatedDays);
         Statistics.Add(SurfaceTemperature, _state, _accumulation, simulatedDays, midTime);
         if (Statistics.YearJustCompleted)
         {
@@ -366,6 +382,17 @@ public sealed class ClimateSimulation : IDisposable
         if (accumulation != null && simulatedDays > 0)
             GlobalPrecipitation = (float)(precipitationSum / Grid.CellCount / simulatedDays);
         SnowCoveredLandFraction = land > 0 ? (float)snowyLand / land : 0f;
+    }
+
+    /// <summary>Banquise, saisons de la végétation, niveau de la mer.</summary>
+    private void UpdateSurfaceStates(double simulatedDays)
+    {
+        if (simulatedDays > 0)
+            SeaIce.Step(simulatedDays, SurfaceTemperature, Ocean.Current, Winds.Wind);
+        for (int cell = 0; cell < Grid.CellCount; cell++)
+            _soilFraction[cell] = _biomeSoil[cell] > 0f ? SoilWater[cell] / _biomeSoil[cell] : 0f;
+        Seasons.Step(simulatedDays, SurfaceTemperature, _soilFraction);
+        SeaLevelMeters = SeaLevel.FromLandIce(Snow, _elevation, _cellAreas);
     }
 
     // --- Biomes et rivières ----------------------------------------------------------------------

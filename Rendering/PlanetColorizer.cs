@@ -26,6 +26,8 @@ public enum DisplayMode
     Realistic,
     /// <summary>Courants océaniques de surface (étape 11a).</summary>
     OceanCurrents,
+    /// <summary>Remontées d'eau froide (étape 11c).</summary>
+    Upwelling,
 }
 
 /// <summary>Calcule la couleur de chaque cellule selon le mode d'affichage.</summary>
@@ -100,6 +102,15 @@ public static class PlanetColorizer
 
     // Vitesse du vent (m/s) : calme bleu sombre, puis cyan, vert, jaune, rouge pour la tempête
     // Courants (m/s) : eaux calmes bleu nuit, courants forts jaunes puis rouges
+    // Remontées (m/jour) : plongée en rouge, remontée d'eau froide en bleu puis cyan
+    private static readonly (float value, Color color)[] UpwellingGradient =
+    {
+        (-1f, new Color(0.65f, 0.12f, 0.1f)),
+        (-0.2f, new Color(0.45f, 0.25f, 0.3f)),
+        (0f, new Color(0.18f, 0.2f, 0.3f)),
+        (0.2f, new Color(0.15f, 0.45f, 0.75f)),
+        (1f, new Color(0.4f, 0.9f, 1f)),
+    };
     private static readonly (float value, Color color)[] CurrentGradient =
     {
         (0f, new Color(0.03f, 0.06f, 0.2f)),
@@ -199,6 +210,9 @@ public static class PlanetColorizer
                     ? Sample(WindGradient, climate.Winds.Wind[cell].Length())
                         .Lerp(Sample(ElevationGradient, tectonics.CellElevation[cell]), ReliefBlend)
                     : Sample(ElevationGradient, tectonics.CellElevation[cell]),
+                DisplayMode.Upwelling => climate.HasTemperature && tectonics.CellElevation[cell] < 0f
+                    ? Sample(UpwellingGradient, climate.Ocean.Upwelling[cell] * 86400f)
+                    : Sample(ElevationGradient, tectonics.CellElevation[cell]).Lerp(new Color(0.5f, 0.5f, 0.5f), 0.6f),
                 DisplayMode.OceanCurrents => climate.HasTemperature && tectonics.CellElevation[cell] < 0f
                     ? Sample(CurrentGradient, climate.Ocean.Current[cell].Length())
                     : Sample(ElevationGradient, tectonics.CellElevation[cell]).Lerp(new Color(0.5f, 0.5f, 0.5f), 0.6f),
@@ -245,10 +259,8 @@ public static class PlanetColorizer
         if (elevation <= 0f)
         {
             Color water = Sample(OceanDepthGradient, elevation);
-            // Banquise : comme dans le modèle, elle apparaît entre −5 et −15 °C
-            float ice = Mathf.Clamp((AtmosphereModel.IceStartCelsius - climate.SurfaceTemperature[cell])
-                                    / (AtmosphereModel.IceStartCelsius - AtmosphereModel.IceFullCelsius), 0f, 1f);
-            return water.Lerp(SeaIceColor, ice);
+            // Banquise qui dérive avec les courants et le vent (étape 11e)
+            return water.Lerp(SeaIceColor, climate.SeaIce.Concentration[cell]);
         }
 
         var hydrology = climate.Hydrology;
@@ -260,9 +272,28 @@ public static class PlanetColorizer
         if (biome == Biome.IceSheet || (hydrology != null && hydrology.Glacier[cell]))
             return SnowColor;
         ground = ground.Darkened(0.15f);
+        ground = SeasonalTint(ground, biome, climate.Seasons, cell);
         // Roche nue en haute montagne
         ground = ground.Lerp(RockColor, Mathf.Clamp((elevation - 2.5f) / 2f, 0f, 0.8f));
         // La neige au sol est dessinée par le shader du terrain, point par point selon l'altitude
+        return ground;
+    }
+
+    private static readonly Color AutumnColor = new(0.72f, 0.42f, 0.13f);
+    private static readonly Color BareTreesColor = new(0.40f, 0.35f, 0.29f);
+    private static readonly Color StrawColor = new(0.72f, 0.64f, 0.40f);
+
+    /// <summary>
+    /// Saisons (étape 12b) : feuillus colorés à l'automne puis nus, herbes qui jaunissent en
+    /// saison sèche ou en hiver, selon la part de forêt, de feuillus et d'herbe du biome.
+    /// </summary>
+    public static Color SeasonalTint(Color ground, Biome biome, VegetationSeasons seasons, int cell)
+    {
+        float forest = VegetationSeasons.ForestShare(biome) * VegetationSeasons.DeciduousShare(biome);
+        float leaves = seasons.Leaves[cell], autumn = seasons.Autumn[cell];
+        ground = ground.Lerp(AutumnColor, forest * leaves * autumn * 0.85f);
+        ground = ground.Lerp(BareTreesColor, forest * (1f - leaves) * 0.8f);
+        ground = ground.Lerp(StrawColor, VegetationSeasons.GrassShare(biome) * (1f - seasons.Grass[cell]) * 0.8f);
         return ground;
     }
 

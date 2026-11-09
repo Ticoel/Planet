@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Threading;
 using Godot;
 using Planet.Simulation;
+using Planet.Simulation.Climate;
 using Planet.Simulation.Terrain;
 
 namespace Planet.Rendering;
@@ -49,7 +50,13 @@ public enum TerrainColoring
 /// </summary>
 public partial class TerrainRenderer : Node3D
 {
-    // Temps de création de maillages par image (ms) et taille du cache (morceaux)
+    // Temps de création de maillages par image (ms) et taille du cache (morceaux).
+    // Chaque morceau a deux instances (relief + eau) avec un « instance uniform » (morph_range) :
+    // Godot leur réserve 16 cases dans un tampon global dont la taille par défaut (65 536) ne
+    // suffit que pour 4 096 instances. Après un saut de caméra, le cache, les morceaux de la
+    // nouvelle vue et ceux en attente de libération dépassaient cette limite et faisaient
+    // planter le jeu : le tampon est agrandi à 524 288 cases (32 768 instances) dans project.godot
+    // (rendering/limits/global_shader_variables/buffer_size).
     private const double UploadBudgetMs = 3.0;
     private const int MaxCachedChunks = 3000;
     // Plus haut sommet possible à l'échelle réelle (m)
@@ -248,7 +255,8 @@ public partial class TerrainRenderer : Node3D
     /// en déduit la limite de la neige point par point (−6,5 °C par km). null : pas de climat
     /// simulé (horloge géologique), limite de la neige selon la latitude.
     /// </summary>
-    public void UpdateCellClimate(float[] temperature, float[] snowMm, float[] elevationKm)
+    /// <param name="canopy">Densité de la canopée des forêts (0 à 1) ou, en négatif, part de sable des déserts ; ou null.</param>
+    public void UpdateCellClimate(float[] temperature, float[] snowMm, float[] elevationKm, float[] canopy = null)
     {
         if (_cellDataImage == null)
             return;
@@ -262,6 +270,7 @@ public partial class TerrainRenderer : Node3D
             _cellData[cell * 4] = temperature[cell];
             _cellData[cell * 4 + 1] = snowMm[cell];
             _cellData[cell * 4 + 2] = elevationKm[cell] * 1000f;
+            _cellData[cell * 4 + 3] = canopy?[cell] ?? 0f;
         }
         var bytes = new byte[_cellData.Length * sizeof(float)];
         Buffer.BlockCopy(_cellData, 0, bytes, 0, bytes.Length);
@@ -577,7 +586,8 @@ public partial class TerrainRenderer : Node3D
                 bounds = bounds.Expand(p + up * rise);
             }
         }
-        bounds = bounds.Grow(1f);
+        // (plus la marée et les variations du niveau de la mer, qui soulèvent la surface de la mer)
+        bounds = bounds.Grow(1f + Tides.MaxHeightMeters + SeaLevel.MaxRiseMeters);
 
         Rid instance = RenderingServer.InstanceCreate2(mesh, GetWorld3D().Scenario);
         RenderingServer.InstanceSetCustomAabb(instance, bounds);
@@ -697,7 +707,8 @@ uniform float planet_radius;
 // 0 : géologie ; 1 : couche de données ; 2 : vue réaliste ; 3 : carte d'altitude
 uniform int coloring = 0;
 // Numéro de la cellule la plus proche (une texture par face du cube), couleur des cellules,
-// et climat des cellules (x : température °C, y : neige mm, z : altitude de la cellule m)
+// et climat des cellules (x : température °C, y : neige mm, z : altitude de la cellule m,
+// w : densité de la canopée des forêts, 0 à 1, ou part de sable des déserts en négatif)
 uniform sampler2DArray cell_index : filter_nearest, repeat_disable;
 uniform sampler2D cell_colors : source_color, filter_nearest;
 uniform sampler2D cell_data : filter_nearest;
@@ -713,6 +724,23 @@ const int NOISE_PERIOD = 8192;
 " + ShaderLibrary.CubeFace + ShaderLibrary.Atmosphere + ShaderLibrary.Clouds + @"
 // Direction du Soleil (repère de la planète)
 uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
+// Marée (étape 11b) : direction de chaque astre (xyz) et amplitude K en m (w) ; la mer monte
+// de K·(cos²θ − 1/3). Niveau moyen de la mer (m), qui suit le volume des glaces (étape 11d)
+uniform vec4 tide_moon = vec4(0.0, 1.0, 0.0, 0.0);
+uniform vec4 tide_sun = vec4(0.0, 1.0, 0.0, 0.0);
+uniform float sea_level = 0.0;
+// Plus haute mer possible au point le plus favorable (m) : limite haute de l'estran
+uniform float tide_high = 0.0;
+
+float sea_surface(vec3 up) {
+    float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
+    return sea_level + tide_moon.w * (m * m - 1.0 / 3.0) + tide_sun.w * (s * s - 1.0 / 3.0);
+}
+
+// Niveau de l'eau : celui du lac s'il y en a un (stocké dans le maillage, > 0), sinon la mer
+float water_surface(vec3 up, float stored) {
+    return stored > 0.01 ? stored : sea_surface(up);
+}
 // Lumière du Soleil arrivée jusqu'au point (atmosphère traversée), ombre des nuages
 varying vec3 v_sun;
 varying float v_shade;
@@ -868,20 +896,26 @@ vec3 layer_color_smooth(vec3 d, bool land) {
 }
 
 
+// Climat des cellules voisines, mélangé (lu cellule par cellule, la limite de la neige
+// dessinait des marches d'escalier)
+vec4 climate_data(vec3 up) {
+    if (!has_climate)
+        return vec4(0.0);
+    ivec4 cells;
+    vec4 weights;
+    smooth_cells(up, cells, weights);
+    vec4 data = vec4(0.0);
+    for (int k = 0; k < 4; k++)
+        data += texelFetch(cell_data, cell_pixel(cells[k]), 0) * weights[k];
+    return data;
+}
+
 // Part du sol enneigée : climat simulé (température corrigée de l'altitude, neige de la cellule)
 // ou, sans climat, limite de la neige selon la latitude
 // (sans tenir compte de la pente : voir snow_on_slope)
-float snow_cover(vec3 up, float h) {
+float snow_cover(vec4 data, vec3 up, float h) {
     float snow;
     if (has_climate) {
-        // Climat des cellules voisines, mélangé (lu cellule par cellule, la limite de la neige
-        // dessinait des marches d'escalier)
-        ivec4 cells;
-        vec4 weights;
-        smooth_cells(up, cells, weights);
-        vec4 data = vec4(0.0);
-        for (int k = 0; k < 4; k++)
-            data += texelFetch(cell_data, cell_pixel(cells[k]), 0) * weights[k];
         float t = data.x - 0.0065 * (h - max(data.z, 0.0));
         float lying = data.y > 10.0 ? 1.0 : smoothstep(-2.0, -6.0, t);
         snow = smoothstep(0.5, -2.5, t) * lying;
@@ -954,7 +988,7 @@ void fragment() {
     vec3 up = normalize(v_world - planet_center);
     vec3 normal = normalize(v_world_normal);
     float h = v_height;
-    float depth = v_water.x - h;           // > 0 : sous l'eau (mer ou lac)
+    float depth = water_surface(up, v_water.x) - h;   // > 0 : sous l'eau (mer ou lac)
     vec3 p = v_world + noise_offset;       // position (m), modulo la période des bruits
     float footprint = length(fwidth(v_world));
 
@@ -972,8 +1006,27 @@ void fragment() {
     // (roche rugueuse, sédiments plus doux, rien sous la neige ni au fond de l'eau)
     float roughGround = mix(0.10, 0.28, rockiness) * (depth > 0.0 ? 0.3 : 1.0);
     vec3 bump = (n32.yzw * 0.8 + n8.yzw * 0.6 + n2.yzw * 0.4) * roughGround;
-    float snowBase = coloring == 1 || coloring == 3 ? 0.0 : snow_cover(up, h);
+    vec4 cdata = coloring == 2 || coloring == 0 ? climate_data(up) : vec4(0.0);
+    float snowBase = coloring == 1 || coloring == 3 ? 0.0 : snow_cover(cdata, up, h);
+    // Canopée des forêts (w > 0) ou part de sable des déserts (w < 0), vue réaliste (étape 12a)
+    float canopy = coloring == 2 ? max(cdata.w, 0.0) : 0.0;
+    float desertSand = coloring == 2 ? max(-cdata.w, 0.0) : 0.0;
     float snowEstimate = snow_on_slope(snowBase, slope0);
+    // Sable (plages, déserts) : dunes (~32 m) et rides (~0,5 m), crêtes ondulées par les bruits.
+    // Coordonnée x + z : les deux sont périodiques de NOISE_PERIOD, multiple des longueurs
+    // d'onde, donc pas de saut quand la position de la caméra repart de zéro
+    float sandy = max(desertSand * (1.0 - rockiness),
+                      (1.0 - smoothstep(1.0, 6.0, h)) * (1.0 - smoothstep(0.1, 0.25, slope0)) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0));
+    sandy *= depth > 0.0 ? 0.0 : 1.0 - snowEstimate;
+    vec3 ridge_axis = vec3(1.0, 0.0, 1.0) - up * dot(vec3(1.0, 0.0, 1.0), up);
+    float dune_phase = 6.2832 * (p.x + p.z + 14.0 * n128.x + 45.0 * n512.x) / 32.0;
+    float ripple_phase = 6.2832 * (p.x + p.z + 0.25 * n2.x + 1.5 * n8.x) / 0.5;
+    // Profil dissymétrique des dunes : pente douce au vent, raide sous le vent
+    float dune_slope = cos(dune_phase) + 0.35 * cos(2.0 * dune_phase);
+    bump += ridge_axis * sandy * (0.22 * dune_slope * desertSand * detail_weight(32.0, footprint)
+                                  + 0.12 * cos(ripple_phase) * detail_weight(0.5, footprint));
+    // Canopée : houppiers des arbres (~8 m) vus d'avion
+    bump += (n8.yzw * 0.9 + n2.yzw * 0.3) * canopy * (1.0 - snowEstimate);
     bump *= 1.0 - 0.8 * snowEstimate;
     normal = normalize(normal - (bump - up * dot(bump, up)));
 
@@ -1004,6 +1057,12 @@ void fragment() {
             // Vue réaliste : couleur du biome, roche nue sur les pentes raides
             color = layer_color_smooth(up, true);
             color *= 1.0 + 0.10 * n512.x + 0.08 * n128.x;
+            // Déserts de sable (étape 12a) : dunes claires, crêtes et creux
+            color = mix(color, sand * (1.0 + 0.06 * dune_slope * detail_weight(32.0, footprint)), desertSand * (1.0 - rockiness) * 0.85);
+            // Forêts : houppiers et trouées d'ombre entre les arbres ; de loin, une teinte plus sombre
+            float crowns = 0.5 + 0.5 * clamp(n8.x * 1.4 + n32.x * 0.6, -1.0, 1.0);
+            color *= mix(1.0, mix(0.55, 1.12, crowns), canopy * detail_weight(16.0, footprint));
+            color *= mix(1.0, 0.85, canopy);
             color = mix(color, sand, (1.0 - smoothstep(1.0, 6.0, h)) * (1.0 - smoothstep(0.1, 0.25, slope)));
         } else {
             // Géologie seule (pas de végétation) : sédiments, sols nus, roche
@@ -1015,8 +1074,11 @@ void fragment() {
             // Taches de sol plus ou moins clair, cailloux
             color *= 1.0 + 0.09 * n512.x + 0.07 * n128.x + 0.05 * n8.x;
         }
-        color = mix(color, rock, rockiness);
-        color = mix(color, cliff, smoothstep(0.38, 0.62, slope));
+        // Roche fissurée : réseau de diaclases (lignes où un bruit s'annule)
+        float cracks = 1.0 - smoothstep(0.0, 0.06, abs(n8.x + 0.5 * n32.x));
+        vec3 cracked = rock * (1.0 - 0.35 * cracks * detail_weight(4.0, footprint));
+        color = mix(color, cracked, rockiness);
+        color = mix(color, cliff * (1.0 - 0.3 * cracks * detail_weight(4.0, footprint)), smoothstep(0.38, 0.62, slope));
         // Éboulis : grain clair et sombre sur la roche
         color *= 1.0 + rockiness * (0.08 * n2.x + 0.06 * n8.x);
         float snow = snow_on_slope(snowBase, slope);
@@ -1024,11 +1086,42 @@ void fragment() {
         snow = clamp(snow + (snow * (1.0 - snow)) * 1.5 * n32.x, 0.0, 1.0);
         color = mix(color, vec3(0.86, 0.88, 0.92) * (1.0 + 0.03 * n8.x), snow);
         roughness = mix(0.95, 0.6, snow);
-        // Lit des fleuves
+        // Estran (étape 11b) : sable mouillé, plus sombre et brillant, là où la mer vient de se
+        // retirer ; un peu humide jusqu'à la limite des plus hautes mers
+        if (v_water.x <= 0.01) {
+            float above = h - sea_surface(up);
+            float wet = (1.0 - smoothstep(0.0, 0.7, above)) * (1.0 - smoothstep(0.25, 0.45, slope));
+            float damp = 1.0 - smoothstep(tide_high + sea_level, tide_high + sea_level + 0.4, h);
+            color *= mix(1.0, 0.86, damp * (1.0 - snowEstimate));
+            color *= mix(1.0, 0.62, wet);
+            roughness = mix(roughness, 0.3, wet);
+            specular = mix(specular, 0.5, wet);
+        }
+        // Fleuves (étape 12c) : l'eau coule vers l'aval (le sens de la pente du maillage), plus
+        // vite là où ça descend ; vaguelettes entraînées par le courant (deux motifs en fondu
+        // enchaîné, chacun repartant de zéro quand son poids est nul : sinon le bruit s'étirerait
+        // à l'infini) ; eaux blanches dans les rapides, cascades sur les pentes raides
         float river = v_water.y;
-        color = mix(color, vec3(0.12, 0.30, 0.38), river);
-        roughness = mix(roughness, 0.15, river);
-        specular = mix(specular, 0.5, river);
+        if (river > 0.01) {
+            vec3 n0 = normalize(v_world_normal);
+            vec3 downhill = n0 - up * dot(n0, up);
+            float steep = length(downhill);
+            vec3 flow = steep > 1e-4 ? downhill / steep : vec3(0.0);
+            float speed = mix(0.7, 4.0, smoothstep(0.0, 0.25, steep));
+            const float FLOW_CYCLE = 2.0;
+            float t1 = fract(TIME / FLOW_CYCLE), t2 = fract(TIME / FLOW_CYCLE + 0.5);
+            float w1 = 1.0 - abs(2.0 * t1 - 1.0);
+            vec4 r1 = texture_noise(p - flow * speed * t1 * FLOW_CYCLE, 2.0);
+            vec4 r2 = texture_noise(p - flow * speed * t2 * FLOW_CYCLE + vec3(3.7, 1.3, 5.1), 2.0);
+            vec4 ripples = (r1 * w1 + r2 * (1.0 - w1)) * detail_weight(2.0, footprint);
+            float rapids = smoothstep(0.12, 0.32, steep) * (0.55 + 0.45 * ripples.x);
+            vec3 water_color = mix(vec3(0.12, 0.30, 0.38), vec3(0.85, 0.9, 0.92), clamp(rapids, 0.0, 1.0));
+            color = mix(color, water_color, river);
+            roughness = mix(roughness, mix(0.12, 0.6, rapids), river);
+            specular = mix(specular, 0.5, river);
+            vec3 water_normal = normalize(up - (ripples.yzw - up * dot(ripples.yzw, up)) * (0.08 + 0.25 * rapids));
+            normal = normalize(mix(normal, water_normal, river));
+        }
     }
 
     NORMAL = normalize((VIEW_MATRIX * vec4(normal, 0.0)).xyz);
@@ -1063,7 +1156,7 @@ void vertex() {
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
     v_water = UV;
     vec3 up = normalize((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz - planet_center);
-    v_depth = v_water.x - v_height;
+    v_depth = water_surface(up, v_water.x) - v_height;
     VERTEX += up * v_depth;
     NORMAL = up;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -1081,6 +1174,12 @@ void fragment() {
     vec3 waves = texture_noise(p + vec3(TIME * 0.6, 0.0, TIME * 0.4), 8.0).yzw * detail_weight(8.0, footprint)
                + texture_noise(p - vec3(TIME * 0.5, TIME * 0.2, 0.0), 2.0).yzw * 0.6 * detail_weight(2.0, footprint)
                + texture_noise(p + vec3(0.0, TIME * 0.3, TIME * 1.1), 32.0).yzw * 0.5 * detail_weight(32.0, footprint);
+    // Houle du large (~128 m et ~512 m), plus marquée en eau profonde, qui s'atténue sur les
+    // hauts-fonds (étape 12c)
+    float open_sea = smoothstep(2.0, 30.0, v_depth) * (v_water.x <= 0.01 ? 1.0 : 0.3);
+    vec3 swell = (texture_noise(p + vec3(TIME * 2.5, 0.0, TIME * 1.2), 128.0).yzw * detail_weight(128.0, footprint)
+                + texture_noise(p - vec3(TIME * 1.1, 0.0, TIME * 3.0), 512.0).yzw * 0.7) * open_sea;
+    waves += swell * 1.4;
     vec3 water_normal = normalize(up - (waves - up * dot(waves, up)) * 0.06);
     NORMAL = normalize((VIEW_MATRIX * vec4(water_normal, 0.0)).xyz);
     vec3 color = mix(vec3(0.10, 0.42, 0.48), vec3(0.03, 0.12, 0.30), smoothstep(0.0, 200.0, v_depth));
@@ -1089,11 +1188,25 @@ void fragment() {
         // Vue réaliste : banquise et teinte de la couche (océans gelés en blanc)
         color = mix(color, layer_color_smooth(up, false), 0.5);
     }
+    // Écume sur les côtes de la mer (étape 12c) : les vagues déferlent quand le fond remonte,
+    // en rouleaux qui avancent vers le rivage ; plus une frange d'écume au bord de l'eau
+    float foam = 0.0;
+    if (v_water.x <= 0.01) {
+        float shore = 1.0 - smoothstep(0.0, 1.8, v_depth);
+        shore *= shore;
+        float breaker = smoothstep(0.55, 0.95, 0.5 + 0.5 * sin(v_depth * 5.0 + TIME * 1.7
+                         + 2.0 * texture_noise(p, 32.0).x * detail_weight(32.0, footprint)));
+        float lace = smoothstep(0.0, 0.6, texture_noise(p + vec3(0.0, 0.0, TIME * 0.4), 2.0).x) * detail_weight(2.0, footprint);
+        foam = shore * max(breaker * (0.4 + 0.6 * lace), 1.0 - smoothstep(0.0, 0.35, v_depth));
+        // vu de loin, les rouleaux se fondent en une frange blanche
+        foam = mix(shore * 0.35, foam, detail_weight(4.0, footprint));
+    }
+    color = mix(color, vec3(0.92, 0.95, 0.97), foam);
     v_shade = cloud_shadow(v_world, up, v_water.x);
     ALBEDO = color;
-    ROUGHNESS = 0.08;
+    ROUGHNESS = mix(0.08, 0.7, foam);
     SPECULAR = 0.6;
-    ALPHA = clamp(0.45 + v_depth / 60.0, 0.45, 0.97);
+    ALPHA = max(clamp(0.45 + v_depth / 60.0, 0.45, 0.97), foam);
 }
 ";
 }

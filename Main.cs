@@ -257,7 +257,8 @@ public partial class Main : Node3D
         if (_climateDataTimer <= 0)
         {
             bool climate = _clock == ClockMode.Climate && _climate.HasTemperature;
-            _terrain.UpdateCellClimate(climate ? _climate.SurfaceTemperature : null, _climate.Snow, _tectonics.CellElevation);
+            _terrain.UpdateCellClimate(climate ? _climate.SurfaceTemperature : null, _climate.Snow, _tectonics.CellElevation,
+                                       climate ? ComputeCanopy() : null);
             _climateDataTimer = 0.25;
         }
         _terrain.Coloring = ColoringFor(_displayMode);
@@ -425,7 +426,7 @@ public partial class Main : Node3D
     private static bool IsClimateLayer(DisplayMode mode) => mode is DisplayMode.Temperature
         or DisplayMode.WindSpeed or DisplayMode.Pressure or DisplayMode.RecentPrecipitation
         or DisplayMode.AnnualPrecipitation or DisplayMode.Humidity or DisplayMode.Biomes or DisplayMode.Realistic
-        or DisplayMode.OceanCurrents;
+        or DisplayMode.OceanCurrents or DisplayMode.Upwelling;
 
     /// <summary>Coloration du terrain selon la couche choisie.</summary>
     private TerrainColoring ColoringFor(DisplayMode mode) => mode switch
@@ -626,7 +627,13 @@ public partial class Main : Node3D
             _cloudsShown = false;
         }
         _terrain.SetShaderParameter("clouds_enabled", _sky.HasClouds && _cloudsShown);
-        _terrain.SetShaderParameter("cloud_time", (float)((_climate.TimeDays * 86400.0) % 200000.0));
+        // Marées (étape 11b) et niveau de la mer selon la glace des terres (étape 11d)
+        TideState tide = climate ? Tides.Compute(_climate.TimeDays, _orbit) : default;
+        _terrain.SetShaderParameter("tide_moon", new Vector4(tide.MoonDirection.X, tide.MoonDirection.Y, tide.MoonDirection.Z, tide.MoonAmplitude));
+        _terrain.SetShaderParameter("tide_sun", new Vector4(tide.SunDirection.X, tide.SunDirection.Y, tide.SunDirection.Z, tide.SunAmplitude));
+        _terrain.SetShaderParameter("tide_high", tide.MaxHeight);
+        _terrain.SetShaderParameter("sea_level", climate ? _climate.SeaLevelMeters : 0f);
+        _terrain.SetShaderParameter("cloud_time", (float)((_climate.TimeDays * 86400.0) % SkyRenderer.CloudTimeWrapSeconds));
 
         var frame = new SkyFrame
         {
@@ -640,6 +647,29 @@ public partial class Main : Node3D
         };
         _sky.Update(frame, delta);
     }
+
+    /// <summary>Densité de la canopée par cellule (0 à 1) : forêts, moins les feuillus sans feuilles ;
+    /// dans les déserts, part de sable en négatif (étape 12a).</summary>
+    private float[] ComputeCanopy()
+    {
+        _canopy ??= new float[_grid.CellCount];
+        var seasons = _climate.Seasons;
+        for (int cell = 0; cell < _canopy.Length; cell++)
+        {
+            Biome biome = _climate.Biomes[cell];
+            float deciduous = VegetationSeasons.DeciduousShare(biome);
+            // (négatif : part de sable des déserts, pour les dunes)
+            _canopy[cell] = biome switch
+            {
+                Biome.HotDesert => -0.75f,
+                Biome.ColdDesert => -0.3f,
+                _ => VegetationSeasons.ForestShare(biome) * (1f - 0.7f * deciduous * (1f - seasons.Leaves[cell])),
+            };
+        }
+        return _canopy;
+    }
+
+    private float[] _canopy;
 
     // --- Lieux de test (F1 à F7, F9 à F11) -------------------------------------------------------------
 
@@ -879,7 +909,7 @@ public partial class Main : Node3D
             // Flèches des courants sur la couche des courants, des vents sinon (maillage réutilisé :
             // en recréer un dix fois par seconde accumulait de la mémoire graphique)
             var arrows = _windMesh.Mesh as ImmediateMesh ?? new ImmediateMesh();
-            if (_displayMode == DisplayMode.OceanCurrents)
+            if (_displayMode is DisplayMode.OceanCurrents or DisplayMode.Upwelling)
                 ClimateOverlays.BuildVectors(arrows, _grid, _climate.Ocean.Current, _tectonics.CellElevation, 40f, 0.01f, 0.4f);
             else
                 ClimateOverlays.BuildVectors(arrows, _grid, _climate.Winds.Wind, _tectonics.CellElevation, 1f, 0.3f, 15f);
@@ -968,7 +998,8 @@ public partial class Main : Node3D
             lines.Add($"{SeasonLabel(sun.EclipticLongitude)}   Soleil au zénith à {SignedDegrees(sun.Declination)} de latitude   " +
                       $"Relief figé à {French(_tectonics.TimeMyr)} Ma   Calcul : {_climate.ComputeBackend}");
             var moon = MoonOrbit.Compute(_climate.TimeDays, _orbit);
-            lines.Add($"Lune : {MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100f:0} %, à {moon.DistanceKm:N0} km");
+            lines.Add($"Lune : {MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100f:0} %, à {moon.DistanceKm:N0} km   " +
+                      TideLabel(moon));
             if (_climate.HasTemperature)
             {
                 lines.Add($"Extrêmes : {French(_climate.SurfaceTemperature.Min())} °C / {French(_climate.SurfaceTemperature.Max())} °C   " +
@@ -1004,6 +1035,7 @@ public partial class Main : Node3D
         DisplayMode.WindSpeed => "vitesse du vent",
         DisplayMode.Pressure => "pression (bleu : dépression, rouge : anticyclone)",
         DisplayMode.OceanCurrents => "courants océaniques",
+        DisplayMode.Upwelling => "remontées d'eau froide",
         DisplayMode.RecentPrecipitation => "pluie des derniers jours",
         DisplayMode.AnnualPrecipitation => "pluie annuelle",
         DisplayMode.Humidity => "humidité de l'air",
@@ -1048,6 +1080,7 @@ public partial class Main : Node3D
         DisplayMode.WindSpeed => "Vitesse du vent (bleu sombre : calme, cyan, vert, jaune, rouge : plus de 18 m/s)",
         DisplayMode.Pressure => "Pression au niveau de la mer (bleu : dépressions, blanc : 1013 hPa, rouge : anticyclones)",
         DisplayMode.OceanCurrents => "Courants de surface (bleu nuit : calme, cyan, vert, jaune, rouge : plus de 0,4 m/s) ; flèches avec V",
+        DisplayMode.Upwelling => "Mouvement vertical de l'eau (bleu puis cyan : l'eau froide des profondeurs remonte, jusqu'à 1 m/jour ; rouge : l'eau de surface plonge)",
         DisplayMode.RecentPrecipitation => "Précipitations des derniers jours, en rythme annuel (beige : sec, vert, bleu, violet : plus de 4 m/an)",
         DisplayMode.AnnualPrecipitation => "Précipitations annuelles (beige : désert, < 250 mm ; vert : 1 m ; bleu : 2 m et plus)",
         DisplayMode.Humidity => "Humidité relative de l'air (brun : sec, blanc : 60 %, bleu : saturé)",
@@ -1193,6 +1226,21 @@ public partial class Main : Node3D
         ? $"{daysPerSecond * 24.0:0.0} h/s".Replace('.', ',')
         : $"{daysPerSecond:0.0} jours/s".Replace('.', ',');
 
+    /// <summary>Marée sous la caméra : hauteur, sens, coefficient (vives-eaux ou mortes-eaux), niveau moyen.</summary>
+    private string TideLabel(MoonState moon)
+    {
+        Vector3 up = _terrain.Explorer.Position.Normalized().ToVector3();
+        float now = Tides.Compute(_climate.TimeDays, _orbit).HeightAt(up);
+        float soon = Tides.Compute(_climate.TimeDays + 10.0 / 1440.0, _orbit).HeightAt(up);
+        // Vives-eaux à la nouvelle et à la pleine lune, mortes-eaux aux quartiers
+        double alignment = Math.Cos(4 * Math.PI * moon.Phase);
+        string kind = alignment > 0.5 ? "vives-eaux" : alignment < -0.5 ? "mortes-eaux" : "marée moyenne";
+        string trend = soon > now ? "montante" : "descendante";
+        float level = _climate.SeaLevelMeters;
+        return $"Marée : {now.ToString("+0.00;-0.00").Replace('.', ',')} m, {trend}, {kind}   " +
+               $"Niveau moyen de la mer : {level.ToString("+0.00;-0.00").Replace('.', ',')} m";
+    }
+
     private static string SignedDegrees(float radians)
     {
         float degrees = Mathf.RadToDeg(radians);
@@ -1278,7 +1326,7 @@ public partial class Main : Node3D
                 CycleDisplayMode(DisplayMode.InstantInsolation, DisplayMode.DailyInsolation);
                 break;
             case Key.Key6 or Key.Kp6: CycleDisplayMode(DisplayMode.Temperature); break;
-            case Key.Key7 or Key.Kp7: CycleDisplayMode(DisplayMode.WindSpeed, DisplayMode.Pressure, DisplayMode.OceanCurrents); break;
+            case Key.Key7 or Key.Kp7: CycleDisplayMode(DisplayMode.WindSpeed, DisplayMode.Pressure, DisplayMode.OceanCurrents, DisplayMode.Upwelling); break;
             case Key.Key8 or Key.Kp8:
                 CycleDisplayMode(DisplayMode.RecentPrecipitation, DisplayMode.AnnualPrecipitation, DisplayMode.Humidity);
                 break;

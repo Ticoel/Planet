@@ -165,13 +165,49 @@ float prevailing_wind(float sin_latitude) {
     return lat < 30.0 ? -7.0 * sin(lat / 30.0 * PI) : (lat < 60.0 ? 11.0 * sin((lat - 30.0) / 30.0 * PI) : -4.0 * sin((lat - 60.0) / 30.0 * PI));
 }
 
+// Systèmes nuageux (0 à 1, moyenne 0,5) : dépressions, fronts, amas d'orages, de quelques
+// centaines à ~1500 km. Le climat simulé ne connaît que des moyennes sur des jours : sans ce
+// « temps qu'il fait », la couverture formait des anneaux continus le long des latitudes.
+// Le motif dérive avec les vents dominants et se renouvelle : deux motifs en fondu enchaîné
+// (période WEATHER_PERIOD), chacun repartant d'un nouveau tirage quand son poids est nul
+// (sinon le cisaillement des vents l'étirerait en traînées)
+const float WEATHER_PERIOD = 100000.0;
+const float WEATHER_CYCLES = 16.0;   // cloud_time revient à zéro tous les 16 motifs
+
+float weather_pattern(vec3 d, float phase, float index) {
+    vec3 east = normalize(vec3(d.z, 0.0, -d.x) + vec3(1e-6, 0.0, 0.0));
+    vec3 q = d + east * (prevailing_wind(d.y) * phase * WEATHER_PERIOD / PLANET_R);
+    float k = mod(index, WEATHER_CYCLES);
+    vec3 offset = fract(vec3(0.371, 0.613, 0.157) * k * 7.13) * 4.0;
+    // Grands systèmes (~1500 km) aux bords déchiquetés par une échelle plus fine (~500 km)
+    return 0.68 * texture(cloud_noise, q * 1.7 + offset).r + 0.32 * texture(cloud_noise, q * 4.9 + offset.yzx).r;
+}
+
+float weather_at(vec3 d) {
+    float t = cloud_time / WEATHER_PERIOD;
+    float phase_a = fract(t), phase_b = fract(t + 0.5);
+    float weight_a = 1.0 - abs(2.0 * phase_a - 1.0);
+    float weight_b = 1.0 - weight_a;
+    float w = weight_a * weather_pattern(d, phase_a, floor(t))
+            + weight_b * weather_pattern(d, phase_b, floor(t + 0.5) + 0.5 * WEATHER_CYCLES);
+    // Le fondu de deux bruits atténue les contrastes : on les rétablit
+    return 0.5 + (w - 0.5) * 2.4 / sqrt(weight_a * weight_a + weight_b * weight_b);
+}
+
 // Couverture en un point. La direction est d'abord déformée par le bruit (~60 km, ±50 km) :
 // sinon les bords des cellules de la simulation (hexagones de ~60 km) se voyaient de haut
 vec2 cloud_cover_at(vec3 direction) {
     // (une seule lecture du bruit : la passe des nuages lit la couverture des dizaines de fois par pixel)
     float n = texture(cloud_noise, direction * 25.0).r - 0.5;
     vec3 warp = n * vec3(1.0, -0.7, 0.45) + (n * n - 0.08) * vec3(-0.6, 0.9, 1.1);
-    return texture(cloud_cover, cube_face_uv(normalize(direction + warp * 0.02))).rg;
+    vec3 d = normalize(direction + warp * 0.02);
+    vec2 cover = texture(cloud_cover, cube_face_uv(d)).rg;
+    // Le climat dit où l'air est humide ; le temps qu'il fait y découpe nuages et éclaircies.
+    // Les averses se regroupent en amas d'orages
+    float w = weather_at(d);
+    cover.r = clamp(cover.r + 1.2 * (w - 0.5) - 0.15, 0.0, 1.0);
+    cover.g *= smoothstep(0.35, 0.7, w) * 1.5;
+    return cover;
 }
 
 // Sommet de la couche nuageuse (m) selon la couverture et les averses

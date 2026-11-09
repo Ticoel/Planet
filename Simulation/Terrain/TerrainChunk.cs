@@ -111,7 +111,9 @@ public static class TerrainChunkBuilder
                 height[index] = sample.Height;
                 water[index] = sample.WaterLevel;
                 river[index] = sample.River;
-                hasWater |= sample.WaterLevel > sample.Height;
+                // (côtes basses comprises : la marée haute et la remontée de la mer peuvent les couvrir)
+                hasWater |= sample.WaterLevel > sample.Height
+                            || sample.Height < Climate.Tides.MaxHeightMeters + Climate.SeaLevel.MaxRiseMeters;
                 surface[index] = direction * (radius + sample.Height);
             }
 

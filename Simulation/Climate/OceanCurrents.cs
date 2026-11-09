@@ -14,6 +14,12 @@ namespace Planet.Simulation.Climate;
 /// Stream ou le Kuroshio) ;</item>
 /// <item><b>Dérive de surface</b> (Ekman) : quelques pour cent du vent, déviés de 45° vers la
 /// droite dans l'hémisphère nord, vers la gauche au sud.</item>
+/// <item><b>Remontées d'eau froide</b> (étape 11c) : sur toute la couche entraînée, l'eau est
+/// poussée à angle droit du vent (transport d'Ekman M = τ × k / (ρ f), à droite du vent au nord).
+/// Là où ce transport diverge, l'eau de surface part et de l'eau profonde, froide, remonte :
+/// w = div M. Cas typiques : le long des côtes ouest des continents quand le vent souffle vers
+/// l'équateur (Californie, Pérou, Canaries, Benguela : l'eau part vers le large), et sous
+/// l'équateur, où les alizés écartent l'eau vers les deux pôles.</item>
 /// </list>
 /// Calcul sur une grille de niveau 6 (~110 km), puis report sur les cellules fines.
 /// </summary>
@@ -40,11 +46,14 @@ public sealed class OceanCurrents
     /// <summary>Courant (vec4 : x, y, z, 0) pour la carte graphique.</summary>
     public float[] CurrentPacked { get; private set; }
     public float MaxSpeed { get; private set; }
+    /// <summary>Vitesse de remontée de l'eau profonde par cellule fine (m/s ; négatif : plongée).</summary>
+    public float[] Upwelling { get; private set; }
 
     // Résultat d'un calcul en tâche de fond, en attente de Publish (fil principal)
     private Vector3[] _nextCurrent;
     private float[] _nextPacked;
     private float _nextMax;
+    private float[] _nextUpwelling;
     /// <summary>Dérive de surface due au vent (Ekman), désactivable pour isoler les gyres (tests).</summary>
     public bool IncludeEkman { get; set; } = true;
     /// <summary>Fonction de courant (m²/s) sur la grille océanique, pour les tests.</summary>
@@ -61,6 +70,10 @@ public sealed class OceanCurrents
     private readonly float[] _forcing;
     private readonly bool[] _ocean;
     private readonly Vector3[] _oceanCurrent;
+    private readonly float[] _upwelling;
+    // |f| minimal : à l'équateur, f = 0 et le transport d'Ekman deviendrait infini (sur Terre,
+    // la théorie cesse de s'appliquer à quelques degrés de l'équateur)
+    private const float MinCoriolis = 2f * EarthRotation * 0.087f;   // sin 5°
     private bool _hasSolution;
 
     public OceanCurrents(PlanetGrid fineGrid)
@@ -70,6 +83,7 @@ public sealed class OceanCurrents
         int fineCount = fineGrid.CellCount, count = OceanGrid.CellCount;
         Current = new Vector3[fineCount];
         CurrentPacked = new float[fineCount * 4];
+        Upwelling = new float[fineCount];
 
         _fineToOcean = new int[fineCount];
         int hint = 0;
@@ -110,6 +124,7 @@ public sealed class OceanCurrents
         _forcing = new float[count];
         _ocean = new bool[count];
         _oceanCurrent = new Vector3[count];
+        _upwelling = new float[count];
     }
 
     /// <summary>Nouveau relief : masque terre/mer (la fonction de courant repart de zéro).</summary>
@@ -125,6 +140,7 @@ public sealed class OceanCurrents
         {
             Current = new Vector3[FineGrid.CellCount];
             CurrentPacked = new float[FineGrid.CellCount * 4];
+            Upwelling = new float[FineGrid.CellCount];
             MaxSpeed = 0f;
             _nextCurrent = null;
             _nextPacked = null;
@@ -155,6 +171,7 @@ public sealed class OceanCurrents
             _forcing[c] = -divergence / (WaterDensity * LayerDepth);
         }
 
+        ComputeUpwelling(stress);
         Solve(_hasSolution ? UpdateIterations : FirstIterations);
         _hasSolution = true;
 
@@ -201,6 +218,7 @@ public sealed class OceanCurrents
         float max = 0f;
         var next = new Vector3[FineGrid.CellCount];
         var packed = new float[FineGrid.CellCount * 4];
+        var upwelling = new float[FineGrid.CellCount];
         for (int c = 0; c < FineGrid.CellCount; c++)
         {
             int o = _fineToOcean[c];
@@ -209,6 +227,7 @@ public sealed class OceanCurrents
             packed[c * 4] = current.X;
             packed[c * 4 + 1] = current.Y;
             packed[c * 4 + 2] = current.Z;
+            upwelling[c] = packed[c * 4 + 3] = _ocean[o] ? _upwelling[o] : 0f;
             max = MathF.Max(max, current.Length());
         }
         lock (this)
@@ -216,6 +235,7 @@ public sealed class OceanCurrents
             _nextCurrent = next;
             _nextPacked = packed;
             _nextMax = max;
+            _nextUpwelling = upwelling;
         }
     }
 
@@ -229,9 +249,48 @@ public sealed class OceanCurrents
             Current = _nextCurrent;
             CurrentPacked = _nextPacked;
             MaxSpeed = _nextMax;
+            Upwelling = _nextUpwelling;
             _nextCurrent = null;
             _nextPacked = null;
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Remontées d'eau : divergence du transport d'Ekman M = τ × k / (ρ f) (m²/s), avec un flux
+    /// nul à travers les côtes. Une cellule côtière dont l'eau part vers le large sans être
+    /// remplacée par la terre voisine a une divergence positive : de l'eau profonde remonte.
+    /// </summary>
+    private void ComputeUpwelling(Vector3[] stress)
+    {
+        int count = OceanGrid.CellCount;
+        var transport = new Vector3[count];
+        for (int c = 0; c < count; c++)
+        {
+            if (!_ocean[c])
+                continue;
+            Vector3 up = OceanGrid.Positions[c];
+            float f = 2f * EarthRotation * up.Y;
+            f = f >= 0f ? MathF.Max(f, MinCoriolis) : MathF.Min(f, -MinCoriolis);
+            transport[c] = stress[c].Cross(up) / (WaterDensity * f);
+        }
+        for (int c = 0; c < count; c++)
+        {
+            if (!_ocean[c])
+            {
+                _upwelling[c] = 0f;
+                continue;
+            }
+            int[] neighbors = OceanGrid.Neighbors[c];
+            float divergence = 0f;
+            for (int k = 0; k < neighbors.Length; k++)
+            {
+                int n = neighbors[k];
+                if (!_ocean[n])
+                    continue;   // côte : rien ne la traverse
+                divergence += 0.5f * (transport[c] + transport[n]).Dot(_directions[c][k]) * _faceWeights[c][k];
+            }
+            _upwelling[c] = divergence;
         }
     }
 

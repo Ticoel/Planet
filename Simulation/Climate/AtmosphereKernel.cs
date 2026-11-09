@@ -113,6 +113,11 @@ void main() {
               + COUPLING * (mean_t - t)
               + ATMOSPHERE_CAPACITY * advection_t;
     float new_t = t + dt * net / capacity + (ocean ? dt * OCEAN_TRANSPORT * ocean_advection_t : 0.0);
+    // Remontées d'eau froide (m/s, composante w du courant)
+    float upwelling = current[cell].w;
+    if (ocean && upwelling > 0.0) {
+        new_t -= dt * UPWELLING_EFFICIENCY * upwelling / MIXED_LAYER_DEPTH * clamp(surface_t - DEEP_WATER_T, 0.0, UPWELLING_CONTRAST);
+    }
 
     // Vapeur d'eau (mm/s)
     float saturation = min(MAX_SATURATION, SATURATION_REF * exp(CLAUSIUS_CLAPEYRON * (surface_t - SATURATION_REF_T)));
