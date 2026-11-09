@@ -4,4 +4,3 @@
 
 [node name="Main" type="Node3D" unique_id=1339253596]
 script = ExtResource("1_main")
-Subdivisions = 7

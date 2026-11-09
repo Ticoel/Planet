@@ -8,6 +8,7 @@ using Planet.Rendering;
 using Planet.Simulation;
 using Planet.Simulation.Climate;
 using Planet.Simulation.Tectonics;
+using Planet.Simulation.Terrain;
 using Environment = Godot.Environment;
 
 namespace Planet;
@@ -22,12 +23,14 @@ public enum ClockMode
 }
 
 /// <summary>
-/// Scène principale : génère la planète, fait tourner l'horloge géologique ou climatique,
-/// et affiche le globe.
-/// Souris : clic gauche + glisser pour tourner, molette pour zoomer.
-/// Clavier : C = horloge géologique/climatique, 1 à 0 = couches (appuyer de nouveau sur la même
-/// touche passe à la variante suivante), E = relief 3D, V = flèches (plaques ou vents),
-/// F = fleuves, Espace = pause, +/- = vitesse, R = nouvelle planète.
+/// Scène principale : génère la planète, fait tourner l'horloge géologique ou climatique, et
+/// l'affiche dans une vue unique, de l'orbite jusqu'au sol, à l'échelle réelle (le relief est
+/// exagéré automatiquement vu de loin).
+/// Souris : molette = zoom, clic gauche + glisser = déplacer, clic droit + glisser = regarder.
+/// Clavier : flèches = avancer / tourner, Page préc. / suiv. = monter / descendre,
+/// C = horloge géologique / climatique, 1 à 0 = couches, E = exagération du relief,
+/// V = flèches (plaques ou vents), F = fleuves, G = vol / marche, X = retour en orbite,
+/// P = pause, + / - = vitesse de l'horloge, R = nouvelle planète.
 /// </summary>
 public partial class Main : Node3D
 {
@@ -59,24 +62,28 @@ public partial class Main : Node3D
     [Export]
     public bool UseGpu { get; set; } = true;
 
-    private const float RotationSpeed = 0.005f;
-    private const float MinDistance = 1.2f;
-    private const float MaxDistance = 10f;
-
-    // Vitesses de l'horloge géologique, en millions d'années par seconde réelle
-    private static readonly float[] GeologicalSpeeds = { 0.5f, 1f, 2f, 5f, 10f, 20f, 50f };
+    // Vitesses de l'horloge géologique, en millions d'années par seconde réelle. Au-delà de
+    // 50 Ma/s, la vitesse réelle est limitée par le calcul (voir FastSimulationBudgetMs)
+    private static readonly float[] GeologicalSpeeds = { 0.5f, 1f, 2f, 5f, 10f, 20f, 50f, 100f, 200f, 500f };
     private const int DefaultGeologicalSpeed = 2;
+    private const float FastGeologicalSpeed = 100f;
+    // Âge de la Terre (Ma) : but de l'avance rapide (touche T)
+    private const double EarthAgeMyr = 4540.0;
 
-    // Vitesses de l'horloge climatique, en jours par seconde réelle (1 h/s à 3 mois/s)
-    private static readonly float[] ClimateSpeeds = { 1f / 24f, 0.25f, 1f, 5f, 15f, 30f, 90f };
+    // Vitesses de l'horloge climatique, en jours par seconde réelle : du temps réel à 3 mois/s
+    private static readonly float[] ClimateSpeeds =
+        { 1f / 86400f, 1f / 1440f, 10f / 1440f, 1f / 24f, 0.25f, 1f, 5f, 15f, 30f, 90f };
+    // 1 minute par seconde : une journée dure 24 min, le soleil bouge à peine
     private const int DefaultClimateSpeed = 1;
 
     // Temps de calcul maximal consacré à la simulation par image, pour garder l'affichage fluide
-    private const double SimulationBudgetMs = 25.0;
-
-    // Exagérations du relief 3D (×1 = échelle réelle, invisible : 7 km pour 6371 km de rayon)
-    private static readonly float[] ReliefPresets = { 0f, 10f, 25f, 50f, 100f };
-    private const int DefaultReliefIndex = 2;
+    // (14 ms au lieu de 25 : à 50 Ma/s demandés, l'image saccadait ; la vitesse réelle baisse un peu)
+    private const double SimulationBudgetMs = 14.0;
+    // Aux vitesses rapides (100 Ma/s et plus, avance rapide) : bien plus de calcul par image,
+    // au prix d'une image moins fluide (~15-20 img/s)
+    private const double FastSimulationBudgetMs = 50.0;
+    // Et le relief détaillé n'est rafraîchi que toutes les 3 s
+    private const double FastTerrainRefreshSeconds = 3.0;
 
     // En horloge géologique, le climat moyen (qui pilote l'érosion) est réestimé tous les 25 Ma,
     // en tâche de fond
@@ -92,6 +99,16 @@ public partial class Main : Node3D
     };
     private static readonly int[] MonthLengths = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
+    // Altitude de départ, comme l'ancien globe vu de loin (m)
+    private const double OrbitAltitude = 1.3e7;
+    // En horloge géologique, le relief affiché suit la tectonique : nouveau relief détaillé au
+    // plus toutes les 0,3 s (calculé en tâche de fond)
+    private const double TerrainRefreshSeconds = 0.8;
+    // Couleurs des couches renvoyées à la carte graphique au plus 15 fois par seconde
+    private const double ColorRefreshSeconds = 1.0 / 15.0;
+    // Les tracés à l'échelle des cellules (fleuves, vents, flèches) ne s'affichent que de haut
+    private const double OverlayMinAltitude = 150000.0;
+
     private PlanetGrid _grid;
     private TectonicPlates _tectonics;
     private ClimateSimulation _climate;
@@ -102,82 +119,90 @@ public partial class Main : Node3D
     private TectonicPlates _estimateSource;
     private double _nextEstimateMyr;
 
-    // Relief sur lequel le climat a été initialisé (planète et temps géologique) : le climat ne
-    // repart de l'équilibre que si le relief a changé depuis
+    // Relief sur lequel le climat a été initialisé : le climat ne repart de l'équilibre que si
+    // le relief a changé depuis
     private TectonicPlates _climateSurfaceSource;
     private double _climateSurfaceTimeMyr = double.NaN;
-    private DisplayMode _displayMode = DisplayMode.Elevation;
+    private DisplayMode _displayMode = DisplayMode.Geology;
     private ClockMode _clock = ClockMode.Geological;
 
-    private MeshInstance3D _planetMesh;
-    private CellColorLayer _colorLayer;
+    // Vue unique
+    private TerrainRenderer _terrain;
+    private Task<TerrainHeightField> _terrainTask;
+    private TectonicPlates _terrainSource;
+    private double _terrainTimeMyr = double.NaN;
+    private double _terrainRefreshTimer;
+    private bool _colorsDirty = true;
+    private double _colorTimer;
+    private double _climateDataTimer;
+
+    // Tracés à l'échelle de la planète (placés et mis à l'échelle à chaque image)
+    private Node3D _overlayRoot;
     private MeshInstance3D _arrowsMesh;
     private MeshInstance3D _riversMesh;
     private MeshInstance3D _windMesh;
+    private bool _showArrows;
     private bool _showRivers = true;
     private bool _showWinds;
     private int _riversVersion = -1;
     private double _windRebuildTimer;
+    private bool _arrowsDirty = true;
+
     private int _hoverCell = -1;
+    private bool _showHelp;
+    private bool _showDetails;
     private DirectionalLight3D _sun;
+    private ShaderMaterial _skyMaterial;
+
+    private const string SkyShaderCode = @"
+shader_type sky;
+
+// Verticale du lieu (le ciel n'est pas toujours au-dessus de l'axe Y sur une planète ronde)
+uniform vec3 local_up = vec3(0.0, 1.0, 0.0);
+// 1 près du sol, 0 dans l'espace
+uniform float visibility = 1.0;
+
+void sky() {
+    vec3 up = normalize(local_up);
+    float height = dot(EYEDIR, up);
+    vec3 sun = LIGHT0_ENABLED ? normalize(LIGHT0_DIRECTION) : up;
+    float sun_height = dot(sun, up);
+    float day = smoothstep(-0.15, 0.2, sun_height);
+    float toward = max(dot(EYEDIR, sun), 0.0);
+
+    vec3 zenith = mix(vec3(0.0, 0.0, 0.02), vec3(0.16, 0.36, 0.78), day);
+    vec3 horizon = mix(vec3(0.02, 0.02, 0.05), vec3(0.64, 0.75, 0.90), day);
+    // Coucher de soleil : horizon orangé du côté du Soleil quand il est bas
+    float sunset = (1.0 - smoothstep(0.0, 0.35, abs(sun_height))) * smoothstep(-0.2, 0.05, sun_height);
+    horizon = mix(horizon, vec3(0.95, 0.50, 0.25), sunset * pow(toward, 3.0));
+    vec3 color = mix(horizon, zenith, pow(clamp(height, 0.0, 1.0), 0.45));
+    if (height < 0.0) {
+        color = horizon * mix(1.0, 0.45, clamp(-height * 4.0, 0.0, 1.0));
+    }
+    // Halo et disque du Soleil
+    color += vec3(1.0, 0.8, 0.5) * pow(toward, 8.0) * 0.35 * day;
+    color += vec3(1.0, 0.95, 0.85) * pow(toward, 3000.0) * 15.0 * step(0.0, height);
+    COLOR = color * visibility;
+}
+";
     private Environment _environment;
     private Label _hud;
 
     private bool _running = true;
     private int _geologicalSpeed = DefaultGeologicalSpeed;
+    // Avance rapide jusqu'à l'âge de la Terre (touche T)
+    private bool _fastForward;
     private int _climateSpeed = DefaultClimateSpeed;
-    private int _reliefIndex = DefaultReliefIndex;
     private double _pendingTime;
     private double _measureRealSeconds;
     private double _measureSimulated;
     private double _effectiveSpeed;
 
-    private Node3D _cameraPivot;
-    private Camera3D _camera;
-    private float _yaw;
-    private float _pitch;
-    private float _distance = 3f;
-
     public override void _Ready()
     {
         var stopwatch = Stopwatch.StartNew();
         _grid = PlanetGrid.Create(Subdivisions);
-        long gridMs = stopwatch.ElapsedMilliseconds;
-
-        stopwatch.Restart();
-        _colorLayer = new CellColorLayer(_grid.CellCount);
-        _planetMesh = new MeshInstance3D
-        {
-            Name = "Planet",
-            Mesh = PlanetMeshBuilder.Build(_grid),
-            MaterialOverride = _colorLayer.Material,
-        };
-        AddChild(_planetMesh);
-        _colorLayer.SetReliefExaggeration(ReliefPresets[_reliefIndex]);
-        GD.Print($"Grid: {_grid.CellCount} cells (subdivisions {Subdivisions}) in {gridMs} ms, " +
-                 $"mesh in {stopwatch.ElapsedMilliseconds} ms");
-
-        _arrowsMesh = new MeshInstance3D
-        {
-            Name = "VelocityArrows",
-            MaterialOverride = VelocityArrows.CreateMaterial(),
-            Visible = false,
-        };
-        AddChild(_arrowsMesh);
-        _riversMesh = new MeshInstance3D
-        {
-            Name = "Rivers",
-            MaterialOverride = VelocityArrows.CreateMaterial(),
-            Visible = false,
-        };
-        AddChild(_riversMesh);
-        _windMesh = new MeshInstance3D
-        {
-            Name = "WindArrows",
-            MaterialOverride = VelocityArrows.CreateMaterial(),
-            Visible = false,
-        };
-        AddChild(_windMesh);
+        GD.Print($"Grid: {_grid.CellCount} cells (subdivisions {Subdivisions}) in {stopwatch.ElapsedMilliseconds} ms");
 
         // Le climat est créé dès le départ : la vérification de la carte graphique s'affiche
         // ainsi tout de suite dans la console
@@ -191,14 +216,22 @@ public partial class Main : Node3D
         _climate = new ClimateSimulation(_grid, _orbit, UseGpu, ClimateStartDay);
 
         SetupEnvironment();
-        SetupCamera();
+        stopwatch.Restart();
+        _terrain = new TerrainRenderer { Name = "Terrain" };
+        AddChild(_terrain);
+        _terrain.SetGrid(_grid);
+        _terrain.Camera.MakeCurrent();
+        GD.Print($"Terrain: cell index textures in {stopwatch.ElapsedMilliseconds} ms");
+        SetupOverlays();
         SetupHud();
         GeneratePlanet();
+        _terrain.Explorer.PlaceAbove(new Double3(0, 0, 1), OrbitAltitude);
     }
 
     public override void _ExitTree()
     {
         _estimateTask?.Wait();
+        _terrainTask?.Wait();
         _climate?.Dispose();
     }
 
@@ -212,7 +245,36 @@ public partial class Main : Node3D
                 AdvanceClimate(delta);
         }
         if (_clock == ClockMode.Geological)
+        {
             CollectClimateEstimate();
+            UpdateTerrainField(delta);
+        }
+
+        // Pendant que la tectonique tourne, le terrain laisse des cœurs à la simulation
+        bool tectonicsRunning = _running && _clock == ClockMode.Geological;
+        _terrain.ActiveWorkerLimit = tectonicsRunning ? Math.Max(2, _terrain.WorkerCount / 3) : int.MaxValue;
+
+        // Couleurs des cellules : inutiles en coloration géologique (calculée par le shader)
+        _colorTimer -= delta;
+        if (_colorsDirty && _colorTimer <= 0 && ColoringFor(_displayMode) is not (TerrainColoring.Geology or TerrainColoring.Elevation))
+        {
+            _terrain.UpdateCellColors(PlanetColorizer.Compute(_tectonics, _climate, _displayMode), _tectonics.CellElevation);
+            _colorsDirty = false;
+            _colorTimer = ColorRefreshSeconds;
+        }
+        // Climat du moment pour la neige du terrain (horloge climatique), 4 fois par seconde
+        _climateDataTimer -= delta;
+        if (_climateDataTimer <= 0)
+        {
+            bool climate = _clock == ClockMode.Climate && _climate.HasTemperature;
+            _terrain.UpdateCellClimate(climate ? _climate.SurfaceTemperature : null, _climate.Snow, _tectonics.CellElevation);
+            _climateDataTimer = 0.25;
+        }
+        _terrain.Coloring = ColoringFor(_displayMode);
+        _terrain.Tick(delta, ReadInput());
+        UpdateSunLight();
+        UpdateSky();
+        UpdateOverlays(delta);
         UpdateHover();
         UpdateHud();
     }
@@ -228,11 +290,21 @@ public partial class Main : Node3D
     {
         float step = _tectonics.MaxTimeStep();
         _pendingTime += delta * GeologicalSpeeds[_geologicalSpeed];
+        double budget = IsFastGeology ? FastSimulationBudgetMs : SimulationBudgetMs;
 
         var stopwatch = Stopwatch.StartNew();
         double simulated = 0;
-        while (_pendingTime >= step && stopwatch.Elapsed.TotalMilliseconds < SimulationBudgetMs)
+        while (_pendingTime >= step && stopwatch.Elapsed.TotalMilliseconds < budget)
         {
+            if (_fastForward && _tectonics.TimeMyr >= EarthAgeMyr)
+            {
+                // Arrivé : retour à la vitesse normale, en pause pour regarder le résultat
+                _fastForward = false;
+                _geologicalSpeed = DefaultGeologicalSpeed;
+                _running = false;
+                _pendingTime = 0;
+                break;
+            }
             _tectonics.Step(step);
             _pendingTime -= step;
             simulated += step;
@@ -242,12 +314,31 @@ public partial class Main : Node3D
 
         if (simulated > 0)
         {
-            RefreshDisplay();
-            if (_arrowsMesh.Visible)
-                RebuildArrows();
+            _colorsDirty = true;
+            _arrowsDirty = true;
         }
         if (_tectonics.TimeMyr >= _nextEstimateMyr)
             StartClimateEstimate();
+    }
+
+    private bool IsFastGeology => _fastForward || GeologicalSpeeds[_geologicalSpeed] >= FastGeologicalSpeed;
+
+    /// <summary>Touche T : avance rapide jusqu'à l'âge de la Terre (ou arrêt de l'avance rapide).</summary>
+    private void ToggleFastForward()
+    {
+        if (_fastForward)
+        {
+            _fastForward = false;
+            _geologicalSpeed = DefaultGeologicalSpeed;
+            return;
+        }
+        if (_tectonics.TimeMyr >= EarthAgeMyr)
+            return;
+        if (_clock != ClockMode.Geological)
+            SetClock(ClockMode.Geological);
+        _fastForward = true;
+        _geologicalSpeed = GeologicalSpeeds.Length - 1;
+        _running = true;
     }
 
     /// <summary>
@@ -286,34 +377,7 @@ public partial class Main : Node3D
         double dtDays = delta * ClimateSpeeds[_climateSpeed];
         double simulated = _climate.Step(dtDays);
         MeasureSpeed(delta, simulated);
-        UpdateSunLight();
-        RefreshDisplay();
-        UpdateClimateOverlays(delta);
-    }
-
-    /// <summary>Fleuves (recalculés une fois par année simulée) et flèches de vent.</summary>
-    private void UpdateClimateOverlays(double delta)
-    {
-        bool climate = _clock == ClockMode.Climate;
-        _riversMesh.Visible = climate && _showRivers && _climate.Hydrology != null;
-        if (_riversMesh.Visible && _riversVersion != _climate.HydrologyVersion)
-            RebuildRivers();
-
-        _windMesh.Visible = climate && _showWinds;
-        _windRebuildTimer -= delta;
-        if (_windMesh.Visible && _windRebuildTimer <= 0)
-        {
-            _windMesh.Mesh = ClimateOverlays.BuildWinds(_grid, _climate.Winds, _tectonics.CellElevation,
-                                                        ReliefPresets[_reliefIndex]);
-            _windRebuildTimer = 0.1;
-        }
-    }
-
-    private void RebuildRivers()
-    {
-        _riversMesh.Mesh = ClimateOverlays.BuildRivers(_grid, _climate.Hydrology, _tectonics.CellElevation,
-                                                       ReliefPresets[_reliefIndex]);
-        _riversVersion = _climate.HydrologyVersion;
+        _colorsDirty = true;
     }
 
     private void MeasureSpeed(double delta, double simulated)
@@ -331,6 +395,7 @@ public partial class Main : Node3D
     private void SetClock(ClockMode clock)
     {
         _clock = clock;
+        _fastForward = false;
         _pendingTime = 0;
         _effectiveSpeed = 0;
         _measureRealSeconds = 0;
@@ -338,6 +403,9 @@ public partial class Main : Node3D
 
         if (clock == ClockMode.Climate)
         {
+            // Le relief se fige : le terrain affiché rattrape d'abord le dernier relief simulé
+            if (_terrainTimeMyr != _tectonics.TimeMyr)
+                RebuildTerrainNow();
             // Si le relief a changé depuis la dernière fois, le climat repart de ce nouveau relief ;
             // sinon il reprend là où il s'était arrêté
             if (_climateSurfaceSource != _tectonics || _climateSurfaceTimeMyr != _tectonics.TimeMyr)
@@ -348,24 +416,19 @@ public partial class Main : Node3D
                 _climate.WaitForHydrology();
                 _riversVersion = -1;
             }
-            _arrowsMesh.Visible = false;
-            // Nuit plus sombre pour bien voir le jour et la nuit
-            _environment.AmbientLightEnergy = 0.12f;
             if (!IsClimateLayer(_displayMode) && _displayMode is not (DisplayMode.InstantInsolation or DisplayMode.DailyInsolation))
                 _displayMode = DisplayMode.Realistic;
-            UpdateSunLight();
         }
         else
         {
-            _environment.AmbientLightEnergy = 0.35f;
-            _sun.RotationDegrees = new Vector3(-30f, 40f, 0f);
             // Les couches du climat ne correspondent plus au relief qui va évoluer
             if (IsClimateLayer(_displayMode))
-                _displayMode = DisplayMode.Elevation;
+                _displayMode = DisplayMode.Geology;
             _nextEstimateMyr = _tectonics.TimeMyr;
         }
-        RefreshDisplay();
-        UpdateClimateOverlays(0);
+        _colorsDirty = true;
+        _arrowsDirty = true;
+        _riversVersion = -1;
     }
 
     /// <summary>Couches calculées par la simulation du climat (sur un relief figé).</summary>
@@ -373,20 +436,46 @@ public partial class Main : Node3D
         or DisplayMode.WindSpeed or DisplayMode.Pressure or DisplayMode.RecentPrecipitation
         or DisplayMode.AnnualPrecipitation or DisplayMode.Humidity or DisplayMode.Biomes or DisplayMode.Realistic;
 
-    /// <summary>Oriente la lumière comme le vrai Soleil : la face éclairée du globe est le jour.</summary>
+    /// <summary>Coloration du terrain selon la couche choisie.</summary>
+    private TerrainColoring ColoringFor(DisplayMode mode) => mode switch
+    {
+        DisplayMode.Geology => TerrainColoring.Geology,
+        DisplayMode.Elevation => TerrainColoring.Elevation,
+        DisplayMode.Realistic => _climate.HasTemperature && _clock == ClockMode.Climate
+            ? TerrainColoring.Realistic
+            : TerrainColoring.Geology,
+        _ => TerrainColoring.Layer,
+    };
+
+    /// <summary>
+    /// Lumière. Horloge climatique : le vrai Soleil (jour, nuit, saisons). Horloge géologique :
+    /// une lumière qui suit la caméra, venue du nord-ouest et rasante (~22° au-dessus de
+    /// l'horizon) : comme en fin d'après-midi, les pentes s'opposent nettement et le relief, à
+    /// l'échelle réelle, reste lisible (avec une lumière haute, il paraissait tout plat).
+    /// </summary>
     private void UpdateSunLight()
     {
-        Vector3 towardSun = _climate.Sun.Direction;
-        Vector3 up = Mathf.Abs(towardSun.Y) > 0.99f ? Vector3.Right : Vector3.Up;
+        Vector3 towardSun;
+        if (_clock == ClockMode.Climate)
+        {
+            towardSun = _climate.Sun.Direction;
+        }
+        else
+        {
+            var (up, north, east) = _terrain.Explorer.LocalFrame();
+            towardSun = (up * 0.36 + north * 0.75 - east * 0.45).Normalized().ToVector3();
+        }
+        Vector3 reference = Mathf.Abs(towardSun.Y) > 0.99f ? Vector3.Right : Vector3.Up;
         // La lumière éclaire selon son axe −Z : on la fait regarder du Soleil vers la planète
-        _sun.Basis = Basis.LookingAt(-towardSun, up);
+        _sun.Basis = Basis.LookingAt(-towardSun, reference);
     }
 
-    // --- Planète -----------------------------------------------------------------------------
+    // --- Planète et relief ------------------------------------------------------------------------
 
     /// <summary>(Re)génère les plaques pour la graine courante et remet l'horloge à zéro.</summary>
     private void GeneratePlanet()
     {
+        _fastForward = false;
         var stopwatch = Stopwatch.StartNew();
         _tectonics = TectonicPlates.Generate(_grid, PlateCount, Seed);
         long platesMs = stopwatch.ElapsedMilliseconds;
@@ -412,47 +501,104 @@ public partial class Main : Node3D
         _effectiveSpeed = 0;
         if (_clock == ClockMode.Climate)
             SetClock(ClockMode.Geological);
-        RebuildArrows();
-        RefreshDisplay();
+        RebuildTerrainNow(progressive: false);
+        _colorsDirty = true;
+        _arrowsDirty = true;
     }
 
-    /// <summary>Envoie à la carte graphique les couleurs de la couche affichée et les altitudes.</summary>
-    private void RefreshDisplay()
+    /// <summary>Relief détaillé du relief simulé actuel, calculé tout de suite.</summary>
+    private void RebuildTerrainNow(bool progressive = true)
     {
-        _colorLayer.UpdateColors(PlanetColorizer.Compute(_tectonics, _climate, _displayMode));
-        _colorLayer.UpdateElevation(_tectonics.CellElevation);
+        _terrainTask?.Wait();
+        _terrainTask = null;
+        var stopwatch = Stopwatch.StartNew();
+        var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff());
+        _terrain.SetField(field, progressive);
+        _terrainSource = _tectonics;
+        _terrainTimeMyr = _tectonics.TimeMyr;
+        GD.Print($"Terrain: height field in {stopwatch.ElapsedMilliseconds} ms");
     }
 
-    private void RebuildArrows()
+    /// <summary>
+    /// Horloge géologique : le relief affiché suit la tectonique. Un nouveau relief détaillé est
+    /// préparé en tâche de fond, puis les morceaux de terrain sont remplacés progressivement.
+    /// </summary>
+    private void UpdateTerrainField(double delta)
     {
-        _arrowsMesh.Mesh = VelocityArrows.Build(_tectonics, ReliefPresets[_reliefIndex]);
+        _terrainRefreshTimer -= delta;
+        if (_terrainTask != null)
+        {
+            if (!_terrainTask.IsCompleted)
+                return;
+            if (_terrainTask.IsCompletedSuccessfully && _terrainSource == _tectonics)
+                _terrain.SetField(_terrainTask.Result, progressive: true);
+            _terrainTask = null;
+        }
+        // Pas de nouveau relief tant que le précédent n'est pas entièrement affiché
+        if (_terrainTimeMyr == _tectonics.TimeMyr || _terrainRefreshTimer > 0 || _terrain.IsUpdating)
+            return;
+        var grid = _grid;
+        var elevation = (float[])_tectonics.CellElevation.Clone();
+        int seed = Seed;
+        float[] runoff = TerrainRunoff();
+        _terrainSource = _tectonics;
+        _terrainTimeMyr = _tectonics.TimeMyr;
+        _terrainRefreshTimer = IsFastGeology ? FastTerrainRefreshSeconds : TerrainRefreshSeconds;
+        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff));
+    }
+
+    /// <summary>
+    /// Ruissellement qui creuse les vallées du terrain : la moitié des précipitations du climat
+    /// moyen estimé (celui qui pilote l'érosion). Le même dans les deux horloges, pour que les
+    /// fleuves ne changent pas de place quand on passe de l'une à l'autre.
+    /// </summary>
+    private float[] TerrainRunoff()
+    {
+        float[] precipitation = _tectonics.AnnualPrecipitation;
+        if (precipitation == null)
+            return null;
+        var runoff = new float[precipitation.Length];
+        for (int cell = 0; cell < runoff.Length; cell++)
+            runoff[cell] = 0.5f * precipitation[cell];
+        return runoff;
     }
 
     // --- Scène -------------------------------------------------------------------------------
 
     private void SetupEnvironment()
     {
-        _sun = new DirectionalLight3D { Name = "Sun", RotationDegrees = new Vector3(-30f, 40f, 0f) };
+        _sun = new DirectionalLight3D { Name = "Sun" };
         AddChild(_sun);
 
+        // Ciel calculé par un petit shader (dégradé, coucher de soleil, disque solaire), orienté
+        // selon la verticale locale et éteint dans l'espace
+        _skyMaterial = new ShaderMaterial { Shader = new Shader { Code = SkyShaderCode } };
+        var sky = new Sky { SkyMaterial = _skyMaterial };
         _environment = new Environment
         {
-            BackgroundMode = Environment.BGMode.Color,
+            BackgroundMode = Environment.BGMode.Sky,
+            Sky = sky,
             BackgroundColor = Colors.Black,
             AmbientLightSource = Environment.AmbientSource.Color,
             AmbientLightColor = Colors.White,
-            AmbientLightEnergy = 0.35f,
+            AmbientLightEnergy = 0.2f,
         };
         AddChild(new WorldEnvironment { Name = "WorldEnvironment", Environment = _environment });
     }
 
-    private void SetupCamera()
+    private void SetupOverlays()
     {
-        _cameraPivot = new Node3D { Name = "CameraPivot" };
-        AddChild(_cameraPivot);
-        _camera = new Camera3D { Name = "Camera", Position = new Vector3(0f, 0f, _distance) };
-        _cameraPivot.AddChild(_camera);
-        _camera.MakeCurrent();
+        _overlayRoot = new Node3D { Name = "Overlays" };
+        AddChild(_overlayRoot);
+        MeshInstance3D Create(string name)
+        {
+            var mesh = new MeshInstance3D { Name = name, MaterialOverride = VelocityArrows.CreateMaterial(), Visible = false };
+            _overlayRoot.AddChild(mesh);
+            return mesh;
+        }
+        _arrowsMesh = Create("VelocityArrows");
+        _riversMesh = Create("Rivers");
+        _windMesh = Create("WindArrows");
     }
 
     private void SetupHud()
@@ -465,19 +611,126 @@ public partial class Main : Node3D
         layer.AddChild(_hud);
     }
 
+    /// <summary>
+    /// Ciel : bleu le jour, orangé au coucher du soleil, noir la nuit, qui s'éteint en montant ;
+    /// noir dans l'espace.
+    /// </summary>
+    private void UpdateSky()
+    {
+        Vector3 up = _terrain.Explorer.Position.Normalized().ToVector3();
+        Vector3 towardSun = _sun.GlobalBasis.Z;
+        float daylight = Mathf.SmoothStep(-0.12f, 0.25f, up.Dot(towardSun));
+        float lowAltitude = 1f - Mathf.SmoothStep(15000f, 120000f, (float)_terrain.Explorer.AltitudeAboveGround);
+        float sky = daylight * lowAltitude;
+        _skyMaterial.SetShaderParameter("local_up", up);
+        _skyMaterial.SetShaderParameter("visibility", lowAltitude);
+        // Lumière ambiante faible : trop forte, elle éclaire autant les pentes à l'ombre que
+        // celles au soleil et efface le relief. Nuit plus sombre avec le vrai Soleil
+        float night = _clock == ClockMode.Climate ? 0.06f : 0.08f;
+        _environment.AmbientLightEnergy = night + 0.14f * sky;
+    }
+
+    /// <summary>
+    /// Tracés à l'échelle des cellules (flèches des plaques, fleuves, vents) : construits sur la
+    /// sphère unité, puis placés au centre de la planète
+    /// et agrandis au rayon réel. Masqués près du sol, où le relief détaillé les traverserait.
+    /// </summary>
+    private void UpdateOverlays(double delta)
+    {
+        var explorer = _terrain.Explorer;
+        bool high = explorer.AltitudeAboveGround > OverlayMinAltitude;
+        _overlayRoot.Position = (-explorer.Position).ToVector3();
+        _overlayRoot.Scale = Vector3.One * (float)TerrainHeightField.RadiusMeters;
+
+
+        bool geological = _clock == ClockMode.Geological;
+        _arrowsMesh.Visible = high && geological && _showArrows;
+        if (_arrowsMesh.Visible && _arrowsDirty)
+        {
+            _arrowsMesh.Mesh = VelocityArrows.Build(_tectonics);
+            _arrowsDirty = false;
+        }
+
+        _riversMesh.Visible = high && !geological && _showRivers && _climate.Hydrology != null;
+        if (_riversMesh.Visible && _riversVersion != _climate.HydrologyVersion)
+        {
+            _riversMesh.Mesh = ClimateOverlays.BuildRivers(_grid, _climate.Hydrology, _tectonics.CellElevation);
+            _riversVersion = _climate.HydrologyVersion;
+        }
+
+        _windMesh.Visible = high && !geological && _showWinds;
+        _windRebuildTimer -= delta;
+        if (_windMesh.Visible && _windRebuildTimer <= 0)
+        {
+            _windMesh.Mesh = ClimateOverlays.BuildWinds(_grid, _climate.Winds, _tectonics.CellElevation);
+            _windRebuildTimer = 0.1;
+        }
+    }
+
     // --- Affichage du texte ------------------------------------------------------------------
 
+    /// <summary>
+    /// Texte à l'écran, volontairement court : horloge, position, couche, valeurs sous la souris.
+    /// [H] affiche l'aide des touches, [I] les détails de la simulation.
+    /// </summary>
     private void UpdateHud()
     {
         // Textes d'interface en français
         var lines = new List<string>();
+        var explorer = _terrain.Explorer;
 
         if (_clock == ClockMode.Geological)
         {
-            string state = _running
-                ? $"Vitesse : {French(GeologicalSpeeds[_geologicalSpeed])} Ma/s (réelle : {French(_effectiveSpeed)} Ma/s)"
-                : "EN PAUSE";
-            lines.Add($"HORLOGE GÉOLOGIQUE   Temps : {French(_tectonics.TimeMyr)} millions d'années   {state}");
+            string speed = !_running ? "EN PAUSE"
+                : _fastForward ? $"AVANCE RAPIDE jusqu'à 4,54 milliards d'années ({French(_effectiveSpeed)} Ma/s)"
+                : $"{French(GeologicalSpeeds[_geologicalSpeed])} Ma/s (réel {French(_effectiveSpeed)})";
+            lines.Add($"GÉOLOGIE   {AgeLabel(_tectonics.TimeMyr)}   {speed}");
+        }
+        else
+        {
+            string speed = _running ? ClimateSpeedLabel(ClimateSpeeds[_climateSpeed]) : "EN PAUSE";
+            string temperature = _climate.HasTemperature ? $"   {French(_climate.GlobalMeanTemperature)} °C en moyenne" : "";
+            lines.Add($"CLIMAT   {DateLabel(_climate.TimeDays)}   {speed}{temperature}");
+        }
+
+        Vector3 p = explorer.Position.Normalized().ToVector3();
+        float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
+        float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
+        string walking = explorer.Walking ? "à pied   " : "";
+        lines.Add($"{walking}{Math.Abs(latitude):0.0}° {(latitude >= 0 ? "N" : "S")}  {Math.Abs(longitude):0.0}° {(longitude >= 0 ? "E" : "O")}   " +
+                  $"hauteur {Distance(explorer.AltitudeAboveGround)}   sol {explorer.GroundHeight:N0} m   " +
+                  $"{Engine.GetFramesPerSecond():0} img/s");
+        lines.Add($"Couche : {LayerName()}");
+        if (_hoverCell >= 0)
+            lines.Add(ShortHoverLabel(_hoverCell));
+
+        if (_showDetails)
+        {
+            lines.Add("");
+            DetailLines(lines);
+        }
+        if (_showHelp)
+        {
+            lines.Add("");
+            lines.Add("Molette : zoom   Clic gauche + glisser : déplacer   Clic droit + glisser : regarder");
+            lines.Add("[↑ ↓] Avancer / reculer   [← →] Tourner   [Page préc. / suiv.] Monter / descendre   [Origine / Fin] Regard haut / bas");
+            lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
+            lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
+            lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
+            lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau");
+        }
+        else
+        {
+            lines.Add("[H] Aide   [I] Détails");
+        }
+        _hud.Text = string.Join("\n", lines);
+    }
+
+    /// <summary>Détails de la simulation (touche I).</summary>
+    private void DetailLines(List<string> lines)
+    {
+        if (_clock == ClockMode.Geological)
+        {
             lines.Add($"Plaques : {_tectonics.AlivePlateCount} (cible {PlateCount})   Fracturations : {_tectonics.RiftCount}   " +
                       $"Fusions : {_tectonics.MergeCount}   Collisions continentales : {_tectonics.SutureCount}   Graine : {Seed}");
             lines.Add($"Continents : {French(_tectonics.ContinentalFraction * 100f)} % de la surface   " +
@@ -487,50 +740,76 @@ public partial class Main : Node3D
         else
         {
             var sun = _climate.Sun;
-            string state = _running
-                ? $"Vitesse : {ClimateSpeedLabel(ClimateSpeeds[_climateSpeed])}"
-                : "EN PAUSE";
-            lines.Add($"HORLOGE CLIMATIQUE   {DateLabel(_climate.TimeDays)}   {state}");
             lines.Add($"{SeasonLabel(sun.EclipticLongitude)}   Soleil au zénith à {SignedDegrees(sun.Declination)} de latitude   " +
-                      $"Distance : {sun.DistanceAu:0.000} UA   Flux : {sun.Flux:0} W/m²".Replace('.', ','));
-            if (_climate.HasTemperature)
-                lines.Add($"Température moyenne : {French(_climate.GlobalMeanTemperature)} °C   " +
-                          $"Extrêmes : {French(_climate.SurfaceTemperature.Min())} °C / {French(_climate.SurfaceTemperature.Max())} °C   " +
-                          $"(vitesse réelle : {EffectiveClimateSpeed(_effectiveSpeed)}, {_climate.LastSubsteps} sous-pas par image)");
+                      $"Relief figé à {French(_tectonics.TimeMyr)} Ma   Calcul : {_climate.ComputeBackend}");
             if (_climate.HasTemperature)
             {
-                var statistics = _climate.Statistics;
-                string years = statistics.CompletedYears == 0
-                    ? "climat annuel estimé (première année en cours)"
-                    : $"{statistics.CompletedYears} année(s) simulée(s) depuis le gel du relief";
-                lines.Add($"Précipitations : {French(_climate.GlobalPrecipitation)} mm/jour en moyenne   " +
-                          $"Terres enneigées : {French(_climate.SnowCoveredLandFraction * 100f)} %   " +
-                          $"Vent maximal : {French(_climate.Winds.MaxSpeed)} m/s   Biomes et fleuves : {years}");
+                lines.Add($"Extrêmes : {French(_climate.SurfaceTemperature.Min())} °C / {French(_climate.SurfaceTemperature.Max())} °C   " +
+                          $"Précipitations : {French(_climate.GlobalPrecipitation)} mm/jour   " +
+                          $"Terres enneigées : {French(_climate.SnowCoveredLandFraction * 100f)} %   Vent maximal : {French(_climate.Winds.MaxSpeed)} m/s");
                 var hydrology = _climate.Hydrology;
                 if (hydrology != null)
-                    lines.Add($"Fleuves : {hydrology.RiverCellCount} cellules, le plus grand débite {hydrology.LargestDischarge:N0} m³/s   " +
-                              $"Lacs : {hydrology.LakeCellCount} cellules   Glaciers : {hydrology.GlacierCellCount} cellules");
+                    lines.Add($"Plus grand fleuve : {hydrology.LargestDischarge:N0} m³/s   Lacs : {hydrology.LakeCellCount} cellules   " +
+                              $"Glaciers : {hydrology.GlacierCellCount} cellules   Années simulées : {_climate.Statistics.CompletedYears}");
                 if (_displayMode is DisplayMode.Biomes or DisplayMode.Realistic)
                     lines.Add(BiomeSummary());
             }
-            lines.Add($"Relief figé à {French(_tectonics.TimeMyr)} Ma   Calcul : {_climate.ComputeBackend}");
         }
-
-        lines.Add($"Affichage : {DisplayModeLabel()}");
+        lines.Add($"Légende : {DisplayModeLabel()}");
         if (_hoverCell >= 0)
             lines.Add(HoverLabel(_hoverCell));
-        lines.Add("[C] Horloge géologique / climatique   [1] Altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher");
-        lines.Add("[5] Ensoleillement (instantané / 24 h)   [6] Température   [7] Vents / pression   " +
-                  "[8] Précipitations (du moment / annuelles) / humidité   [9] Biomes   [0] Vue réaliste");
-        string arrows = _clock == ClockMode.Geological ? "déplacement des plaques" : "vents";
-        lines.Add($"[V] Flèches ({arrows})   [F] Fleuves : {(_showRivers ? "affichés" : "masqués")}   " +
-                  $"[E] Relief 3D : {ReliefLabel()}   [Espace] Pause   [+] / [-] Vitesse   [R] Nouvelle planète");
-        lines.Add("Clic gauche + glisser : tourner   Molette : zoom");
-        _hud.Text = string.Join("\n", lines);
+        string stale = _terrain.StaleChunkCount > 0 ? $", {_terrain.StaleChunkCount} en mise à jour" : "";
+        lines.Add($"Terrain : {_terrain.VisibleChunkCount} morceaux (niveau max {_terrain.DeepestVisibleLevel}{stale}), " +
+                  $"{_terrain.CachedChunkCount} en mémoire, {_terrain.PendingChunkCount} en calcul   " +
+                  $"Vitesse de la caméra : {SpeedLabel(_terrain.Explorer.Speed)}");
     }
+
+    private string LayerName() => _displayMode switch
+    {
+        DisplayMode.Geology => "géologie",
+        DisplayMode.Elevation => "altitude",
+        DisplayMode.Plates => "plaques",
+        DisplayMode.Boundaries => "frontières de plaques (rouge : convergente, bleu : divergente, jaune : transformante)",
+        DisplayMode.CrustAge => "âge du plancher océanique (rouge : récent, bleu : ancien)",
+        DisplayMode.InstantInsolation => "ensoleillement instantané",
+        DisplayMode.DailyInsolation => "ensoleillement moyen sur 24 h",
+        DisplayMode.Temperature => "température (bleu : froid, rouge : chaud)",
+        DisplayMode.WindSpeed => "vitesse du vent",
+        DisplayMode.Pressure => "pression (bleu : dépression, rouge : anticyclone)",
+        DisplayMode.RecentPrecipitation => "pluie des derniers jours",
+        DisplayMode.AnnualPrecipitation => "pluie annuelle",
+        DisplayMode.Humidity => "humidité de l'air",
+        DisplayMode.Biomes => "biomes",
+        DisplayMode.Realistic => "vue réaliste",
+        _ => "",
+    };
+
+    /// <summary>Valeurs essentielles de la cellule sous la souris.</summary>
+    private string ShortHoverLabel(int cell)
+    {
+        string text = $"Sous la souris : altitude {_tectonics.CellElevation[cell] * 1000f:N0} m";
+        if (_clock != ClockMode.Climate || !_climate.HasTemperature)
+            return text;
+        text += $", {French(_climate.SurfaceTemperature[cell])} °C, pluie {_climate.Statistics.AnnualPrecipitation[cell]:N0} mm/an";
+        if (!_climate.Model.IsOcean(cell))
+            text += $", {Biomes.Name(_climate.Biomes[cell])}";
+        return text;
+    }
+
+    private static string Distance(double meters) => meters switch
+    {
+        < 1000 => $"{meters:0.0} m".Replace('.', ','),
+        < 100000 => $"{meters / 1000:0.00} km".Replace('.', ','),
+        _ => $"{meters / 1000:N0} km",
+    };
+
+    private static string SpeedLabel(double metersPerSecond) => metersPerSecond < 100
+        ? $"{metersPerSecond * 3.6:0} km/h"
+        : $"{metersPerSecond * 3.6:N0} km/h (Mach {metersPerSecond / 340:0.0})".Replace('.', ',');
 
     private string DisplayModeLabel() => _displayMode switch
     {
+        DisplayMode.Geology => "Géologie (sédiments, sols nus, roche, neige au-dessus d'une limite selon la latitude, mer)",
         DisplayMode.Elevation => "Altitude (bleu : océans, vert : plaines, ocre : plateaux, brun : montagnes, blanc : sommets)",
         DisplayMode.Plates => "Plaques (clair : continents, foncé : océans)",
         DisplayMode.Boundaries => "Frontières (rouge : convergente, bleu : divergente, jaune : transformante)",
@@ -570,24 +849,30 @@ public partial class Main : Node3D
         return "Terres : " + string.Join(", ", top);
     }
 
-    /// <summary>Repère la cellule sous la souris (intersection du rayon avec la sphère).</summary>
+    /// <summary>Repère la cellule sous la souris (rayon depuis la caméra, sphère du niveau de la mer).</summary>
     private void UpdateHover()
     {
         Vector2 mouse = GetViewport().GetMousePosition();
-        Vector3 origin = _camera.ProjectRayOrigin(mouse);
-        Vector3 direction = _camera.ProjectRayNormal(mouse);
-        // |origin + t·direction| = 1 : on garde la première intersection
-        float b = origin.Dot(direction);
-        float c = origin.LengthSquared() - 1f;
-        float discriminant = b * b - c;
-        if (discriminant < 0f)
+        Vector3 ray = _terrain.Camera.ProjectRayNormal(mouse);
+        Double3 direction = Double3.From(ray).Normalized();
+        // Caméra à l'origine du rendu ; centre de la planète en −position de la caméra
+        Double3 center = -_terrain.Explorer.Position;
+        double radius = TerrainHeightField.RadiusMeters;
+        double b = direction.Dot(center);
+        double discriminant = b * b - center.LengthSquared() + radius * radius;
+        if (discriminant < 0)
         {
             _hoverCell = -1;
             return;
         }
-        float t = -b - Mathf.Sqrt(discriminant);
-        Vector3 point = (origin + direction * t).Normalized();
-        _hoverCell = _grid.NearestCell(point, _hoverCell >= 0 ? _hoverCell : 0);
+        double t = b - Math.Sqrt(discriminant);
+        if (t < 0)
+        {
+            _hoverCell = -1;
+            return;
+        }
+        Double3 point = (direction * t - center).Normalized();
+        _hoverCell = _grid.NearestCell(point.ToVector3(), _hoverCell >= 0 ? _hoverCell : 0);
     }
 
     /// <summary>Valeurs de la cellule sous la souris.</summary>
@@ -661,6 +946,9 @@ public partial class Main : Node3D
 
     private static string ClimateSpeedLabel(float daysPerSecond) => daysPerSecond switch
     {
+        < 1f / 50000f => "temps réel",
+        < 1f / 1000f => "1 minute par seconde",
+        < 0.01f => "10 minutes par seconde",
         < 0.1f => "1 heure par seconde",
         < 0.5f => "6 heures par seconde",
         < 1.5f => "1 jour par seconde",
@@ -670,7 +958,9 @@ public partial class Main : Node3D
     };
 
     /// <summary>Vitesse mesurée de l'horloge climatique, en heures ou jours par seconde.</summary>
-    private static string EffectiveClimateSpeed(double daysPerSecond) => daysPerSecond < 1.0
+    private static string EffectiveClimateSpeed(double daysPerSecond) => daysPerSecond < 1.0 / 24.0
+        ? $"{daysPerSecond * 1440.0:0.0} min/s".Replace('.', ',')
+        : daysPerSecond < 1.0
         ? $"{daysPerSecond * 24.0:0.0} h/s".Replace('.', ',')
         : $"{daysPerSecond:0.0} jours/s".Replace('.', ',');
 
@@ -680,38 +970,54 @@ public partial class Main : Node3D
         return (degrees >= 0f ? "+" : "") + degrees.ToString("0.0").Replace('.', ',') + "°";
     }
 
-    private string ReliefLabel()
-    {
-        float exaggeration = ReliefPresets[_reliefIndex];
-        return exaggeration <= 0f ? "désactivé" : $"exagéré ×{exaggeration:0}";
-    }
-
     /// <summary>Nombre à une décimale avec la virgule française.</summary>
     private static string French(double value) => value.ToString("0.0").Replace('.', ',');
 
+    /// <summary>Âge en millions d'années, ou en milliards au-delà de 1000 Ma.</summary>
+    private static string AgeLabel(double myr) => myr < 1000
+        ? $"{French(myr)} millions d'années"
+        : $"{(myr / 1000).ToString("0.00").Replace('.', ',')} milliards d'années";
+
     // --- Entrées -----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Commandes continues : flèches haut/bas pour avancer/reculer, gauche/droite pour tourner,
+    /// Page préc./suiv. (ou Espace/Ctrl) pour monter/descendre, Origine/Fin pour lever ou baisser
+    /// les yeux, Maj pour aller plus vite. Z/S et Q/D (positions physiques) marchent aussi.
+    /// </summary>
+    private static ExplorerInput ReadInput()
+    {
+        static float Axis(bool negative, bool positive) => (positive ? 1f : 0f) - (negative ? 1f : 0f);
+        static bool Down(Key key) => Input.IsPhysicalKeyPressed(key);
+        return new ExplorerInput(
+            Forward: Axis(Down(Key.Down) || Down(Key.S), Down(Key.Up) || Down(Key.W)),
+            Strafe: Axis(Down(Key.A), Down(Key.D)),
+            Vertical: Axis(Down(Key.Pagedown) || Down(Key.Ctrl), Down(Key.Pageup) || Down(Key.Space)),
+            Turn: Axis(Down(Key.Left), Down(Key.Right)),
+            Pitch: Axis(Down(Key.End), Down(Key.Home)),
+            Run: Down(Key.Shift),
+            Jump: Down(Key.Space));
+    }
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        var explorer = _terrain.Explorer;
         switch (@event)
         {
             case InputEventKey { Pressed: true, Echo: false } key:
                 HandleKey(key);
                 break;
-
             case InputEventMouseMotion motion when (motion.ButtonMask & MouseButtonMask.Left) != 0:
-                _yaw -= motion.Relative.X * RotationSpeed;
-                // On bloque l'inclinaison juste avant les pôles pour ne pas retourner la caméra
-                _pitch = Mathf.Clamp(_pitch - motion.Relative.Y * RotationSpeed, -1.5f, 1.5f);
-                _cameraPivot.Rotation = new Vector3(_pitch, _yaw, 0f);
+                explorer.Pan(motion.Relative, GetViewport().GetVisibleRect().Size.Y);
                 break;
-
+            case InputEventMouseMotion motion when (motion.ButtonMask & MouseButtonMask.Right) != 0:
+                explorer.Look(motion.Relative);
+                break;
             case InputEventMouseButton { Pressed: true } button:
                 if (button.ButtonIndex == MouseButton.WheelUp)
-                    _distance = Mathf.Max(MinDistance, _distance * 0.9f);
+                    explorer.Zoom(+1);
                 else if (button.ButtonIndex == MouseButton.WheelDown)
-                    _distance = Mathf.Min(MaxDistance, _distance * 1.1f);
-                _camera.Position = new Vector3(0f, 0f, _distance);
+                    explorer.Zoom(-1);
                 break;
         }
     }
@@ -735,7 +1041,7 @@ public partial class Main : Node3D
         // Le reste : touche physique, pour que la rangée des chiffres marche en AZERTY sans Maj
         switch (key.PhysicalKeycode)
         {
-            case Key.Key1 or Key.Kp1: SetDisplayMode(DisplayMode.Elevation); break;
+            case Key.Key1 or Key.Kp1: CycleDisplayMode(DisplayMode.Geology, DisplayMode.Elevation); break;
             case Key.Key2 or Key.Kp2: SetDisplayMode(DisplayMode.Plates); break;
             case Key.Key3 or Key.Kp3: SetDisplayMode(DisplayMode.Boundaries); break;
             case Key.Key4 or Key.Kp4: SetDisplayMode(DisplayMode.CrustAge); break;
@@ -749,38 +1055,44 @@ public partial class Main : Node3D
                 break;
             case Key.Key9 or Key.Kp9: CycleDisplayMode(DisplayMode.Biomes); break;
             case Key.Key0 or Key.Kp0: CycleDisplayMode(DisplayMode.Realistic); break;
-            case Key.F:
-                _showRivers = !_showRivers;
-                UpdateClimateOverlays(0);
-                break;
+            case Key.F: _showRivers = !_showRivers; break;
             case Key.C:
                 SetClock(_clock == ClockMode.Geological ? ClockMode.Climate : ClockMode.Geological);
                 break;
             case Key.V:
                 if (_clock == ClockMode.Geological)
                 {
-                    _arrowsMesh.Visible = !_arrowsMesh.Visible;
-                    if (_arrowsMesh.Visible)
-                        RebuildArrows();
+                    _showArrows = !_showArrows;
+                    _arrowsDirty = true;
                 }
                 else
                 {
                     _showWinds = !_showWinds;
                     _windRebuildTimer = 0;
-                    UpdateClimateOverlays(0);
                 }
                 break;
-            case Key.E:
-                _reliefIndex = (_reliefIndex + 1) % ReliefPresets.Length;
-                _colorLayer.SetReliefExaggeration(ReliefPresets[_reliefIndex]);
-                if (_arrowsMesh.Visible)
-                    RebuildArrows();
-                _riversVersion = -1;
-                _windRebuildTimer = 0;
-                UpdateClimateOverlays(0);
+            case Key.G:
+                _terrain.Explorer.ToggleWalking();
                 break;
-            case Key.Space:
+            case Key.X:
+                // Retour en orbite au-dessus du point actuel
+                _terrain.Explorer.PlaceAbove(_terrain.Explorer.Position, OrbitAltitude);
+                break;
+            case Key.P:
                 _running = !_running;
+                break;
+            case Key.T:
+                ToggleFastForward();
+                break;
+            case Key.U:
+                // Eau masquée : on voit les fonds marins et le fond des lacs
+                _terrain.ShowWater = !_terrain.ShowWater;
+                break;
+            case Key.H:
+                _showHelp = !_showHelp;
+                break;
+            case Key.I:
+                _showDetails = !_showDetails;
                 break;
             case Key.R:
                 Seed++;
@@ -791,6 +1103,7 @@ public partial class Main : Node3D
 
     private void ChangeSpeed(int direction)
     {
+        _fastForward = false;
         if (_clock == ClockMode.Geological)
             _geologicalSpeed = Math.Clamp(_geologicalSpeed + direction, 0, GeologicalSpeeds.Length - 1);
         else
@@ -803,7 +1116,8 @@ public partial class Main : Node3D
         // Les couches du climat demandent l'horloge climatique (relief figé)
         if (IsClimateLayer(mode) && _clock == ClockMode.Geological)
             SetClock(ClockMode.Climate);
-        RefreshDisplay();
+        _colorsDirty = true;
+        _colorTimer = 0;
     }
 
     /// <summary>Une touche, plusieurs variantes : appuyer de nouveau passe à la suivante.</summary>

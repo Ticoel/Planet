@@ -11,6 +11,7 @@ public static class Fixtures
     {
         new(() => PlanetGrid.Create(0)), new(() => PlanetGrid.Create(1)), new(() => PlanetGrid.Create(2)),
         new(() => PlanetGrid.Create(3)), new(() => PlanetGrid.Create(4)), new(() => PlanetGrid.Create(5)),
+        new(() => PlanetGrid.Create(6)),
     };
 
     public static PlanetGrid Grid(int subdivisions) => Grids[subdivisions].Value;

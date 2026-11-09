@@ -8,6 +8,8 @@ namespace Planet.Rendering;
 /// <summary>Modes d'affichage de la planète (couches de visualisation).</summary>
 public enum DisplayMode
 {
+    /// <summary>Couleurs naturelles du terrain (calculées par le shader du terrain).</summary>
+    Geology,
     Elevation,
     Plates,
     Boundaries,
@@ -171,7 +173,7 @@ public static class PlanetColorizer
             bool continental = tectonics.CellContinental[cell];
             colors[cell] = mode switch
             {
-                DisplayMode.Elevation => Sample(ElevationGradient, tectonics.CellElevation[cell]),
+                DisplayMode.Elevation or DisplayMode.Geology => Sample(ElevationGradient, tectonics.CellElevation[cell]),
                 DisplayMode.InstantInsolation => Sample(InsolationGradient, climate.InstantInsolation[cell] / InstantScaleWm2)
                     .Lerp(Sample(ElevationGradient, tectonics.CellElevation[cell]), ReliefBlend),
                 DisplayMode.DailyInsolation => Sample(InsolationGradient, climate.DailyInsolation[cell] / DailyScaleWm2)
@@ -244,9 +246,8 @@ public static class PlanetColorizer
         ground = ground.Darkened(0.15f);
         // Roche nue en haute montagne
         ground = ground.Lerp(RockColor, Mathf.Clamp((elevation - 2.5f) / 2f, 0f, 0.8f));
-        // Neige au sol : couverture complète à 10 cm d'équivalent eau
-        float snow = Mathf.Clamp(climate.Snow[cell] / AtmosphereModel.SnowCoverMm, 0f, 1f);
-        return ground.Lerp(SnowColor, snow * 0.9f);
+        // La neige au sol est dessinée par le shader du terrain, point par point selon l'altitude
+        return ground;
     }
 
     /// <summary>Teintes réparties par le nombre d'or : deux plaques voisines dans la liste

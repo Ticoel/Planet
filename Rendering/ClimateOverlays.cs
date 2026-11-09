@@ -25,8 +25,7 @@ public static class ClimateOverlays
     private static readonly Color SmallRiverColor = new(0.15f, 0.45f, 0.95f);
     private static readonly Color LargeRiverColor = new(0.6f, 0.9f, 1f);
 
-    public static ImmediateMesh BuildRivers(PlanetGrid grid, HydrologyResult hydrology, float[] elevationKm,
-                                            float reliefExaggeration)
+    public static ImmediateMesh BuildRivers(PlanetGrid grid, HydrologyResult hydrology, float[] elevationKm)
     {
         var mesh = new ImmediateMesh();
         if (hydrology == null || hydrology.RiverCellCount == 0)
@@ -45,18 +44,18 @@ public static class ClimateOverlays
             if (down < 0)
                 continue;
             float t = Mathf.Clamp((MathF.Log(hydrology.Discharge[cell]) - logMin) / (logMax - logMin), 0f, 1f);
-            Vector3 from = grid.Positions[cell] * Lift(elevationKm[cell], reliefExaggeration, RiverLift);
+            Vector3 from = grid.Positions[cell] * Lift(elevationKm[cell], RiverLift);
             // Le dernier segment s'arrête sur la côte, à mi-chemin de la cellule d'océan
             Vector3 toPosition = elevationKm[down] > 0f
                 ? grid.Positions[down]
                 : (grid.Positions[cell] + grid.Positions[down]).Normalized();
-            Vector3 to = toPosition * Lift(MathF.Max(elevationKm[down], 0f), reliefExaggeration, RiverLift);
+            Vector3 to = toPosition * Lift(MathF.Max(elevationKm[down], 0f), RiverLift);
             lines.Add((SmallRiverColor.Lerp(LargeRiverColor, t), from, to));
         }
         return Fill(mesh, lines);
     }
 
-    public static ImmediateMesh BuildWinds(PlanetGrid grid, WindModel winds, float[] elevationKm, float reliefExaggeration)
+    public static ImmediateMesh BuildWinds(PlanetGrid grid, WindModel winds, float[] elevationKm)
     {
         var mesh = new ImmediateMesh();
         int sampleCount = Math.Min(grid.CellCount, PlanetGrid.ExpectedCellCount(WindSampleLevel));
@@ -70,7 +69,7 @@ public static class ClimateOverlays
             Vector3 position = grid.Positions[cell];
             Vector3 direction = wind / speed;
             float length = speed * LengthPerMetrePerSecond;
-            Vector3 start = position * Lift(elevationKm[cell], reliefExaggeration, WindLift) - direction * length * 0.5f;
+            Vector3 start = position * Lift(elevationKm[cell], WindLift) - direction * length * 0.5f;
             Vector3 tip = start + direction * length;
             Vector3 side = position.Cross(direction).Normalized();
             float head = length * 0.3f;
@@ -101,6 +100,6 @@ public static class ClimateOverlays
         return mesh;
     }
 
-    private static float Lift(float elevationKm, float exaggeration, float baseLift) =>
-        baseLift + CellColorLayer.ReliefOffset(elevationKm, exaggeration);
+    private static float Lift(float elevationKm, float baseLift) =>
+        baseLift + CellColorLayer.ReliefOffset(elevationKm);
 }

@@ -17,7 +17,7 @@ public static class VelocityArrows
     // Longueur d'affichage : une vitesse de 10 cm/an donne une flèche de 0,08 rayon
     private const float LengthPerCmPerYear = 0.008f;
 
-    public static ImmediateMesh Build(TectonicPlates tectonics, float reliefExaggeration)
+    public static ImmediateMesh Build(TectonicPlates tectonics)
     {
         var grid = tectonics.Grid;
         int sampleCount = Math.Min(grid.CellCount, PlanetGrid.ExpectedCellCount(SampleLevel));
@@ -35,7 +35,7 @@ public static class VelocityArrows
             float length = speed * LengthPerCmPerYear;
             // Au-dessus du relief s'il est affiché en 3D
             float lift = LiftAboveSurface
-                         + CellColorLayer.ReliefOffset(tectonics.CellElevation[cell], reliefExaggeration);
+                         + CellColorLayer.ReliefOffset(tectonics.CellElevation[cell]);
             Vector3 start = position * lift;
             Vector3 tip = start + direction * length;
 
