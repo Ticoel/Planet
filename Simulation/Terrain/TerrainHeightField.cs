@@ -1,6 +1,7 @@
 using System;
 using Godot;
 using Planet.Simulation.Climate;
+using Planet.Simulation.Tectonics;
 
 namespace Planet.Simulation.Terrain;
 
@@ -138,8 +139,10 @@ public sealed class TerrainHeightField
     private const double ValleyMinDischarge = 200.0;
     private const int ValleyMinUpstreamCells = 3;
     private const double MeanderAmplitude = 2500.0, MeanderWavelength = 14000.0;
-    // Côtes : hauteur des falaises (m) selon le relief
-    private const double FlatCliffHeight = 25.0, RuggedCliffHeight = 160.0;
+    // Côtes : hauteur des falaises (m) selon le relief. Sur Terre, les côtes rocheuses à falaises
+    // forment la majorité des rivages (~3/4 selon Emery et Kuhn 1982) ; avant, seul ~1/3 des côtes
+    // en avait, basses et adoucies sur ~200 m vues de loin : on ne les voyait presque pas
+    private const double FlatCliffHeight = 30.0, RuggedCliffHeight = 220.0;
     // Lacs : part des cellules voisines en lac à partir de laquelle un point est dans le lac
     private const double LakeThreshold = 0.45;
     private const double LakeEdgeShare = 0.08;
@@ -166,7 +169,8 @@ public sealed class TerrainHeightField
 
     /// <param name="runoffMm">Ruissellement annuel de chaque cellule (mm/an), pour les vallées
     /// et les lacs ; null : ni vallées ni lacs.</param>
-    public TerrainHeightField(PlanetGrid grid, float[] elevationKm, int seed, float[] runoffMm = null)
+    /// <param name="landforms">Volcans et cratères (étape 13), copies figées ; null : aucun.</param>
+    public TerrainHeightField(PlanetGrid grid, float[] elevationKm, int seed, float[] runoffMm = null, Landform[] landforms = null)
     {
         Grid = grid;
         Seed = seed;
@@ -211,6 +215,121 @@ public sealed class TerrainHeightField
             }
         }
         _riverCurve = BuildRiverCurves(count);
+        BuildLandformIndex(landforms);
+    }
+
+    // --- Volcans et cratères (étape 13) -----------------------------------------------------
+
+    // Reliefs ponctuels qui touchent chaque cellule (index des reliefs, null : aucun)
+    private Landform[] _landforms = Array.Empty<Landform>();
+    private int[][] _cellLandforms;
+
+    /// <summary>Volcans et cratères pris en compte par ce relief.</summary>
+    public int LandformCount => _landforms.Length;
+
+    /// <summary>Range chaque relief dans les cellules dont il peut toucher la zone (son rayon
+    /// d'influence + le rayon d'une cellule) : un point n'examine que ceux de sa cellule.</summary>
+    private void BuildLandformIndex(Landform[] landforms)
+    {
+        _landforms = landforms ?? Array.Empty<Landform>();
+        _cellLandforms = new int[Grid.CellCount][];
+        if (_landforms.Length == 0)
+            return;
+        var lists = new System.Collections.Generic.List<int>[Grid.CellCount];
+        double cellRadius = 0.75 * Grid.MeanEdgeAngle;
+        for (int i = 0; i < _landforms.Length; i++)
+        {
+            var landform = _landforms[i];
+            double reach = InfluenceRadiusM(landform) / RadiusMeters + cellRadius;
+            Double3 center = Double3.From(landform.Position).Normalized();
+            int start = Grid.NearestCell(landform.Position, 0);
+            // Parcours en largeur depuis la cellule du relief, limité à sa zone d'influence
+            var queue = new System.Collections.Generic.Queue<int>();
+            var seen = new System.Collections.Generic.HashSet<int> { start };
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                int c = queue.Dequeue();
+                (lists[c] ??= new()).Add(i);
+                foreach (int n in Grid.Neighbors[c])
+                    if (seen.Add(n) && Math.Acos(Math.Clamp(center.Dot(_positions[n]), -1, 1)) < reach)
+                        queue.Enqueue(n);
+            }
+        }
+        for (int c = 0; c < lists.Length; c++)
+            _cellLandforms[c] = lists[c]?.ToArray();
+    }
+
+    /// <summary>Distance (m) au-delà de laquelle un relief ne change plus rien (éjectas : 3 rayons).</summary>
+    private static double InfluenceRadiusM(Landform landform) =>
+        landform.Kind == LandformKind.ImpactCrater ? 3.0 * landform.RadiusM : landform.RadiusM;
+
+    /// <summary>
+    /// Hauteur ajoutée (m) par les volcans et les cratères voisins du point.
+    /// <list type="bullet">
+    /// <item>Volcan bouclier : dôme convexe (1 − q²)^1,5, caldeira au sommet ;</item>
+    /// <item>stratovolcan : cône aux flancs concaves (1 − q)^1,6, cratère au sommet ;</item>
+    /// <item>cratère d'impact (Pike 1977) : cuvette jusqu'à la profondeur d, rempart de
+    /// ~0,04 D (petits cratères) qui retombe en 1/r³ sur les éjectas ; au-delà de 15 km, fond
+    /// plat et piton central.</item>
+    /// </list>
+    /// </summary>
+    private double LandformHeight(Double3 direction, int cell)
+    {
+        int[] list = _cellLandforms?[cell];
+        if (list == null)
+            return 0;
+        double total = 0;
+        foreach (int i in list)
+        {
+            var landform = _landforms[i];
+            Double3 center = Double3.From(landform.Position).Normalized();
+            double r = Math.Acos(Math.Clamp(direction.Dot(center), -1, 1)) * RadiusMeters;
+            double radius = landform.RadiusM;
+            if (r >= InfluenceRadiusM(landform))
+                continue;
+            double q = r / radius;
+            double scale = landform.Freshness * landform.Growth;
+            switch (landform.Kind)
+            {
+                case LandformKind.ShieldVolcano:
+                {
+                    double h = Math.Pow(1 - q * q, 1.5);
+                    double caldera = 1 - SmoothStep(0.06, 0.1, q);
+                    total += scale * landform.PeakHeightM * (h - 0.06 * caldera);
+                    break;
+                }
+                case LandformKind.Stratovolcano:
+                {
+                    double h = Math.Pow(1 - q, 1.6);
+                    double crater = 1 - SmoothStep(0.03, 0.06, q);
+                    total += scale * landform.PeakHeightM * (h - 0.12 * crater);
+                    break;
+                }
+                default:
+                {
+                    double depth = landform.PeakHeightM;
+                    double diameterKm = radius / 500.0;
+                    double rim = 1000.0 * (diameterKm < 15 ? 0.036 * Math.Pow(diameterKm, 1.014) : 0.236 * Math.Pow(diameterKm, 0.399));
+                    double h;
+                    if (q < 1)
+                    {
+                        // Fond : parabolique (simple) ou plat (complexe, puissance 4), piton central
+                        double power = diameterKm < 15 ? 2 : 4;
+                        h = -depth + (depth + rim) * Math.Pow(q, power);
+                        if (diameterKm >= 15)
+                            h += 0.3 * depth * Math.Exp(-Math.Pow(q / 0.12, 2));
+                    }
+                    else
+                    {
+                        h = rim * Math.Pow(q, -3) * (1 - SmoothStep(2.2, 3.0, q));
+                    }
+                    total += landform.Freshness * h;
+                    break;
+                }
+            }
+        }
+        return total;
     }
 
     /// <summary>
@@ -471,6 +590,7 @@ public sealed class TerrainHeightField
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
         height = Math.Max(height - valley.depth, Math.Min(height, 1.0));
         height = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
+        height += LandformHeight(direction, near[0]);
 
         // Lacs : au cœur de leur zone, l'eau est au niveau du lac ; vers le bord de la zone, ce
         // niveau s'abaisse progressivement jusqu'à passer sous le sol. La rive tombe là où le
@@ -685,10 +805,15 @@ public sealed class TerrainHeightField
         if (height <= 0 || baseHeight < -300 || baseHeight > 1500)
             return height;
         var (_, hill, mountain, _) = ReliefMix(baseHeight, baseSlope);
-        double rocky = SmoothStep(0.05, 0.45, GradientNoise.Sample(position.X / 25000.0, position.Y / 25000.0, position.Z / 25000.0, Seed + 401));
-        double cliff = rocky * (FlatCliffHeight + (RuggedCliffHeight - FlatCliffHeight) * Math.Min(1, hill + mountain));
-        // Raideur de la falaise limitée par la finesse du maillage
-        double rise = Math.Max(8.0, minWavelength);
+        // Côtes rocheuses sur ~60 % du rivage, plages et côtes basses ailleurs ; falaises plus
+        // hautes là où le relief est accidenté
+        double rocky = SmoothStep(-0.2, 0.2, GradientNoise.Sample(position.X / 25000.0, position.Y / 25000.0, position.Z / 25000.0, Seed + 401));
+        double cliff = rocky * (FlatCliffHeight + (RuggedCliffHeight - FlatCliffHeight) * Math.Min(1, hill + mountain + 2 * baseSlope));
+        // Seulement près du rivage : là où le relief de grande échelle est encore bas par rapport
+        // à la falaise (sinon toutes les plaines côtières se retrouvaient surélevées d'autant)
+        cliff *= 1 - SmoothStep(0.5 * cliff, 2.0 * cliff + 1, baseHeight);
+        // Raideur de la falaise limitée par la finesse du maillage (deux fois plus raide qu'avant)
+        double rise = Math.Max(4.0, 0.5 * minWavelength);
         return height + cliff * (1 - Math.Exp(-height / rise));
     }
 

@@ -346,9 +346,18 @@ public sealed class ClimateSimulation : IDisposable
             _atmosphereKernel?.UploadCurrent(Ocean.CurrentPacked);
     }
 
+    /// <summary>
+    /// Voile d'aérosols volcaniques (étape 13a) : forçage radiatif en W/m² (positif = moins de
+    /// Soleil). Appliqué comme une baisse du flux solaire, rapportée aux ~240 W/m² absorbés en
+    /// moyenne : 3 W/m² (Pinatubo) retirent ~1,25 % du rayonnement.
+    /// </summary>
+    public float AerosolForcingWm2 { get; set; }
+
     private void UpdateInsolation()
     {
         Sun = Orbit.ComputeSun(TimeDays);
+        if (AerosolForcingWm2 > 0f)
+            Sun = Sun with { Flux = Sun.Flux * MathF.Max(0.5f, 1f - AerosolForcingWm2 / 240f) };
         if (_insolationKernel != null)
             _insolationKernel.Compute(Sun, InstantInsolation, DailyInsolation);
         else

@@ -60,6 +60,12 @@ des eaux de surface.*
 *Remontées d'eau froide : sous l'équateur (les alizés écartent l'eau vers les pôles) et le long
 des côtes où le vent pousse l'eau vers le large ; elles refroidissent la surface.*
 
+![Éruption volcanique : panache de cendres le jour, lave incandescente la nuit](docs/images/eruption.jpg)
+
+*Éruption : panache de cendres qui monte en volutes (à gauche), coulées de lave incandescente
+la nuit (à droite). Rendu du moteur du projet ; l'éruption est placée ici sur un sommet pour
+l'image, dans le jeu elle naît sur les volcans simulés.*
+
 ![Saisons et banquise dans la vue réaliste](docs/images/saisons.jpg)
 
 *Vue réaliste en juillet et en novembre : feuillus qui se colorent puis perdent leurs feuilles,
@@ -86,8 +92,12 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
   - I : détails (Lune, marée sous la caméra, niveau moyen de la mer…) ;
   - O : qualité d'image (résolution réduite + AMD FSR 1 ou 2 ; FSR 2 qualité au démarrage) ;
-  - U : masquer l'eau ; N : masquer les nuages ; F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux,
-    pluie, neige, puis nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur).
+  - U : masquer l'eau ; N : masquer les nuages ; K : couper le son ;
+  - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
+  - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
+    (fichiers rangés dans le dossier Images/Planet) ;
+  - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, pluie, neige, puis
+    nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ; L : volcan.
 
 ## Licence
 
@@ -95,7 +105,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-09 (étapes 1 à 12 faites, 102 tests).
+Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -142,7 +152,32 @@ Mise à jour : 2026-11-09 (étapes 1 à 12 faites, 102 tests).
   ombres au sol ; pluie, neige et poussière autour de la caméra, éclairées par la lumière du moment.
 - **Sol et saisons** : textures procédurales (strates, roche fissurée, éboulis, dunes et rides de
   sable, canopée des forêts) ; neige selon le climat ; feuillus qui se colorent puis perdent leurs
-  feuilles, herbes qui jaunissent ; fleuves qui coulent (rapides, cascades), houle et écume.
+  feuilles, herbes qui jaunissent ; fleuves qui coulent (rapides, cascades), houle et écume ;
+  côtes à falaises sur ~60 % des rivages ; eau plus sombre et saturée que le sol.
+- **Planète active** :
+  - points chauds fixes sous les plaques : chaînes d'îles volcaniques de plus en plus vieilles,
+    érodées puis englouties ; volcans d'arc au-dessus des subductions ;
+  - cratères d'impact (taux actuel ~1,8 cratère de plus de 20 km par Ma, loi de taille en D^−1,8,
+    bombardement intense des débuts selon la chronologie lunaire), effacés par l'érosion ;
+  - volcans et cratères sculptés dans le relief détaillé (cônes, caldeiras, cuvettes, remparts,
+    pitons centraux) ;
+  - dans l'horloge climatique : éruptions (lave incandescente, panaches de cendres, voile
+    d'aérosols qui refroidit la planète après les plus fortes) et séismes aux frontières de plaques
+    (loi de Gutenberg-Richter, secousse de la caméra quand ils sont ressentis) ;
+  - glaciations : cycles de Milankovitch (excentricité, inclinaison, précession), volume des glaces
+    (Imbrie), mer jusqu'à ~130 m plus bas et limite des neiges abaissée sur une planète assez froide ;
+    le climat simulé reçoit l'orbite du moment.
+- **L'étoile** : système à une étoile, une planète et une lune. La masse de l'étoile (touche E,
+  0,8 à 1,4 masse solaire) fixe sa durée de vie (~10 milliards d'années × M^−2,5), sa luminosité,
+  la distance de la planète (même lumière que la Terre à mi-vie) et la durée de l'année (Kepler).
+  L'étoile s'éclaire en vieillissant (jeune Soleil ~30 % plus faible) ; le gaz carbonique compense
+  une étoile faible mais pas une étoile trop forte : la planète finit par chauffer. En géante rouge,
+  l'étoile enfle et rougit dans le ciel ; **quand elle meurt, la partie est finie** (R : nouvelle
+  planète, E : autre étoile).
+- **Sons** : vent, pluie, vagues, tonnerre, grondements des volcans et des séismes, entièrement
+  synthétisés et pilotés par la simulation (extrait : `docs/sons.mp3`).
+- **Captures** : photos sans l'interface, vidéos AVI Motion JPEG à 30 images/s encodées en tâche de
+  fond, cartes équirectangulaires de n'importe quelle couche à l'instant t.
 
 ## Feuille de route
 
@@ -154,14 +189,31 @@ Faites :
 - **10** : ciel vivant (Lune, atmosphère, nuages, météo autour de la caméra).
 - **11** : océans (courants, marées, remontées d'eau froide, niveau de la mer, banquise).
 - **12** : sol et saisons en haute définition, eau animée.
+- **13** : planète active (volcans, séismes, impacts, glaciations), sons, photos, vidéos et cartes.
 
 À venir :
 
-13. **Planète active** : volcans (points chauds, arcs de subduction), séismes ; impacts de
-    météorites qui s'effacent avec le temps ; glaciations et cycles de Milankovitch (le niveau
-    de la mer suivra les calottes).
-14. **Vie et confort** : arbres et herbes en objets selon le biome ; sauvegarde et chargement ;
-    passe sur la fluidité ; vue sous-marine.
+14. **Vie** : apparition et évolution d'espèces simples qui se répartissent selon le climat et
+    s'adaptent ; leur action sur le milieu (voir plus bas).
+15. **Confort** : sauvegarde et chargement d'une planète ; vue sous-marine ; arbres et herbes en
+    objets au sol.
+
+### Pistes pour la vie et son action sur le milieu
+
+- **Populations par cellule** plutôt qu'individus : densité de chaque espèce (ou groupe
+  fonctionnel : plantes pionnières, forêts, herbivores, prédateurs) dans chaque cellule, croissance
+  selon le climat, dispersion vers les voisines, compétition et prédation (équations de
+  Lotka-Volterra). Évolution : traits qui varient (tolérance au froid, à la sécheresse, taille) et
+  sélection par le milieu ; spéciation quand des populations restent isolées (îles, chaînes de
+  montagnes).
+- **Action sur le milieu**, en retour : la végétation change l'albédo, retient l'eau et l'humus
+  (moins d'érosion), produit l'oxygène et capte le carbone (effet de serre, donc climat) ; les
+  coraux construisent des récifs ; les castors ou les termites modifient localement le terrain.
+- **Modifier le terrain** : le relief détaillé est une fonction calculée à la demande, donc
+  facile à compléter par des **calques de modifications** (creuser, bâtir, déposer) stockés par
+  morceau du quadtree. Les voxels ne seraient utiles que pour des grottes ou des surplombs : on
+  pourrait les limiter à de petites zones (quelques centaines de mètres) autour des lieux modifiés.
+
 
 # Sources et références
 
@@ -269,6 +321,45 @@ de ces mêmes ouvrages.
 - Delpierre N. et al. (2009). *Modelling interannual and spatial variability of leaf senescence
   for three deciduous tree species in France.* Agricultural and Forest Meteorology 149,
   938-948. — jaunissement des feuilles quand il fait plus froid.
+
+## Planète active
+- Wilson J. T. (1963). *A possible origin of the Hawaiian Islands.* Canadian Journal of Physics
+  41(6), 863-870 ; Morgan W. J. (1971). *Convection plumes in the lower mantle.* Nature 230,
+  42-43. — points chauds fixes et chaînes d'îles.
+- Pike R. J. (1977). *Size-dependence in the shape of fresh impact craters on the Moon.* In
+  Impact and Explosion Cratering, Pergamon, 489-509. — profondeur, rempart et piton des cratères.
+- Grieve R. A. F., Shoemaker E. M. (1994). *The record of past impacts on Earth.* In Hazards Due
+  to Comets and Asteroids, University of Arizona Press, 417-462. — taux actuel des impacts.
+- Neukum G., Ivanov B. A., Hartmann W. K. (2001). *Cratering records in the inner solar system in
+  relation to the lunar reference system.* Space Science Reviews 96, 55-86. — chronologie des
+  impacts (bombardement des débuts).
+- Gutenberg B., Richter C. F. (1944). *Frequency of earthquakes in California.* Bulletin of the
+  Seismological Society of America 34(4), 185-188. — loi magnitude-fréquence.
+- Newhall C. G., Self S. (1982). *The volcanic explosivity index (VEI).* Journal of Geophysical
+  Research 87(C2), 1231-1238 ; Siebert L., Simkin T., Kimberly P. (2010). *Volcanoes of the World*,
+  3e éd. University of California Press. — explosivité et fréquence des éruptions.
+- Robock A. (2000). *Volcanic eruptions and climate.* Reviews of Geophysics 38(2), 191-219. —
+  voile d'aérosols et refroidissement après les grandes éruptions.
+- Emery K. O., Kuhn G. G. (1982). *Sea cliffs: their processes, profiles, and classification.*
+  Geological Society of America Bulletin 93(7), 644-654. — part des côtes à falaises.
+- Gough D. O. (1981). *Solar interior structure and luminosity variations.* Solar Physics 74,
+  21-34. — éclairement croissant de l'étoile (jeune Soleil faible).
+- Kippenhahn R., Weigert A., Weiss A. (2012). *Stellar Structure and Evolution*, 2e éd. Springer. —
+  durée de vie selon la masse, relation masse-luminosité, géante rouge.
+- Walker J. C. G., Hays P. B., Kasting J. F. (1981). *A negative feedback mechanism for the
+  long-term stabilization of Earth's surface temperature.* Journal of Geophysical Research 86(C10),
+  9776-9782 ; Caldeira K., Kasting J. F. (1992). *The life span of the biosphere revisited.* Nature
+  360, 721-723. — thermostat du gaz carbonique et ses limites.
+- Imbrie J., Imbrie J. Z. (1980). *Modeling the climatic response to orbital variations.* Science
+  207, 943-953. — volume des glaces piloté par l'ensoleillement d'été.
+- Laskar J. et al. (2004). *A long-term numerical solution for the insolation quantities of the
+  Earth.* Astronomy & Astrophysics 428, 261-285. — référence pour les cycles orbitaux (ici
+  remplacés par quelques termes périodiques aux périodes de Berger 1978).
+
+## Sons et captures
+- Farnell A. (2010). *Designing Sound.* MIT Press. — synthèse procédurale du vent, de la pluie,
+  du tonnerre et des vagues à partir de bruits filtrés.
+- Microsoft (1992). *AVI RIFF File Reference* (Video for Windows). — conteneur des vidéos.
 
 ## Rendu
 - Strugar F. (2009). *Continuous Distance-Dependent Level of Detail for Rendering Heightmaps.*

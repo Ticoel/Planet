@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Godot;
 using Planet.Rendering;
 using Planet.Simulation;
+using Planet.Simulation.Audio;
 using Planet.Simulation.Climate;
 using Planet.Simulation.Tectonics;
 using Planet.Simulation.Terrain;
@@ -56,6 +57,8 @@ public partial class Main : Node3D
 
     [Export(PropertyHint.Range, "100,5000,1")]
     public float SolarConstant { get; set; } = 1361f;
+    /// <summary>Masse de l'étoile (masses solaires) : fixe sa durée de vie (touche E pour en changer).</summary>
+    [Export] public float StarMass { get; set; } = 1f;
 
     [ExportGroup("Calcul")]
     /// <summary>Calcul du climat sur la carte graphique (repli automatique sur le processeur).</summary>
@@ -69,6 +72,8 @@ public partial class Main : Node3D
     private const float FastGeologicalSpeed = 100f;
     // Âge de la Terre (Ma) : but de l'avance rapide (touche T)
     private const double EarthAgeMyr = 4540.0;
+    // Autour d'une étoile massive (vie plus courte), l'avance rapide s'arrête avant sa mort
+    private double FastForwardTargetMyr => Math.Min(EarthAgeMyr, 0.9 * _star.LifetimeGyr * 1000.0);
 
     // Vitesses de l'horloge climatique, en jours par seconde réelle : du temps réel à 3 mois/s
     private static readonly float[] ClimateSpeeds =
@@ -115,7 +120,26 @@ public partial class Main : Node3D
     private OrbitalParameters _orbit;
 
     // Estimation du climat pour l'érosion (horloge géologique)
-    private Task<float[]> _estimateTask;
+    private Task<FastClimateEstimate> _estimateTask;
+    // Planète active (étape 13) : éruptions et séismes de l'horloge climatique, glaciations
+    private PlanetActivity _activity;
+    private readonly GlacialCycles _glacial = new();
+    private double _estimatedMeanTemperature = 15.0;
+    private float _displaySeaLevel;
+    private double _shakeSeconds, _shakeStrength;
+    private readonly HashSet<Eruption> _announcedEruptions = new();
+    private readonly Dictionary<Eruption, float> _ventHeights = new();
+    private readonly Vector4[] _eruptionVents = new Vector4[8];
+    private readonly Vector4[] _eruptionShapes = new Vector4[8];
+    private string _lastQuake;
+    private SoundscapePlayer _sound;
+    private CaptureManager _capture;
+    // L'étoile du système (une étoile, une planète, une lune) ; quand elle meurt, la partie est finie
+    private static readonly float[] StarMasses = { 0.8f, 0.9f, 1f, 1.1f, 1.2f, 1.4f };
+    private Star _star;
+    private StarPhase _starPhase;
+    private bool _gameOver;
+    private bool _muted;
     private TectonicPlates _estimateSource;
     private double _nextEstimateMyr;
 
@@ -195,14 +219,24 @@ public partial class Main : Node3D
 
         // Le climat est créé dès le départ : la vérification de la carte graphique s'affiche
         // ainsi tout de suite dans la console
+        _star = new Star(StarMass);
         _orbit = new OrbitalParameters
         {
             AxialTiltDeg = AxialTiltDeg,
             Eccentricity = Eccentricity,
-            YearLengthDays = YearLengthDays,
+            YearLengthDays = (float)_star.YearLengthDays,
             SolarConstant = SolarConstant,
         };
         _climate = new ClimateSimulation(_grid, _orbit, UseGpu, ClimateStartDay);
+        _activity = new PlanetActivity(Seed);
+        _sound = new SoundscapePlayer { Name = "Sound" };
+        AddChild(_sound);
+        _capture = new CaptureManager
+        {
+            Name = "Capture", Notify = ShowNotice,
+            SetInterfaceVisible = visible => { if (_hud != null) _hud.Visible = visible; },
+        };
+        AddChild(_capture);
 
         stopwatch.Restart();
         _terrain = new TerrainRenderer { Name = "Terrain" };
@@ -263,6 +297,7 @@ public partial class Main : Node3D
         }
         _terrain.Coloring = ColoringFor(_displayMode);
         _terrain.Tick(delta, ReadInput());
+        ApplyShake(delta);
         _noticeTimer -= delta;
         UpdateSky(delta);
         UpdateOverlays(delta);
@@ -287,7 +322,7 @@ public partial class Main : Node3D
         double simulated = 0;
         while (_pendingTime >= step && stopwatch.Elapsed.TotalMilliseconds < budget)
         {
-            if (_fastForward && _tectonics.TimeMyr >= EarthAgeMyr)
+            if (_fastForward && _tectonics.TimeMyr >= FastForwardTargetMyr)
             {
                 // Arrivé : retour à la vitesse normale, en pause pour regarder le résultat
                 _fastForward = false;
@@ -299,6 +334,8 @@ public partial class Main : Node3D
             _tectonics.Step(step);
             _pendingTime -= step;
             simulated += step;
+            if (CheckStar())
+                break;
         }
         _pendingTime = Math.Min(_pendingTime, step);
         MeasureSpeed(delta, simulated);
@@ -312,6 +349,70 @@ public partial class Main : Node3D
             StartClimateEstimate();
     }
 
+    /// <summary>
+    /// Orbite de la planète à un instant géologique (copie : les estimations du climat tournent en
+    /// tâche de fond) : lumière de l'étoile vieillissante, cycles de Milankovitch.
+    /// </summary>
+    private OrbitalParameters OrbitAt(double timeMyr)
+    {
+        var orbit = new OrbitalParameters { AxialTiltDeg = AxialTiltDeg, Eccentricity = Eccentricity, SolarConstant = SolarConstant };
+        GlacialCycles.ApplyTo(orbit, GlacialCycles.ElementsAt(timeMyr));
+        _star.ApplyTo(orbit, timeMyr / 1000.0);
+        return orbit;
+    }
+
+    /// <summary>Changements de phase de l'étoile ; vrai si elle vient de mourir (fin de la partie).</summary>
+    private bool CheckStar()
+    {
+        StarPhase phase = _star.PhaseAt(_tectonics.TimeMyr / 1000.0);
+        if (phase == _starPhase)
+            return false;
+        _starPhase = phase;
+        if (phase == StarPhase.RedGiant)
+        {
+            ShowNotice("L'étoile a épuisé l'hydrogène de son cœur : elle enfle en géante rouge, la planète brûle");
+            return false;
+        }
+        if (phase == StarPhase.Dead)
+        {
+            _gameOver = true;
+            _running = false;
+            _fastForward = false;
+            _pendingTime = 0;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>Touche E : étoile suivante (plus ou moins massive) ; une nouvelle planète se forme autour.</summary>
+    private void NextStar()
+    {
+        int index = Array.IndexOf(StarMasses, StarMass);
+        StarMass = StarMasses[(index + 1) % StarMasses.Length];
+        _star = new Star(StarMass);
+        // Nouvelle année (troisième loi de Kepler) : le climat repart de zéro avec la nouvelle orbite
+        _estimateTask?.Wait();
+        _estimateTask = null;
+        _climate.Dispose();
+        _orbit.YearLengthDays = (float)_star.YearLengthDays;
+        _orbit.SolarConstant = SolarConstant;
+        _climate = new ClimateSimulation(_grid, _orbit, UseGpu, ClimateStartDay);
+        _climateSurfaceSource = null;
+        GeneratePlanet();
+        ShowNotice($"Étoile de {French(StarMass)} masse solaire : vie de {French((float)_star.LifetimeGyr)} milliards d'années, " +
+                   $"planète à {French((float)_star.PlanetDistanceAu)} UA, année de {_star.YearLengthDays:0} jours");
+    }
+
+    /// <summary>État de l'étoile pour les détails.</summary>
+    private string StarLine()
+    {
+        double age = _tectonics.TimeMyr / 1000.0;
+        StarPhase phase = _star.PhaseAt(age);
+        return $"Étoile : {French(StarMass)} masse solaire, {Star.PhaseName(phase)}, âge {French((float)age)} sur " +
+               $"{French((float)_star.LifetimeGyr)} milliards d'années (mort vers {French((float)_star.DeathGyr)})   " +
+               $"lumière ×{French((float)_star.RelativeLuminosity(age))}, reçue par le climat ×{French((float)_star.EffectiveIrradiance(age))}";
+    }
+
     private bool IsFastGeology => _fastForward || GeologicalSpeeds[_geologicalSpeed] >= FastGeologicalSpeed;
 
     /// <summary>Touche T : avance rapide jusqu'à l'âge de la Terre (ou arrêt de l'avance rapide).</summary>
@@ -323,7 +424,7 @@ public partial class Main : Node3D
             _geologicalSpeed = DefaultGeologicalSpeed;
             return;
         }
-        if (_tectonics.TimeMyr >= EarthAgeMyr)
+        if (_tectonics.TimeMyr >= FastForwardTargetMyr)
             return;
         if (_clock != ClockMode.Geological)
             SetClock(ClockMode.Geological);
@@ -341,10 +442,10 @@ public partial class Main : Node3D
         if (_estimateTask != null)
             return;
         var grid = _grid;
-        var orbit = _orbit;
+        var orbit = OrbitAt(_tectonics.TimeMyr);
         var elevation = (float[])_tectonics.CellElevation.Clone();
         _estimateSource = _tectonics;
-        _estimateTask = Task.Run(() => FastClimateEstimator.Estimate(grid, elevation, orbit).AnnualPrecipitation);
+        _estimateTask = Task.Run(() => FastClimateEstimator.Estimate(grid, elevation, orbit));
         _nextEstimateMyr = _tectonics.TimeMyr + ClimateEstimateIntervalMyr;
     }
 
@@ -353,7 +454,10 @@ public partial class Main : Node3D
         if (_estimateTask == null || !_estimateTask.IsCompleted)
             return;
         if (_estimateTask.IsCompletedSuccessfully && _estimateSource == _tectonics)
-            _tectonics.AnnualPrecipitation = _estimateTask.Result;
+        {
+            _tectonics.AnnualPrecipitation = _estimateTask.Result.AnnualPrecipitation;
+            _estimatedMeanTemperature = _estimateTask.Result.MeanTemperature.Average();
+        }
         else if (!_estimateTask.IsCompletedSuccessfully)
             GD.PushWarning($"Climate estimate failed: {_estimateTask.Exception?.GetBaseException().Message}");
         _estimateTask = null;
@@ -369,6 +473,95 @@ public partial class Main : Node3D
         double simulated = _climate.Step(dtDays);
         MeasureSpeed(delta, simulated);
         _colorsDirty = true;
+
+        // Éruptions et séismes (étape 13a) ; les aérosols des grosses éruptions voilent le Soleil
+        _activity.Step(_climate.TimeDays, simulated);
+        _climate.AerosolForcingWm2 = _activity.AerosolForcing;
+        ReportActivity();
+    }
+
+    /// <summary>Séismes ressentis à la caméra (secousse, message) et nouvelles éruptions notables.</summary>
+    private void ReportActivity()
+    {
+        Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
+        foreach (var quake in _activity.RecentEarthquakes)
+        {
+            double distanceKm = quake.Position.AngleTo(camera) * PlanetConstants.RadiusKm;
+            float felt = PlanetActivity.FeltIntensity(quake.Magnitude, distanceKm);
+            if (felt >= 3f && _terrain.Explorer.AltitudeAboveGround < 20000)
+            {
+                // Secousse : plus forte et plus longue pour un séisme fort et proche
+                _shakeStrength = Math.Max(_shakeStrength, (felt - 2.5) * 0.15);
+                _shakeSeconds = Math.Max(_shakeSeconds, 1.5 + quake.Magnitude - 5);
+            }
+            if (felt >= 3.5f || quake.Magnitude >= 7.5f)
+            {
+                _lastQuake = $"Séisme de magnitude {French(quake.Magnitude)} à {distanceKm:N0} km";
+                ShowNotice(_lastQuake + (felt >= 3.5f ? $" (ressenti, intensité {felt:0})" : ""));
+            }
+        }
+        foreach (var eruption in _activity.Eruptions)
+        {
+            if (!_announcedEruptions.Add(eruption))
+                continue;
+            double distanceKm = eruption.Position.AngleTo(camera) * PlanetConstants.RadiusKm;
+            if (eruption.Vei >= 4 || distanceKm < 500)
+                ShowNotice($"Éruption (indice d'explosivité {eruption.Vei}) à {distanceKm:N0} km");
+        }
+        _announcedEruptions.RemoveWhere(e => !_activity.Eruptions.Contains(e));
+    }
+
+    /// <summary>Secousse de la caméra pendant un séisme ressenti (petits déplacements aléatoires).</summary>
+    private void ApplyShake(double delta)
+    {
+        var camera = _terrain.Camera;
+        if (_shakeSeconds <= 0)
+        {
+            camera.Position = Vector3.Zero;
+            _shakeStrength = 0;
+            return;
+        }
+        _shakeSeconds -= delta;
+        float amplitude = (float)(_shakeStrength * Math.Min(1.0, _shakeSeconds));
+        float time = Time.GetTicksMsec() / 1000f;
+        camera.Position = new Vector3(MathF.Sin(time * 37f), MathF.Sin(time * 29f + 1f), MathF.Sin(time * 43f + 2f)) * amplitude;
+        camera.RotateObjectLocal(Vector3.Right, MathF.Sin(time * 23f) * amplitude * 0.01f);
+    }
+
+    /// <summary>Éruptions les plus proches de la caméra, pour la lave du terrain et les panaches.</summary>
+    private void UpdateEruptionUniforms(bool climate)
+    {
+        int count = 0;
+        if (climate)
+        {
+            Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
+            double day = _climate.TimeDays;
+            var nearest = _activity.Eruptions
+                .Select(e => (eruption: e, distance: e.Position.AngleTo(camera)))
+                .Where(x => x.distance * PlanetConstants.RadiusKm < 1500 && x.eruption.IntensityAt(day) > 0)
+                .OrderBy(x => x.distance).Take(_eruptionVents.Length);
+            foreach (var (eruption, _) in nearest)
+            {
+                if (!_ventHeights.TryGetValue(eruption, out float height))
+                {
+                    int hint = -1;
+                    height = (float)(_terrain.Field?.Sample(Double3.From(eruption.Position).Normalized(), 100, ref hint).Height ?? 0);
+                    _ventHeights[eruption] = height;
+                }
+                float intensity = eruption.IntensityAt(day);
+                Vector3 p = eruption.Position;
+                _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, intensity);
+                float lavaRadius = eruption.Vei <= 1 ? 6000f : 2500f;
+                _eruptionShapes[count] = new Vector4(lavaRadius, eruption.PlumeHeightM, eruption.Vei, height);
+                count++;
+            }
+            if (_ventHeights.Count > 64)
+                _ventHeights.Clear();
+        }
+        _terrain.SetShaderParameter("eruption_count", count);
+        _terrain.SetShaderParameter("eruption_vents", _eruptionVents);
+        _terrain.SetShaderParameter("eruption_shapes", _eruptionShapes);
+        _sky.SetEruptions(count, _eruptionVents, _eruptionShapes);
     }
 
     private void MeasureSpeed(double delta, double simulated)
@@ -401,6 +594,10 @@ public partial class Main : Node3D
             // sinon il reprend là où il s'était arrêté
             if (_climateSurfaceSource != _tectonics || _climateSurfaceTimeMyr != _tectonics.TimeMyr)
             {
+                // Orbite du moment (cycles de Milankovitch, étape 13c) et volcans actifs du relief figé
+                GlacialCycles.ApplyTo(_orbit, GlacialCycles.ElementsAt(_tectonics.TimeMyr));
+                _star.ApplyTo(_orbit, _tectonics.TimeMyr / 1000.0);
+                _activity.SetPlanet(_tectonics);
                 _climate.SetSurface(_tectonics.CellElevation);
                 _climateSurfaceSource = _tectonics;
                 _climateSurfaceTimeMyr = _tectonics.TimeMyr;
@@ -487,6 +684,8 @@ public partial class Main : Node3D
     private void GeneratePlanet()
     {
         _fastForward = false;
+        _gameOver = false;
+        _starPhase = StarPhase.MainSequence;
         var stopwatch = Stopwatch.StartNew();
         _tectonics = TectonicPlates.Generate(_grid, PlateCount, Seed);
         long platesMs = stopwatch.ElapsedMilliseconds;
@@ -504,7 +703,9 @@ public partial class Main : Node3D
         stopwatch.Restart();
         _estimateTask?.Wait();
         _estimateTask = null;
-        _tectonics.AnnualPrecipitation = FastClimateEstimator.Estimate(_grid, _tectonics.CellElevation, _orbit).AnnualPrecipitation;
+        var estimate = FastClimateEstimator.Estimate(_grid, _tectonics.CellElevation, OrbitAt(_tectonics.TimeMyr));
+        _tectonics.AnnualPrecipitation = estimate.AnnualPrecipitation;
+        _estimatedMeanTemperature = estimate.MeanTemperature.Average();
         _nextEstimateMyr = ClimateEstimateIntervalMyr;
         GD.Print($"Climate estimate for erosion in {stopwatch.ElapsedMilliseconds} ms");
 
@@ -523,7 +724,7 @@ public partial class Main : Node3D
         _terrainTask?.Wait();
         _terrainTask = null;
         var stopwatch = Stopwatch.StartNew();
-        var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff());
+        var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff(), _tectonics.SnapshotLandforms());
         _terrain.SetField(field, progressive);
         _terrainSource = _tectonics;
         _terrainTimeMyr = _tectonics.TimeMyr;
@@ -555,7 +756,8 @@ public partial class Main : Node3D
         _terrainSource = _tectonics;
         _terrainTimeMyr = _tectonics.TimeMyr;
         _terrainRefreshTimer = IsFastGeology ? FastTerrainRefreshSeconds : TerrainRefreshSeconds;
-        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff));
+        var landforms = _tectonics.SnapshotLandforms();
+        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms));
     }
 
     /// <summary>
@@ -655,13 +857,25 @@ public partial class Main : Node3D
             _cloudsShown = false;
         }
         _terrain.SetShaderParameter("clouds_enabled", _sky.HasClouds && _cloudsShown);
+        // Glaciations (étape 13c) : volume des glaces à l'instant géologique ; dans l'horloge
+        // géologique, le niveau affiché suit en douceur (à grande vitesse, plusieurs cycles de
+        // Milankovitch passent en une seconde : les côtes auraient clignoté)
+        _glacial.AdvanceTo(_tectonics.TimeMyr, _estimatedMeanTemperature);
+        float glacialSea = (float)_glacial.SeaLevelM;
+        _displaySeaLevel = climate ? glacialSea : Mathf.Lerp(_displaySeaLevel, glacialSea, 1f - MathF.Exp(-(float)delta * 1.5f));
+        _terrain.SetShaderParameter("glacial_cooling", (float)_glacial.CoolingCelsius);
+        UpdateEruptionUniforms(climate);
+        double starAge = _tectonics.TimeMyr / 1000.0;
+        var (tr, tg, tb) = _star.Tint(starAge);
+        _sky.SetStar((float)_star.AngularRadius(starAge), new Vector3(tr, tg, tb));
+
         // Marées (étape 11b) et niveau de la mer selon la glace des terres (étape 11d)
         double skyTime = SkyTimeDays();
         TideState tide = climate ? Tides.Compute(skyTime, _orbit) : default;
         _terrain.SetShaderParameter("tide_moon", new Vector4(tide.MoonDirection.X, tide.MoonDirection.Y, tide.MoonDirection.Z, tide.MoonAmplitude));
         _terrain.SetShaderParameter("tide_sun", new Vector4(tide.SunDirection.X, tide.SunDirection.Y, tide.SunDirection.Z, tide.SunAmplitude));
         _terrain.SetShaderParameter("tide_high", tide.MaxHeight);
-        _terrain.SetShaderParameter("sea_level", climate ? _climate.SeaLevelMeters : 0f);
+        _terrain.SetShaderParameter("sea_level", _displaySeaLevel + (climate ? _climate.SeaLevelMeters : 0f));
         _terrain.SetShaderParameter("cloud_time", (float)((_climate.TimeDays * 86400.0) % SkyRenderer.CloudTimeWrapSeconds));
 
         var frame = new SkyFrame
@@ -675,6 +889,7 @@ public partial class Main : Node3D
             Weather = climate ? LocalWeatherAtCamera() : null,
         };
         _sky.Update(frame, delta);
+        UpdateSound(frame);
     }
 
     /// <summary>Densité de la canopée par cellule (0 à 1) : forêts, moins les feuillus sans feuilles ;
@@ -707,6 +922,7 @@ public partial class Main : Node3D
     {
         "plus haut sommet", "plus grand fleuve", "grand lac", "côte", "désert venteux",
         "forêt sous la pluie", "neige qui tombe", "au-dessus des nuages", "coucher de soleil", "Lune",
+        "volcan",
     };
 
     /// <summary>
@@ -718,7 +934,7 @@ public partial class Main : Node3D
         if (index < 0 || index >= PlaceNames.Length)
             return;
         var explorer = _terrain.Explorer;
-        bool needsClimate = index >= 4;
+        bool needsClimate = index >= 4 && index != 10;
         if (needsClimate && _clock != ClockMode.Climate)
             SetClock(ClockMode.Climate);
         if (needsClimate && !_climate.HasTemperature)
@@ -853,6 +1069,32 @@ public partial class Main : Node3D
                 detail = $"{MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100:0} %";
                 break;
             }
+            case 10:
+            {
+                // Volcan en éruption le plus proche (horloge climatique), sinon un volcan actif
+                Double3 camera = explorer.Position.Normalized();
+                Vector3? target = null;
+                if (_clock == ClockMode.Climate && _activity.Eruptions.Count > 0)
+                    target = _activity.Eruptions.OrderBy(e => e.Position.AngleTo(camera.ToVector3())).First().Position;
+                else
+                {
+                    var active = _tectonics.Landforms.Where(l => l.Active && l.Kind != LandformKind.ImpactCrater)
+                        .OrderByDescending(l => l.PeakHeightM * l.Growth).FirstOrDefault();
+                    if (active != null)
+                        target = active.Position;
+                }
+                if (target == null)
+                {
+                    ShowNotice("Aucun volcan actif sur cette planète pour l'instant");
+                    return;
+                }
+                Double3 vent = Double3.From(target.Value).Normalized();
+                Double3 east = Double3.UnitY.Cross(vent).Normalized();
+                explorer.PlaceAbove((vent - east * 0.004).Normalized(), 2500);
+                explorer.Face(east, -0.05);
+                detail = _clock == ClockMode.Climate && _activity.Eruptions.Count > 0 ? "en éruption" : "actif";
+                break;
+            }
             default:
                 ShowNotice("Réseau des fleuves pas encore calculé");
                 return;
@@ -963,9 +1205,14 @@ public partial class Main : Node3D
         if (_clock == ClockMode.Geological)
         {
             string speed = !_running ? "EN PAUSE"
-                : _fastForward ? $"AVANCE RAPIDE jusqu'à 4,54 milliards d'années ({French(_effectiveSpeed)} Ma/s)"
+                : _fastForward ? $"AVANCE RAPIDE jusqu'à {French((float)(FastForwardTargetMyr / 1000.0))} milliards d'années ({French(_effectiveSpeed)} Ma/s)"
                 : $"{French(GeologicalSpeeds[_geologicalSpeed])} Ma/s (réel {French(_effectiveSpeed)})";
             lines.Add($"GÉOLOGIE   {AgeLabel(_tectonics.TimeMyr)}   {speed}");
+            if (_gameOver)
+            {
+                lines.Add("FIN : l'étoile est morte. Devenue géante rouge, elle a brûlé la planète, puis s'est éteinte en naine blanche.");
+                lines.Add("R : nouvelle planète   E : autre étoile");
+            }
         }
         else
         {
@@ -1002,7 +1249,9 @@ public partial class Main : Node3D
             lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
             lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
-            lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages");
+            lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
+            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption");
+            lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité d'image (résolution réduite + AMD FSR)");
             lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
@@ -1023,6 +1272,9 @@ public partial class Main : Node3D
             lines.Add($"Continents : {French(_tectonics.ContinentalFraction * 100f)} % de la surface   " +
                       $"Point culminant : {French(_tectonics.CellElevation.Max())} km   " +
                       $"Fosse la plus profonde : {French(_tectonics.CellElevation.Min())} km");
+            lines.Add(ActivityLine());
+            lines.Add(GlacialLine());
+            lines.Add(StarLine());
         }
         else
         {
@@ -1032,6 +1284,11 @@ public partial class Main : Node3D
             var moon = MoonOrbit.Compute(_climate.TimeDays, _orbit);
             lines.Add($"Lune : {MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100f:0} %, à {moon.DistanceKm:N0} km   " +
                       TideLabel(moon));
+            lines.Add($"Volcans actifs : {_activity.ActiveVolcanoCount}   Éruptions en cours : {_activity.Eruptions.Count}" +
+                      (_activity.AerosolForcing > 0.05f ? $"   Voile volcanique : −{French(_activity.AerosolForcing)} W/m²" : "") +
+                      (_lastQuake != null ? $"   Dernier séisme notable : {_lastQuake}" : ""));
+            lines.Add(GlacialLine());
+            lines.Add(StarLine());
             if (_climate.HasTemperature)
             {
                 lines.Add($"Extrêmes : {French(_climate.SurfaceTemperature.Min())} °C / {French(_climate.SurfaceTemperature.Max())} °C   " +
@@ -1258,6 +1515,83 @@ public partial class Main : Node3D
         ? $"{daysPerSecond * 24.0:0.0} h/s".Replace('.', ',')
         : $"{daysPerSecond:0.0} jours/s".Replace('.', ',');
 
+    /// <summary>
+    /// Ce qu'on entend (sons synthétisés) : vent et pluie du climat à la caméra, vagues près des
+    /// côtes, tonnerre sous les averses, grondement des volcans en éruption et des séismes.
+    /// </summary>
+    private void UpdateSound(in SkyFrame frame)
+    {
+        if (_sound == null)
+            return;
+        _sound.Volume = _muted ? 0f : 0.8f;
+        var input = new SoundscapeInput { AltitudeM = (float)frame.AltitudeAboveGround, Quake = (float)Math.Min(1.0, _shakeStrength * 2) };
+        if (frame.Weather.HasValue)
+        {
+            LocalWeather w = frame.Weather.Value;
+            float precipitation = Mathf.SmoothStep(0.3f, 20f, w.PrecipitationMmPerDay);
+            float snow = Mathf.SmoothStep(1.5f, -1.5f, w.TemperatureC);
+            input.WindSpeed = w.Wind.Length() * (1f + (float)Math.Min(1.0, frame.AltitudeAboveGround / 3000.0));
+            input.Rain = precipitation * (1f - snow);
+            input.Snow = precipitation * snow;
+            input.ThunderRate = 0.15f * Mathf.SmoothStep(8f, 25f, w.PrecipitationMmPerDay) * (1f - snow);
+        }
+        // Vagues : sur la mer ou près d'une côte (la cellule ou une voisine est de l'autre milieu)
+        int cell = Math.Max(_weatherHint, 0);
+        cell = _grid.NearestCell(_terrain.Explorer.Position.Normalized().ToVector3(), cell);
+        bool sea = _terrain.Explorer.GroundHeight < 0;
+        bool coast = false;
+        foreach (int n in _grid.Neighbors[cell])
+            if ((_tectonics.CellElevation[n] < 0) != (_tectonics.CellElevation[cell] < 0))
+                coast = true;
+        input.Surf = sea ? (coast ? 1f : 0.5f) : coast ? 0.6f : 0f;
+        // Volcans : grondement audible jusqu'à quelques dizaines de km (plus loin pour les plus violents)
+        if (frame.Weather.HasValue)
+        {
+            Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
+            foreach (var eruption in _activity.Eruptions)
+            {
+                double km = eruption.Position.AngleTo(camera) * PlanetConstants.RadiusKm;
+                float reach = 20f * (1 + eruption.Vei);
+                input.Volcano = MathF.Max(input.Volcano, eruption.IntensityAt(_climate.TimeDays) * Math.Clamp(1f - (float)km / reach, 0f, 1f));
+            }
+        }
+        _sound.Input = input;
+    }
+
+    /// <summary>Touche M : carte de la couche affichée à l'instant présent (projection équirectangulaire).</summary>
+    private void ExportMap()
+    {
+        DisplayMode mode = ColoringFor(_displayMode) is TerrainColoring.Geology ? DisplayMode.Elevation : _displayMode;
+        var colors = PlanetColorizer.Compute(_tectonics, _climate, mode);
+        string when = _clock == ClockMode.Climate ? $"annee{_climate.TimeDays / _orbit.YearLengthDays + 1:0}_jour{_climate.TimeDays % _orbit.YearLengthDays:0}"
+                                                   : $"{_tectonics.TimeMyr:0}Ma";
+        _capture.ExportMap(_grid, colors, $"{mode}_{when}");
+    }
+
+    /// <summary>Volcans et cratères de l'horloge géologique.</summary>
+    private string ActivityLine()
+    {
+        int active = 0, extinct = 0, craters = 0;
+        foreach (var landform in _tectonics.Landforms)
+        {
+            if (landform.Kind == LandformKind.ImpactCrater) craters++;
+            else if (landform.Active) active++;
+            else extinct++;
+        }
+        return $"Volcans : {active} actifs, {extinct} éteints   Cratères visibles : {craters} (impacts depuis le début : {_tectonics.ImpactCount:N0})";
+    }
+
+    /// <summary>Orbite du moment et glaciations.</summary>
+    private string GlacialLine()
+    {
+        var elements = GlacialCycles.ElementsAt(_tectonics.TimeMyr);
+        string ice = _glacial.Strength <= 0.01
+            ? "planète trop chaude pour les glaciations"
+            : $"glaces {_glacial.IceFraction * 100:0} % du maximum, mer {French((float)_glacial.SeaLevelM)} m, {French((float)_glacial.CoolingCelsius)} °C";
+        string eccentricity = elements.Eccentricity.ToString("0.000").Replace('.', ',');
+        return $"Orbite : excentricité {eccentricity}, axe incliné de {French((float)elements.ObliquityDeg)}°, périhélie à {elements.PerihelionLongitudeDeg:0}°   {ice}";
+    }
+
     /// <summary>Marée sous la caméra : hauteur, sens, coefficient (vives-eaux ou mortes-eaux), niveau moyen.</summary>
     private string TideLabel(MoonState moon)
     {
@@ -1269,7 +1603,7 @@ public partial class Main : Node3D
         double alignment = Math.Cos(4 * Math.PI * moon.Phase);
         string kind = alignment > 0.5 ? "vives-eaux" : alignment < -0.5 ? "mortes-eaux" : "marée moyenne";
         string trend = soon > now ? "montante" : "descendante";
-        float level = _climate.SeaLevelMeters;
+        float level = _displaySeaLevel + _climate.SeaLevelMeters;
         return $"Marée : {now.ToString("+0.00;-0.00").Replace('.', ',')} m, {trend}, {kind}   " +
                $"Niveau moyen de la mer : {level.ToString("+0.00;-0.00").Replace('.', ',')} m";
     }
@@ -1396,7 +1730,13 @@ public partial class Main : Node3D
                 _terrain.Explorer.PlaceAbove(_terrain.Explorer.Position, OrbitAltitude);
                 break;
             case Key.P:
-                _running = !_running;
+                if (_gameOver)
+                    ShowNotice("L'étoile est morte : R pour une nouvelle planète, E pour une autre étoile");
+                else
+                    _running = !_running;
+                break;
+            case Key.E:
+                NextStar();
                 break;
             case Key.T:
                 ToggleFastForward();
@@ -1409,6 +1749,23 @@ public partial class Main : Node3D
             case Key.U:
                 // Eau masquée : on voit les fonds marins et le fond des lacs
                 _terrain.ShowWater = !_terrain.ShowWater;
+                break;
+            case Key.F12:
+                // Photo ; Maj + F12 : démarrer ou arrêter une vidéo
+                if (key.ShiftPressed)
+                    _capture.ToggleVideo();
+                else
+                    _capture.TakePhoto();
+                break;
+            case Key.M:
+                ExportMap();
+                break;
+            case Key.L:
+                GoToPlace(10);
+                break;
+            case Key.K:
+                _muted = !_muted;
+                ShowNotice(_muted ? "Son coupé (K pour le remettre)" : "Son remis");
                 break;
             case Key.N:
                 // Nuages masqués : on voit le relief et les couleurs du sol depuis l'orbite

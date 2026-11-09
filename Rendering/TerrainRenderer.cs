@@ -108,6 +108,7 @@ public partial class TerrainRenderer : Node3D
     private ShaderMaterial _waterMaterial;
     private Image _cellDataImage;
     private ImageTexture _cellDataTexture;
+    private byte[] _cellDataBytes;
     private float[] _cellData;
     private long _frame;
     // Relief affiché (_generation : le plus récent, peut-être encore en préparation)
@@ -279,9 +280,11 @@ public partial class TerrainRenderer : Node3D
             _cellData[cell * 4 + 2] = elevationKm[cell] * 1000f;
             _cellData[cell * 4 + 3] = canopy?[cell] ?? 0f;
         }
-        var bytes = new byte[_cellData.Length * sizeof(float)];
-        Buffer.BlockCopy(_cellData, 0, bytes, 0, bytes.Length);
-        _cellDataImage.SetData(CellColorLayer.TextureWidth, _cellColorHeight, false, Image.Format.Rgbaf, bytes);
+        // (tampon réutilisé : 4 fois par seconde, une nouvelle copie de plusieurs Mo pesait sur le
+        // ramasse-miettes)
+        _cellDataBytes ??= new byte[_cellData.Length * sizeof(float)];
+        Buffer.BlockCopy(_cellData, 0, _cellDataBytes, 0, _cellDataBytes.Length);
+        _cellDataImage.SetData(CellColorLayer.TextureWidth, _cellColorHeight, false, Image.Format.Rgbaf, _cellDataBytes);
         _cellDataTexture.Update(_cellDataImage);
         SetBoth("has_climate", true);
     }
@@ -742,6 +745,13 @@ uniform vec4 tide_sun = vec4(0.0, 1.0, 0.0, 0.0);
 uniform float sea_level = 0.0;
 // Plus haute mer possible au point le plus favorable (m) : limite haute de l'estran
 uniform float tide_high = 0.0;
+// Glaciations (étape 13c) : refroidissement global (°C, négatif) qui abaisse la limite des neiges
+uniform float glacial_cooling = 0.0;
+// Éruptions en cours (étape 13a), les plus proches de la caméra : direction de la bouche (xyz)
+// et intensité (w) ; forme : rayon des coulées (m), hauteur du panache (m), VEI, altitude de la bouche (m)
+uniform int eruption_count = 0;
+uniform vec4 eruption_vents[8];
+uniform vec4 eruption_shapes[8];
 
 float sea_surface(vec3 up) {
     float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
@@ -856,10 +866,9 @@ ivec2 cell_pixel(int cell) {
 }
 
 // Couche de données (plaques, températures…) : les 4 cellules voisines mélangées
-vec3 layer_color_blend(vec3 d) {
-    ivec4 cells;
-    vec4 weights;
-    smooth_cells(d, cells, weights);
+// (les cellules et leurs poids sont calculés une seule fois par pixel : smooth_cells coûte
+// quatre bruits de gradient)
+vec3 layer_color_blend(ivec4 cells, vec4 weights) {
     vec3 sum = vec3(0.0);
     for (int k = 0; k < 4; k++)
         sum += texelFetch(cell_colors, cell_pixel(cells[k]), 0).rgb * weights[k];
@@ -887,10 +896,7 @@ vec3 elevation_color(float h) {
     return ELEVATION_COLORS[12];
 }
 
-vec3 layer_color_smooth(vec3 d, bool land) {
-    ivec4 cells;
-    vec4 weights;
-    smooth_cells(d, cells, weights);
+vec3 layer_color_smooth_cells(ivec4 cells, vec4 weights, bool land) {
     vec3 sum = vec3(0.0);
     float total = 0.0;
     vec3 fallback = vec3(0.0);
@@ -911,15 +917,20 @@ vec3 layer_color_smooth(vec3 d, bool land) {
     return land ? vec3(0.45, 0.42, 0.34) : fallback / max(fallbackTotal, 1e-4);
 }
 
+vec3 layer_color_smooth(vec3 d, bool land) {
+    ivec4 cells;
+    vec4 weights;
+    smooth_cells(d, cells, weights);
+    return layer_color_smooth_cells(cells, weights, land);
+}
+
+
 
 // Climat des cellules voisines, mélangé (lu cellule par cellule, la limite de la neige
 // dessinait des marches d'escalier)
-vec4 climate_data(vec3 up) {
+vec4 climate_data(ivec4 cells, vec4 weights) {
     if (!has_climate)
         return vec4(0.0);
-    ivec4 cells;
-    vec4 weights;
-    smooth_cells(up, cells, weights);
     vec4 data = vec4(0.0);
     for (int k = 0; k < 4; k++)
         data += texelFetch(cell_data, cell_pixel(cells[k]), 0) * weights[k];
@@ -932,15 +943,33 @@ vec4 climate_data(vec3 up) {
 float snow_cover(vec4 data, vec3 up, float h) {
     float snow;
     if (has_climate) {
-        float t = data.x - 0.0065 * (h - max(data.z, 0.0));
+        float t = data.x - 0.0065 * (h - max(data.z, 0.0)) + glacial_cooling;
         float lying = data.y > 10.0 ? 1.0 : smoothstep(-2.0, -6.0, t);
         snow = smoothstep(0.5, -2.5, t) * lying;
     } else {
         float latitude = abs(up.y);
-        float snowline = mix(5200.0, 400.0, smoothstep(0.25, 0.95, latitude));
+        float snowline = mix(5200.0, 400.0, smoothstep(0.25, 0.95, latitude)) + glacial_cooling / 0.0065;
         snow = smoothstep(snowline, snowline + 400.0, h);
     }
     return snow;
+}
+
+// Lave des éruptions en cours : coulées autour de la bouche, découpées par les bruits (bras de
+// lave qui descendent les pentes), plus chaudes près de la bouche. Renvoie 0 à 1 (part de lave)
+float lava_cover(vec3 up, float h, vec4 n128, vec4 n32, vec4 n8) {
+    float lava = 0.0;
+    for (int k = 0; k < eruption_count; k++) {
+        float distance = acos(clamp(dot(up, eruption_vents[k].xyz), -1.0, 1.0)) * planet_radius;
+        float radius = eruption_shapes[k].x;
+        if (distance > radius)
+            continue;
+        float q = distance / radius;
+        // La lave coule vers le bas : rien au-dessus de la bouche, sauf tout près
+        float below = 1.0 - smoothstep(-30.0, 60.0, h - eruption_shapes[k].w + 400.0 * (1.0 - q));
+        float arms = smoothstep(-0.1, 0.25, n128.x * 0.9 + n32.x * 0.4 + 0.6 * (1.0 - q) - 0.35 * q);
+        lava = max(lava, eruption_vents[k].w * arms * below * (1.0 - smoothstep(0.6, 1.0, q)));
+    }
+    return clamp(lava, 0.0, 1.0);
 }
 
 // La neige ne tient pas sur les pentes trop raides
@@ -1022,7 +1051,12 @@ void fragment() {
     // (roche rugueuse, sédiments plus doux, rien sous la neige ni au fond de l'eau)
     float roughGround = mix(0.10, 0.28, rockiness) * (depth > 0.0 ? 0.3 : 1.0);
     vec3 bump = (n32.yzw * 0.8 + n8.yzw * 0.6 + n2.yzw * 0.4) * roughGround;
-    vec4 cdata = coloring == 2 || coloring == 0 ? climate_data(up) : vec4(0.0);
+    // Cellules voisines et poids du fondu, une fois pour toutes (couleurs, neige, canopée)
+    ivec4 cells = ivec4(0);
+    vec4 weights = vec4(0.0);
+    if (coloring == 1 || coloring == 2 || (coloring == 0 && has_climate))
+        smooth_cells(up, cells, weights);
+    vec4 cdata = coloring == 2 || coloring == 0 ? climate_data(cells, weights) : vec4(0.0);
     float snowBase = coloring == 1 || coloring == 3 ? 0.0 : snow_cover(cdata, up, h);
     // Canopée des forêts (w > 0) ou part de sable des déserts (w < 0), vue réaliste (étape 12a)
     float canopy = coloring == 2 ? max(cdata.w, 0.0) : 0.0;
@@ -1060,7 +1094,7 @@ void fragment() {
     vec3 cliff = rock * 0.72;
 
     if (coloring == 1) {
-        color = layer_color_blend(up);
+        color = layer_color_blend(cells, weights);
     } else if (coloring == 3) {
         color = elevation_color(h);
     } else if (depth > 0.0) {
@@ -1071,7 +1105,7 @@ void fragment() {
     } else {
         if (coloring == 2) {
             // Vue réaliste : couleur du biome, roche nue sur les pentes raides
-            color = layer_color_smooth(up, true);
+            color = layer_color_smooth_cells(cells, weights, true);
             color *= 1.0 + 0.10 * n512.x + 0.08 * n128.x;
             // Déserts de sable (étape 12a) : dunes claires, crêtes et creux
             // (sable des déserts plus ocre que celui des plages : vus de l'espace, ils viraient au blanc)
@@ -1142,6 +1176,16 @@ void fragment() {
         }
     }
 
+    // Éruptions : basalte noir sous la lave, lave incandescente qui éclaire d'elle-même
+    if (eruption_count > 0 && depth <= 0.0) {
+        float lava = lava_cover(up, h, n128, n32, n8);
+        if (lava > 0.0) {
+            float heat = lava * (0.75 + 0.25 * n32.x);
+            color = mix(color, vec3(0.05, 0.04, 0.035), smoothstep(0.0, 0.3, lava));
+            EMISSION = vec3(1.0, 0.32, 0.05) * heat * 3.0;
+            roughness = mix(roughness, 0.7, lava);
+        }
+    }
     NORMAL = normalize((VIEW_MATRIX * vec4(normal, 0.0)).xyz);
     v_shade = cloud_shadow(v_world, up, h);
     ALBEDO = color;
@@ -1200,11 +1244,13 @@ void fragment() {
     waves += swell * 1.4;
     vec3 water_normal = normalize(up - (waves - up * dot(waves, up)) * 0.06);
     NORMAL = normalize((VIEW_MATRIX * vec4(water_normal, 0.0)).xyz);
-    vec3 color = mix(vec3(0.10, 0.42, 0.48), vec3(0.03, 0.12, 0.30), smoothstep(0.0, 200.0, v_depth));
-    color = mix(color, vec3(0.01, 0.04, 0.14), smoothstep(200.0, 5000.0, v_depth));
+    // Couleur de l'eau, plus sombre et plus saturée que le sol (avant, de loin, eau peu
+    // profonde et terre se confondaient) : turquoise sur les hauts-fonds, bleu profond au large
+    vec3 color = mix(vec3(0.05, 0.36, 0.40), vec3(0.02, 0.14, 0.26), smoothstep(0.0, 40.0, v_depth));
+    color = mix(color, vec3(0.008, 0.04, 0.11), smoothstep(40.0, 2000.0, v_depth));
     if (coloring == 2) {
         // Vue réaliste : banquise et teinte de la couche (océans gelés en blanc)
-        color = mix(color, layer_color_smooth(up, false), 0.5);
+        color = mix(color, layer_color_smooth(up, false), 0.35);
     }
     // Écume sur les côtes de la mer (étape 12c) : les vagues déferlent quand le fond remonte,
     // en rouleaux qui avancent vers le rivage ; plus une frange d'écume au bord de l'eau
@@ -1224,7 +1270,8 @@ void fragment() {
     ALBEDO = color;
     ROUGHNESS = mix(0.08, 0.7, foam);
     SPECULAR = 0.6;
-    ALPHA = max(clamp(0.45 + v_depth / 60.0, 0.45, 0.97), foam);
+    // Plus opaque qu'avant : les fonds sableux ne transparaissent que sur les premiers mètres
+    ALPHA = max(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), foam);
 }
 ";
 }

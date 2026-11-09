@@ -162,6 +162,7 @@ public sealed partial class TectonicPlates
         foreach (var plate in plates)
             result.InitializeMotionPlan(plate);
         result.InitializeContinents();
+        result.InitializeLandforms(seed);
         result.ClassifyBoundaries();
         result.UpdateElevation();
         return result;
@@ -252,6 +253,7 @@ public sealed partial class TectonicPlates
         TimeMyr += dtMyr;
         ClassifyBoundaries();
         UpdateCrust(dtMyr);
+        UpdateLandforms(dtMyr);
         UpdateElevation();
     }
 

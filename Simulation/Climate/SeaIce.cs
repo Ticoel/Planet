@@ -30,6 +30,7 @@ public sealed class SeaIce
     private readonly Vector3[][] _directions;
     private readonly bool[] _ocean;
     private float[] _next;
+    private readonly Vector3[] _velocity;   // réutilisé à chaque pas (pas d'allocation par image)
 
     /// <summary>Concentration de glace de chaque cellule (0 à 1 ; 0 sur les terres).</summary>
     public float[] Concentration { get; private set; }
@@ -56,6 +57,7 @@ public sealed class SeaIce
         _ocean = new bool[count];
         Concentration = new float[count];
         _next = new float[count];
+        _velocity = new Vector3[count];
     }
 
     /// <summary>Glace d'équilibre à une température de surface (°C).</summary>
@@ -91,7 +93,7 @@ public sealed class SeaIce
         double seconds = dtDays * 86400.0;
         // Sous-pas pour la stabilité : la glace ne doit pas traverser plus d'une demi-cellule
         // (cellules de ~60 km, dérive jusqu'à ~0,5 m/s : ~1 jour par sous-pas)
-        var velocity = new Vector3[count];
+        var velocity = _velocity;
         float maxRate = 0f;
         for (int c = 0; c < count; c++)
         {
