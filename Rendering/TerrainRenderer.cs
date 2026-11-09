@@ -755,6 +755,14 @@ uniform vec4 eruption_shapes[8];
 // Volcans proches (direction, rayon de la base en m) : flancs de lave refroidie et de cendres
 uniform int volcano_count = 0;
 uniform vec4 volcano_sites[16];
+// Coulée simulée (LavaFlow) autour de la bouche la plus proche : rouge = lave incandescente,
+// vert = sol recouvert de lave ; grille posée sur le plan tangent (axes x, y), demi-côté en m
+uniform sampler2D lava_map : filter_linear, repeat_disable;
+uniform float lava_active = 0.0;
+uniform vec3 lava_center = vec3(0.0, 1.0, 0.0);
+uniform vec3 lava_axis_x = vec3(1.0, 0.0, 0.0);
+uniform vec3 lava_axis_y = vec3(0.0, 0.0, 1.0);
+uniform float lava_half_extent = 5120.0;
 
 float sea_surface(vec3 up) {
     float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
@@ -957,20 +965,29 @@ float snow_cover(vec4 data, vec3 up, float h) {
     return snow;
 }
 
-// Lave des éruptions en cours : coulées autour de la bouche, découpées par les bruits (bras de
-// lave qui descendent les pentes), plus chaudes près de la bouche. Renvoie 0 à 1 (part de lave)
-float lava_cover(vec3 up, float h, vec4 n128, vec4 n32, vec4 n8) {
-    float lava = 0.0;
+// Lave des éruptions en cours. Autour de la bouche la plus proche : la coulée simulée comme un
+// fluide (LavaFlow, sur le processeur), qui suit le relief. Aux autres bouches : un petit lac de
+// lave dans le cratère. Renvoie (part de lave incandescente, part du sol couverte de lave).
+vec2 lava_state(vec3 up, float h, vec4 n128) {
+    vec2 lava = vec2(0.0);
+    if (lava_active > 0.5 && dot(up, lava_center) > 0.0) {
+        vec2 uv = vec2(dot(up, lava_axis_x), dot(up, lava_axis_y)) * planet_radius / (2.0 * lava_half_extent) + 0.5;
+        if (all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) {
+            vec2 texel = texture(lava_map, uv).rg;
+            // Bords nets (la texture est interpolée entre cellules de 40 m) et ondulés par le bruit
+            float edge = (n128.x - 0.5) * 0.25;
+            lava.y = smoothstep(0.35, 0.6, texel.g + edge);
+            lava.x = smoothstep(0.05, 0.5, texel.r + edge * 0.5) * lava.y;
+        }
+    }
     for (int k = 0; k < eruption_count; k++) {
-        float distance = acos(clamp(dot(up, eruption_vents[k].xyz), -1.0, 1.0)) * planet_radius;
+        vec3 vent = eruption_vents[k].xyz;
         float radius = eruption_shapes[k].x;
-        if (distance > radius || radius <= 0.0)
+        if (radius <= 0.0 || (lava_active > 0.5 && dot(vent, lava_center) > 0.9999999))
             continue;
-        float q = distance / radius;
-        // La lave coule vers le bas : rien au-dessus de la bouche, sauf tout près
-        float below = 1.0 - smoothstep(-30.0, 60.0, h - eruption_shapes[k].w + 400.0 * (1.0 - q));
-        float arms = smoothstep(-0.1, 0.25, n128.x * 0.9 + n32.x * 0.4 + 0.6 * (1.0 - q) - 0.35 * q);
-        lava = max(lava, eruption_vents[k].w * arms * below * (1.0 - smoothstep(0.6, 1.0, q)));
+        float distance = acos(clamp(dot(up, vent), -1.0, 1.0)) * planet_radius;
+        float pool = (1.0 - smoothstep(0.5, 1.0, distance / 350.0 + (n128.y - 0.5) * 0.4)) * eruption_vents[k].w;
+        lava = max(lava, vec2(pool));
     }
     return clamp(lava, 0.0, 1.0);
 }
@@ -1192,13 +1209,15 @@ void fragment() {
         }
     }
     // Éruptions : basalte noir sous la lave, lave incandescente qui éclaire d'elle-même
-    if (eruption_count > 0 && depth <= 0.0) {
-        float lava = lava_cover(up, h, n128, n32, n8);
-        if (lava > 0.0) {
-            float heat = lava * (0.75 + 0.25 * n32.x);
-            color = mix(color, vec3(0.05, 0.04, 0.035), smoothstep(0.0, 0.3, lava));
+    if ((eruption_count > 0 || lava_active > 0.5) && depth <= 0.0) {
+        vec2 lava = lava_state(up, h, n128);
+        if (lava.y > 0.0) {
+            // Croûte sombre qui se craquelle : la lumière sort par les fissures et les fronts
+            float cracks = smoothstep(0.45, 0.6, n32.x * 0.6 + n128.z * 0.4 + lava.x * 0.35);
+            float heat = lava.x * mix(0.12, 1.0, cracks);
+            color = mix(color, vec3(0.05, 0.04, 0.035), lava.y);
             EMISSION = vec3(1.0, 0.32, 0.05) * heat * 3.0;
-            roughness = mix(roughness, 0.7, lava);
+            roughness = mix(roughness, 0.7, lava.y);
         }
     }
     NORMAL = normalize((VIEW_MATRIX * vec4(normal, 0.0)).xyz);

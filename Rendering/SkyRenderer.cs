@@ -659,11 +659,21 @@ uniform vec4 eruption_shapes[8];
 // la lave à la base, éclairs volcaniques la nuit dans les colonnes explosives.
 // Renvoie la couleur (prémultipliée) et l'opacité ; t_hit : distance du premier panache touché.
 
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 // Rayon de la colonne et de l'ombrelle à la hauteur s (m) au-dessus de la bouche
 float plume_radius(float s, float height, bool steam) {
-    float column = (steam ? 120.0 : 350.0) + (steam ? 0.22 : 0.15) * s;
-    float umbrella = smoothstep(0.62, 0.85, s / height) * (1.0 - smoothstep(0.95, 1.08, s / height))
-                     * (steam ? 0.15 : 0.75) * height;
+    float column = (steam ? 120.0 : 500.0) + (steam ? 0.22 : 0.2) * s;
+    // (l'ombrelle est plate : plus large que haute, comme celle du Pinatubo ou du Saint-Helens)
+    float umbrella = smoothstep(0.66, 0.86, s / height) * (1.0 - smoothstep(0.93, 1.05, s / height))
+                     * (steam ? 0.15 : 0.85) * height;
+    // (la colonne s'arrête dans l'ombrelle : rien ne dépasse au-dessus)
+    if (!steam)
+        column *= 1.0 - smoothstep(0.85, 0.98, s / height);
     return max(column, umbrella);
 }
 
@@ -685,18 +695,19 @@ float plume_density(int k, vec3 p, vec3 vent, vec3 axis, vec3 drift, float heigh
     float n2 = texture(cloud_noise, q * 1.1 + vec3(0.21, boil, 0.43)).r;
     float n3 = texture(cloud_noise, q * 3.1 + vec3(0.77, 0.13, boil)).r;
     float billow = n1 * 0.55 + n2 * 0.3 + n3 * 0.15;
+    // (bord adouci : la cendre fine s'estompe dans l'air au lieu de s'arrêter net)
     float edge = d / radius + (0.5 - billow) * 1.3;
-    float density = 1.0 - smoothstep(0.5, 0.8, edge);
+    float density = 1.0 - smoothstep(0.4, 0.85, edge);
     // Sous l'ombrelle : rideaux de cendres qui retombent (plus diffus, en traînées verticales)
     if (!steam) {
-        float umbrella_radius = 0.75 * height;
+        float umbrella_radius = 0.85 * height;
         float under = (1.0 - smoothstep(0.6, 1.0, length(w - axis * s - drift * s * s / height) / umbrella_radius))
                       * smoothstep(0.1, 0.6, s / height) * (1.0 - smoothstep(0.6, 0.72, s / height));
         float curtains = smoothstep(0.55, 0.8, texture(cloud_noise, vec3(w.x, w.y * 0.05, w.z) / 4000.0 + vec3(0.7)).r);
         density = max(density, under * curtains * 0.25);
     }
     // Le haut de la colonne s'effiloche
-    return density * (1.0 - smoothstep(1.0, 1.1, s / height));
+    return density * (1.0 - smoothstep(0.97, 1.05, s / height));
 }
 
 vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
@@ -728,6 +739,14 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
         float root = sqrt(disc);
         float t0 = max((-qb - root) / (2.0 * qa), 0.0);
         float t1 = min((-qb + root) / (2.0 * qa), t_scene);
+        // ... et entre les plans de la bouche et du sommet
+        float s_camera = dot(w0, axis);
+        if (abs(b) > 1e-6) {
+            float ta = (0.0 - s_camera) / b, tb = (height * 1.1 - s_camera) / b;
+            t0 = max(t0, min(ta, tb));
+            t1 = min(t1, max(ta, tb));
+        } else if (s_camera < 0.0 || s_camera > height * 1.1)
+            continue;
         if (t1 <= t0)
             continue;
         // Éclairage : lumière du Soleil à mi-hauteur (rougie au couchant), ciel, nuit
@@ -735,26 +754,30 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
         float mus = dot(axis, sun);
         vec3 sunlight = sun_transmittance(mid_height, mus) * smoothstep(-0.12, 0.05, mus);
         vec3 skylight = vec3(0.32, 0.38, 0.5) * smoothstep(-0.15, 0.25, mus) + vec3(0.004);
-        vec3 albedo = steam ? vec3(0.9, 0.91, 0.93) : vec3(0.42, 0.395, 0.37);
+        vec3 albedo = steam ? vec3(0.9, 0.91, 0.93) : vec3(0.36, 0.335, 0.31);
         // Éclairs dans les colonnes explosives : brefs, irréguliers, visibles surtout la nuit
         float flash_slot = floor(cloud_time * 0.5 + float(k) * 13.0);
         float flash = (!steam && vei >= 3.0 && fract(sin(flash_slot * 91.7 + float(k)) * 4375.85) > 0.93)
                       ? (1.0 - fract(cloud_time * 0.5 + float(k) * 13.0)) * 6.0 : 0.0;
         float boil = cloud_time * 0.002;
-        const int STEPS = 40;
+        const int STEPS = 64;
         float dt = (t1 - t0) / float(STEPS);
-        float t = t0 + dt * fract(sin(dot(pixel + float(k), vec2(12.9898, 78.233))) * 43758.5453);
+        float t = t0 + dt * hash12(pixel + vec2(float(k) * 17.0));
         for (int i = 0; i < STEPS; i++) {
             vec3 p = camera_planet + rd * t;
             float density = plume_density(k, p, vent, axis, drift, height, steam, boil) * intensity;
             if (density > 0.01) {
                 float s = dot(p - vent, axis);
                 float radius = plume_radius(s, height, steam);
-                // Ombre propre : épaisseur du panache vers le Soleil
-                float toward_sun = plume_density(k, p + sun * radius * 0.6, vent, axis, drift, height, steam, boil);
-                float lit = exp(-toward_sun * 2.5);
+                // Ombre propre : deux échantillons vers le Soleil (près et loin), plus une part de
+                // lumière diffusée plusieurs fois, qui éclaire un peu le cœur des volutes
+                float near_sun = plume_density(k, p + sun * radius * 0.2, vent, axis, drift, height, steam, boil);
+                float far_sun = plume_density(k, p + sun * radius * 0.55, vent, axis, drift, height, steam, boil);
+                float lit = exp(-near_sun * 1.2 - far_sun * 1.8) + 0.12;
+                // Le ciel éclaire mieux le haut du panache que sa base, dans l'ombre de l'ombrelle
+                float sky_view = 0.55 + 0.45 * smoothstep(0.1, 0.9, s / height);
                 // (le haut de la colonne et l'ombrelle, en cendres fines, sont plus clairs que la base)
-                vec3 light = albedo * mix(0.75, 1.15, smoothstep(0.2, 0.9, s / height)) * (sunlight * lit * 1.7 + skylight);
+                vec3 light = albedo * mix(0.65, 1.2, smoothstep(0.15, 0.9, s / height)) * (sunlight * lit * 1.3 + skylight * sky_view);
                 // Lueur de la lave à la base et éclairs
                 float base = 1.0 - smoothstep(0.0, steam ? 0.0 : 0.18, s / height);
                 light += vec3(1.0, 0.33, 0.06) * base * (vei <= 1.0 ? 1.4 : 0.8) * float(!steam);
@@ -777,11 +800,6 @@ void vertex() {
     POSITION = vec4(VERTEX.xy, 1.0, 1.0);
 }
 
-float hash12(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
 
 // Nuages le long du rayon : couleur (prémultipliée), opacité, distance du premier nuage
 void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec3 color, out float alpha, out float t_first) {

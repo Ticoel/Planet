@@ -60,11 +60,18 @@ des eaux de surface.*
 *Remontées d'eau froide : sous l'équateur (les alizés écartent l'eau vers les pôles) et le long
 des côtes où le vent pousse l'eau vers le large ; elles refroidissent la surface.*
 
-![Éruption volcanique : panache de cendres le jour, lave incandescente la nuit](docs/images/eruption.jpg)
+![Éruption volcanique : panache en champignon le jour et au soleil bas, coulée de lave la nuit](docs/images/eruption.jpg)
 
-*Éruption : panache de cendres qui monte en volutes (à gauche), coulées de lave incandescente
-la nuit (à droite). Rendu du moteur du projet ; l'éruption est placée ici sur un sommet pour
-l'image, dans le jeu elle naît sur les volcans simulés.*
+*Éruption : panache calculé en volume, colonne qui bouillonne puis ombrelle qui s'étale à sa
+hauteur d'équilibre (de jour et soleil bas) ; la nuit, coulée de lave simulée comme un fluide,
+qui descend du cratère en suivant le relief, croûte sombre et fissures incandescentes. Rendu du
+moteur du projet ; les éruptions sont placées ici pour l'image, dans le jeu elles naissent sur
+les volcans simulés.*
+
+![Falaise côtière vue du large](docs/images/falaise.jpg)
+
+*Falaise côtière trouvée par la vue Maj + F4 : la plus haute paroi raide de la côte, vue du large
+à hauteur de vagues.*
 
 ![Saisons et banquise dans la vue réaliste](docs/images/saisons.jpg)
 
@@ -164,6 +171,11 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     pitons centraux) ;
   - volcans repérables de loin : flancs sombres de lave et de cendres, panache de vapeur des
     volcans actifs (touche L : vue de côté sur un volcan, en éruption s'il y en a une) ;
+  - coulées de lave simulées comme un fluide autour de l'éruption la plus proche (automate
+    cellulaire de 256 × 256 cellules de 40 m) : la lave descend la pente, suit les vallées,
+    remplit les creux, ne coule que plus épaisse qu'une épaisseur critique (fluide de Bingham),
+    refroidit par sa surface et se fige en basalte noir ; volcans sous-marins : rien en surface
+    sous 200 m d'eau, panache de vapeur au-dessus (type Surtsey) ;
   - panaches d'éruption en volume (lancer de rayons dans une densité bruitée) : colonne qui bouillonne
     en volutes, poussée par le vent, champignon qui s'étale à sa hauteur d'équilibre, rideaux de
     cendres, ombre propre, lueur de la lave à la base et éclairs volcaniques la nuit ;
@@ -349,6 +361,15 @@ de ces mêmes ouvrages.
 - Newhall C. G., Self S. (1982). *The volcanic explosivity index (VEI).* Journal of Geophysical
   Research 87(C2), 1231-1238 ; Siebert L., Simkin T., Kimberly P. (2010). *Volcanoes of the World*,
   3e éd. University of California Press. — explosivité et fréquence des éruptions.
+- Hulme G. (1974). *The interpretation of lava flow morphology.* Geophysical Journal of the Royal
+  Astronomical Society 39, 361-383. — la lave comme fluide de Bingham : épaisseur critique.
+- Crisci G. M., Rongo R., Di Gregorio S., Spataro W. (2004). *The simulation model SCIARA: the
+  1991 and 2001 lava flows at Mount Etna.* Journal of Volcanology and Geothermal Research 132,
+  253-267 ; Vicari A. et al. (2007). *Modeling of the 2001 lava flow at Etna volcano by a Cellular
+  Automata approach.* Environmental Modelling & Software 22, 1465-1471. — coulées par automate
+  cellulaire (échanges entre voisines selon les dénivelés, refroidissement, solidification).
+- Sparks R. S. J. (1986). *The dimensions and dynamics of volcanic eruption columns.* Bulletin of
+  Volcanology 48, 3-15. — colonne convective et ombrelle qui s'étale à sa hauteur d'équilibre.
 - Robock A. (2000). *Volcanic eruptions and climate.* Reviews of Geophysics 38(2), 191-219. —
   voile d'aérosols et refroidissement après les grandes éruptions.
 - Emery K. O., Kuhn G. G. (1982). *Sea cliffs: their processes, profiles, and classification.*

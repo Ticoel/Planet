@@ -539,6 +539,7 @@ public partial class Main : Node3D
         int count = 0;
         Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
         var erupting = new HashSet<Vector3>();
+        Eruption nearestOnLand = null;
         if (climate)
         {
             double day = _climate.TimeDays;
@@ -550,9 +551,21 @@ public partial class Main : Node3D
             {
                 Vector3 p = eruption.Position;
                 erupting.Add(p);
+                float ventHeight = VentHeight(p);
+                // Volcan sous-marin : sous plus de ~200 m d'eau, rien ne se voit en surface ; plus
+                // près de la surface, l'eau qui bout donne un panache de vapeur (comme Surtsey,
+                // 1963), mais pas de coulées sur les terres voisines
+                if (ventHeight < -SubmarineVisibleDepthM)
+                    continue;
                 _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, eruption.IntensityAt(day));
-                float lavaRadius = eruption.Vei <= 1 ? 9000f : 3000f;
-                _eruptionShapes[count] = new Vector4(lavaRadius, eruption.PlumeHeightM, eruption.Vei, VentHeight(p));
+                if (ventHeight < 0)
+                    _eruptionShapes[count] = new Vector4(0f, Math.Min(eruption.PlumeHeightM, 4000f), -1f, 0f);
+                else
+                {
+                    nearestOnLand ??= eruption;
+                    float lavaRadius = eruption.Vei <= 1 ? 9000f : 3000f;
+                    _eruptionShapes[count] = new Vector4(lavaRadius, eruption.PlumeHeightM, eruption.Vei, ventHeight);
+                }
                 count++;
             }
         }
@@ -567,7 +580,7 @@ public partial class Main : Node3D
         {
             Vector3 p = landform.Position;
             _volcanoSites[sites++] = new Vector4(p.X, p.Y, p.Z, landform.RadiusM);
-            if (landform.Active && count < _eruptionVents.Length && !erupting.Contains(p))
+            if (landform.Active && count < _eruptionVents.Length && !erupting.Contains(p) && VentHeight(p) >= 0)
             {
                 _eruptionVents[count] = new Vector4(p.X, p.Y, p.Z, 0.35f);
                 _eruptionShapes[count] = new Vector4(0f, 1500f, -1f, VentHeight(p));   // VEI −1 : vapeur
@@ -582,7 +595,11 @@ public partial class Main : Node3D
         _terrain.SetShaderParameter("volcano_count", sites);
         _terrain.SetShaderParameter("volcano_sites", _volcanoSites);
         _sky.SetEruptions(count, _eruptionVents, _eruptionShapes);
+        UpdateLava(nearestOnLand, climate);
     }
+
+    /// <summary>Profondeur (m) au-delà de laquelle une éruption sous-marine ne se voit pas en surface.</summary>
+    private const float SubmarineVisibleDepthM = 200f;
 
     /// <summary>Altitude du relief détaillé au sommet d'un volcan (m), mémorisée.</summary>
     private float VentHeight(Vector3 position)
