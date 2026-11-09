@@ -46,6 +46,12 @@ une **climatique** (du temps réel à des mois par seconde), sur le relief figé
 |:---:|:---:|:---:|
 | ![Évolution des plaques et du relief](docs/images/tectonique.jpg) | ![Températures de janvier et juillet](docs/images/temperatures.jpg) | ![Cartes du climat simulé](docs/images/climat.jpg) |
 
+![Courants océaniques simulés : gyres, courant circumpolaire, courants équatoriaux](docs/images/courants.jpg)
+
+*Courants océaniques de surface : gyres refermés le long des continents, courants vers l'ouest
+sous les tropiques, courant circumpolaire vers l'est autour de 50° S. Ils transportent la chaleur
+des eaux de surface.*
+
 ## Auteurs
 
 - **Code et conception technique : Claude**, modèle d'intelligence artificielle créé par
@@ -62,6 +68,7 @@ une **climatique** (du temps réel à des mois par seconde), sur le relief figé
   - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : zoom ; G : vol / marche ;
   - C : horloge géologique / climatique ; + / − : vitesse ; T : avance rapide jusqu'à 4,5 milliards d'années ;
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
+  - O : qualité d'image (résolution réduite + AMD FSR 1 ou 2) ;
   - U : masquer l'eau ; F1 à F10 : lieux de test (sommet, fleuve, lac, côte, désert venteux, pluie,
     neige, nuages, coucher de soleil, Lune).
 
@@ -71,7 +78,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Décisions de conception
 
-Mise à jour : 2026-11-09 (étapes 1 à 10 faites)
+Mise à jour : 2026-11-09 (étapes 1 à 10 faites, 11a faite)
 
 ## Vision
 Planète **entièrement procédurale** : tectonique, relief, climat, cycle de l'eau et biomes émergent de la simulation et tournent seuls. Pas de données de la vraie Terre. Exploration de l'orbite jusqu'au sol, à l'échelle réelle.
@@ -150,10 +157,14 @@ se voit le plus.
   - brume et brouillard dans les vallées humides et froides au petit matin.
 
 ### Étape 11 — Océans
-- **Courants océaniques** : courants de surface entraînés par les vents (Ekman), déviés par Coriolis
-  et les côtes → gyres, courants de bord ouest (type Gulf Stream), remontées d'eau froide le long
-  des côtes ouest ; transport de chaleur couplé au climat (plus juste : Europe plus douce, déserts
-  côtiers) ; dérive de la banquise ; couche « courants ».
+- **11a Courants océaniques (faite)** : modèle de Stommel (1948) résolu sur une grille de ~110 km
+  (r ∇²ψ + β ∂ψ/∂x = rot τ / ρH, ψ = 0 sur les côtes, couche de 100 m, courants de bord ouest
+  larges de ~350 km) plus dérive d'Ekman (1,2 % du vent, déviée de 45°) ; recalculés en tâche de
+  fond tous les 5 jours simulés ; transport de la chaleur des eaux de surface couplé au climat (sur
+  la carte graphique et le processeur, efficacité 50 %) ; couche « courants » (touche 7) et flèches (V).
+  Vérifié sur un océan d'école : gyres dans le bon sens dans les deux hémisphères, courant de
+  bord ouest ~4 fois plus rapide qu'à l'est.
+- **À venir** : remontées d'eau froide le long des côtes ouest des continents, dérive de la banquise.
 - **Lune et marées** : niveau de la mer qui suit la force de marée (Lune + Soleil, vives-eaux et
   mortes-eaux), ~1 m au large, amplifié dans les baies peu profondes ; estrans qui se découvrent.
 - **Niveau de la mer** selon le volume des glaces (glaciations).
