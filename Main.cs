@@ -306,7 +306,7 @@ public partial class Main : Node3D
         _colorTimer -= delta;
         if (_colorsDirty && _colorTimer <= 0 && ColoringFor(_displayMode) is not (TerrainColoring.Geology or TerrainColoring.Elevation))
         {
-            _terrain.UpdateCellColors(PlanetColorizer.Compute(_tectonics, _climate, _displayMode), _tectonics.CellElevation);
+            _terrain.UpdateCellColors(LayerColors(_displayMode), _tectonics.CellElevation);
             _colorsDirty = false;
             _colorTimer = ColorRefreshSeconds;
         }
@@ -674,6 +674,11 @@ public partial class Main : Node3D
         _terrain.SetShaderParameter("eruption_winds", _eruptionWinds);
         _terrain.SetShaderParameter("volcano_count", sites);
         _terrain.SetShaderParameter("volcano_sites", _volcanoSites);
+        UpdateHabitats(ref count, climate);
+        _terrain.SetShaderParameter("eruption_count", count);
+        _terrain.SetShaderParameter("eruption_vents", _eruptionVents);
+        _terrain.SetShaderParameter("eruption_shapes", _eruptionShapes);
+        _terrain.SetShaderParameter("eruption_winds", _eruptionWinds);
         _sky.SetEruptions(count, _eruptionVents, _eruptionShapes, _eruptionWinds);
         UpdateLava(nearestOnLand, climate);
     }
@@ -1412,7 +1417,7 @@ public partial class Main : Node3D
 
             Vector3 p = explorer.Position.Normalized().ToVector3();
             float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
-            float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
+            float longitude = Mathf.RadToDeg(Mathf.Atan2(-p.Z, p.X));
             string walking = explorer.Walking ? "à pied   " : "";
             lines.Add($"{walking}{Math.Abs(latitude):0.0}° {(latitude >= 0 ? "N" : "S")}  {Math.Abs(longitude):0.0}° {(longitude >= 0 ? "E" : "O")}   " +
                       $"hauteur {Distance(explorer.AltitudeAboveGround)}   sol {explorer.GroundHeight:N0} m   " +
@@ -1441,7 +1446,7 @@ public partial class Main : Node3D
             lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
-            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption");
+            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
             lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
@@ -1516,6 +1521,7 @@ public partial class Main : Node3D
         DisplayMode.Pressure => "pression (bleu : dépression, rouge : anticyclone)",
         DisplayMode.OceanCurrents => "courants océaniques",
         DisplayMode.Upwelling => "remontées d'eau froide",
+        DisplayMode.VolcanicHabitats => "milieux hydrothermaux",
         DisplayMode.RecentPrecipitation => "pluie des derniers jours",
         DisplayMode.AnnualPrecipitation => "pluie annuelle",
         DisplayMode.Humidity => "humidité de l'air",
@@ -1560,6 +1566,7 @@ public partial class Main : Node3D
         DisplayMode.WindSpeed => "Vitesse du vent (bleu sombre : calme, cyan, vert, jaune, rouge : plus de 18 m/s)",
         DisplayMode.Pressure => "Pression au niveau de la mer (bleu : dépressions, blanc : 1013 hPa, rouge : anticyclones)",
         DisplayMode.OceanCurrents => "Courants de surface (bleu nuit : calme, cyan, vert, jaune, rouge : plus de 0,4 m/s) ; flèches avec V",
+        DisplayMode.VolcanicHabitats => "Milieux hydrothermaux (jaune : fumerolles ; orange : sources chaudes, geysers ; brun : mares de boue ; rouge sombre : fumeurs noirs ; cyan : sources alcalines ; vert : évents côtiers)",
         DisplayMode.Upwelling => "Mouvement vertical de l'eau (bleu puis cyan : l'eau froide des profondeurs remonte, jusqu'à 1 m/jour ; rouge : l'eau de surface plonge)",
         DisplayMode.RecentPrecipitation => "Précipitations des derniers jours, en rythme annuel (beige : sec, vert, bleu, violet : plus de 4 m/an)",
         DisplayMode.AnnualPrecipitation => "Précipitations annuelles (beige : désert, < 250 mm ; vert : 1 m ; bleu : 2 m et plus)",
@@ -1622,7 +1629,7 @@ public partial class Main : Node3D
     {
         Vector3 p = _grid.Positions[cell];
         float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
-        float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
+        float longitude = Mathf.RadToDeg(Mathf.Atan2(-p.Z, p.X));
         string position = $"Sous la souris : {Math.Abs(latitude):0}° {(latitude >= 0 ? "N" : "S")}, " +
                           $"{Math.Abs(longitude):0}° {(longitude >= 0 ? "E" : "O")}, " +
                           $"altitude {_tectonics.CellElevation[cell] * 1000f:N0} m";
@@ -1753,7 +1760,7 @@ public partial class Main : Node3D
     private void ExportMap()
     {
         DisplayMode mode = ColoringFor(_displayMode) is TerrainColoring.Geology ? DisplayMode.Elevation : _displayMode;
-        var colors = PlanetColorizer.Compute(_tectonics, _climate, mode);
+        var colors = LayerColors(mode);
         string when = _clock == ClockMode.Climate ? $"annee{_climate.TimeDays / _orbit.YearLengthDays + 1:0}_jour{_climate.TimeDays % _orbit.YearLengthDays:0}"
                                                    : $"{_tectonics.TimeMyr:0}Ma";
         _capture.ExportMap(_grid, colors, $"{mode}_{when}");
@@ -1969,6 +1976,9 @@ public partial class Main : Node3D
                 break;
             case Key.L:
                 GoToPlace(10);
+                break;
+            case Key.J:
+                GoToNextHabitat();
                 break;
             case Key.K:
                 _muted = !_muted;

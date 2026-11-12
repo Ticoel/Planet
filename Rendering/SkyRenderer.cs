@@ -779,7 +779,9 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
         float flash = (!P.steam && vei >= 3.0 && fract(sin(flash_slot * 91.7 + float(k)) * 4375.85) > 0.93)
                       ? (1.0 - fract(cloud_time * 0.5 + float(k) * 13.0)) * 6.0 : 0.0;
         float boil = cloud_time * 0.002;
-        float extinction_scale = (P.steam ? 0.004 : 0.01) * (1.0 + 0.5 * vei) * intensity;
+        // (petits évents : opacité rapportée à leur taille, sinon un filet de vapeur de 10 m
+        // serait invisible)
+        float extinction_scale = (P.small ? 0.35 / P.base : (P.steam ? 0.004 : 0.01) * (1.0 + 0.5 * vei)) * intensity;
         float t = t0;
         bool first = true;
         for (int i = 0; i < plume_steps && t < t1; i++) {

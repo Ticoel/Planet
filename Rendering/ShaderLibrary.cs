@@ -252,7 +252,8 @@ float cloud_density(vec3 p, float h, vec2 cover, float footprint) {
     /// </summary>
     public const string Plumes = @"
 // Éruptions en cours : direction de la bouche + intensité ; rayon du volcan (m), hauteur du
-// panache (m), VEI (−1 : vapeur), altitude de la bouche (m) ; vent à la bouche (direction, m/s)
+// panache (m), VEI (−1 : vapeur d'un volcan ; −2 : petit évent, source chaude ou geyser, dont
+// le premier nombre est alors le rayon en m), altitude de la bouche (m) ; vent (direction, m/s)
 uniform int eruption_count = 0;
 uniform vec4 eruption_vents[8];
 uniform vec4 eruption_shapes[8];
@@ -261,7 +262,7 @@ uniform vec4 eruption_winds[8];
 struct Plume {
     vec3 vent, up, wind, side;
     float height, base, bend, top, thick, spread, len, x0, speed, vei;
-    bool steam;
+    bool steam, small;
 };
 
 Plume plume_params(int k) {
@@ -274,11 +275,12 @@ Plume plume_params(int k) {
     P.speed = eruption_winds[k].w;
     float f = clamp(P.speed / 10.0, 0.2, 3.0);
     P.steam = eruption_shapes[k].z < -0.5;
+    P.small = eruption_shapes[k].z < -1.5;
     P.vei = max(eruption_shapes[k].z, 0.0);
     P.height = eruption_shapes[k].y;
     float volcano = eruption_shapes[k].x;
     // Base de la colonne à la mesure du volcan ; la vapeur, légère, se couche vite dans le vent
-    P.base = P.steam ? max(100.0, 0.01 * volcano) : max(450.0, 0.015 * volcano);
+    P.base = P.small ? volcano : P.steam ? max(100.0, 0.01 * volcano) : max(450.0, 0.015 * volcano);
     P.bend = (P.steam ? 0.7 : 0.15) * f;
     P.top = (P.steam ? 0.85 : 0.8) * P.height;
     P.thick = (P.steam ? 0.1 : 0.14) * P.height;

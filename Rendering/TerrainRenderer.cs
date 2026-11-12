@@ -782,6 +782,11 @@ uniform vec3 lava_center = vec3(0.0, 1.0, 0.0);
 uniform vec3 lava_axis_x = vec3(1.0, 0.0, 0.0);
 uniform vec3 lava_axis_y = vec3(0.0, 0.0, 1.0);
 uniform float lava_half_extent = 5120.0;
+// Milieux hydrothermaux proches (étape 14a) : position par rapport à la caméra (m) et rayon (m) ;
+// type (0 fumerolles, 1 source chaude, 2 mare de boue, 3 geyser), température (°C), pH, variation
+uniform int habitat_count = 0;
+uniform vec4 habitat_sites[16];
+uniform vec4 habitat_kinds[16];
 
 float sea_surface(vec3 up) {
     float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
@@ -1050,7 +1055,8 @@ float plume_shadow(vec3 world, vec3 up, float h) {
     vec3 base_point = camera_planet + world;
     float shade = 1.0;
     for (int k = 0; k < eruption_count; k++) {
-        if (eruption_vents[k].w <= 0.0 || eruption_shapes[k].y <= 0.0)
+        // (les petits évents ne font pas d'ombre notable)
+        if (eruption_vents[k].w <= 0.0 || eruption_shapes[k].y <= 0.0 || eruption_shapes[k].z < -1.5)
             continue;
         Plume P = plume_params(k);
         float feature, thin, trail, safe;
@@ -1252,6 +1258,64 @@ void fragment() {
         if (volcanic > 0.0) {
             vec3 ash = mix(vec3(0.17, 0.15, 0.14), vec3(0.33, 0.29, 0.26), smoothstep(-0.3, 0.4, n128.x + 0.5 * n32.x));
             color = mix(color, ash, volcanic * 0.8 * (1.0 - snowEstimate));
+        }
+    }
+    // Milieux hydrothermaux : bassins, dépôts minéraux et tapis microbiens
+    if (habitat_count > 0 && depth <= 0.0 && coloring != 1 && coloring != 3) {
+        for (int k = 0; k < habitat_count; k++) {
+            vec3 r = v_world - habitat_sites[k].xyz;
+            r -= up * dot(r, up);
+            float radius = habitat_sites[k].w;
+            float d = length(r);
+            if (d > 3.6 * radius)
+                continue;
+            // Contour irrégulier (lobes à l'échelle du bassin, festons fins)
+            float angle = atan(r.z, r.x) + habitat_kinds[k].w * 6.28;
+            float q = d / radius * (1.0 + 0.16 * sin(3.0 * angle) + 0.09 * sin(7.0 * angle + 1.7)) + (n8.x - 0.5) * 0.12;
+            float kind = habitat_kinds[k].x, heat = clamp((habitat_kinds[k].y - 40.0) / 55.0, 0.0, 1.0), ph = habitat_kinds[k].z;
+            if (kind < 0.5) {
+                // Fumerolles : roche blanchie par les gaz acides, plaques de soufre jaune autour des évents
+                float field = 1.0 - smoothstep(0.5, 1.0, q);
+                float sulfur = field * smoothstep(0.5, 0.62, n32.x * 0.6 + n8.y * 0.4 + 0.25 * (1.0 - q));
+                color = mix(color, vec3(0.74, 0.71, 0.64), field * 0.6);
+                color = mix(color, vec3(0.86, 0.74, 0.16), sulfur * 0.85);
+            } else if (kind < 1.5) {
+                // Source chaude : terrasse de dépôts clairs, puis anneaux de tapis microbiens (bruns,
+                // orange, jaunes : chaque couleur vit à sa température), puis l'eau, turquoise au
+                // bord et bleu profond au centre, là où elle est trop chaude pour la vie
+                float terrace = (1.0 - smoothstep(1.2, 3.2, q)) * 0.75;
+                color = mix(color, ph < 5.0 ? vec3(0.72, 0.7, 0.6) : vec3(0.84, 0.8, 0.72), terrace);
+                if (ph >= 5.0) {
+                    float mats = smoothstep(0.72, 0.84, q) * (1.0 - smoothstep(1.15, 1.45, q)) * mix(0.5, 1.0, heat);
+                    vec3 mat = mix(vec3(0.93, 0.78, 0.2), mix(vec3(0.9, 0.45, 0.08), vec3(0.42, 0.2, 0.08), smoothstep(1.0, 1.35, q)),
+                                   smoothstep(0.8, 0.98, q));
+                    color = mix(color, mat * (0.85 + 0.3 * n8.z), mats);
+                }
+                float water = 1.0 - smoothstep(0.74, 0.8, q);
+                // (source acide : eau laiteuse vert-gris, sans tapis colorés)
+                vec3 pool = ph < 5.0 ? mix(vec3(0.42, 0.56, 0.5), vec3(0.6, 0.7, 0.62), smoothstep(0.2, 0.75, q))
+                                     : mix(vec3(0.02, 0.13, 0.4), vec3(0.1, 0.62, 0.68), smoothstep(0.15, 0.72, q));
+                color = mix(color, pool, water);
+                roughness = mix(roughness, 0.06, water);
+                specular = mix(specular, 0.6, water);
+                normal = normalize(mix(normal, up, water));
+            } else if (kind < 2.5) {
+                // Mare de boue : argile grise qui bouillonne (bulles en anneaux)
+                float mud = 1.0 - smoothstep(0.85, 1.0, q);
+                float bubbles = smoothstep(0.55, 0.7, n2.x + n8.x * 0.5);
+                color = mix(color, vec3(0.5, 0.48, 0.44), (1.0 - smoothstep(1.0, 2.2, q)) * 0.6);
+                color = mix(color, vec3(0.4, 0.38, 0.35) * (1.0 - 0.25 * bubbles), mud);
+                roughness = mix(roughness, 0.3, mud);
+                normal = normalize(mix(normal, up, mud * 0.8));
+            } else {
+                // Geyser : cône et tablier de geysérite (silice blanche), bouche sombre, flaques
+                float apron = 1.0 - smoothstep(1.5, 3.4, q);
+                color = mix(color, vec3(0.86, 0.85, 0.81) * (0.9 + 0.2 * n8.y), apron * 0.85);
+                float puddles = apron * smoothstep(0.6, 0.7, n32.y + 0.3 * n8.x) * smoothstep(1.0, 1.6, q);
+                color = mix(color, vec3(0.25, 0.5, 0.58), puddles * 0.7);
+                roughness = mix(roughness, 0.1, puddles);
+                color = mix(color, vec3(0.08, 0.1, 0.12), 1.0 - smoothstep(0.25, 0.45, q));
+            }
         }
     }
     // Éruptions : basalte noir sous la lave, lave incandescente qui éclaire d'elle-même

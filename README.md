@@ -128,6 +128,7 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
   - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
+  - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
   - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, pluie, neige, puis
     nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ;
     Maj + F4 : la plus haute falaise de la côte, vue du large ; L : volcan.
@@ -223,6 +224,18 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     Terre (lave incandescente, panaches de cendres, voile d'aérosols qui refroidit la planète après
     les plus fortes) et séismes aux frontières de plaques
     (loi de Gutenberg-Richter, secousse de la caméra quand ils sont ressentis) ;
+  - **milieux hydrothermaux** (étape 14a), là où la chaleur du sous-sol rencontre l'eau : sur les
+    volcans émergés, fumerolles près du sommet (gaz à 100-450 °C, pH 1 à 2,5), puis, là où l'eau
+    de pluie ressort réchauffée, sources chaudes (40 °C à l'ébullition, qui baisse de 1 °C tous
+    les 300 m d'altitude), geysers (rares : jets de 15 à 70 m toutes les 25 à 180 minutes) et
+    mares de boue acides quand l'eau manque ; sous la mer, fumeurs noirs (~350 °C) le long des
+    dorsales et sur les volcans sous-marins, sources alcalines tièdes (pH 9 à 11) sur leurs
+    flancs, évents côtiers. Un volcan éteint depuis peu garde quelques sources tièdes. Dans le
+    jeu : bassins turquoise bordés de tapis microbiens jaunes et orange, terrasses de dépôts
+    clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
+    « Milieux hydrothermaux », fiche à la sonde (nombre, température, pH), réglage de leur
+    abondance ; touche J : source chaude ou geyser suivant. Ce sont les berceaux possibles de
+    la vie de l'étape suivante ;
   - glaciations : cycles de Milankovitch (excentricité, inclinaison, précession), volume des glaces
     (Imbrie), mer jusqu'à ~130 m plus bas et limite des neiges abaissée sur une planète assez froide ;
     le climat simulé reçoit l'orbite du moment.
@@ -252,8 +265,6 @@ Faites :
 
 À venir :
 
-- **Milieux volcaniques** : geysers, sources et mares chaudes, fumerolles, sources
-  hydrothermales sous-marines autour des volcans actifs (berceaux possibles de la vie).
 - **Chimie** : éléments répartis sur la planète (carbone, azote, phosphore, soufre, fer, eau…),
   nourris par les roches, le volcanisme, l'érosion et les fleuves ; lisibles à la sonde.
 
@@ -411,6 +422,19 @@ de ces mêmes ouvrages.
   cellulaire (échanges entre voisines selon les dénivelés, refroidissement, solidification).
 - Bonadonna C., Phillips J. C. (2003). *Sedimentation from strong volcanic plumes.* Journal of
   Geophysical Research 108(B7), 2340. — étalement de l'ombrelle et de la traînée sous le vent.
+- Corliss J. B. et al. (1979). *Submarine thermal springs on the Galápagos Rift.* Science
+  203(4385), 1073-1083 ; Kelley D. S. et al. (2001). *An off-axis hydrothermal vent field near the
+  Mid-Atlantic Ridge at 30° N.* Nature 412, 145-149. — fumeurs noirs des dorsales, sources
+  alcalines hors de l'axe (« Lost City » : 40 à 90 °C, pH 9 à 11).
+- Martin W., Russell M. J. (2007). *On the origin of biochemistry at an alkaline hydrothermal
+  vent.* Philosophical Transactions of the Royal Society B 362, 1887-1925 ; Mulkidjanian A. Y. et
+  al. (2012). *Origin of first cells at terrestrial, anoxic geothermal fields.* PNAS 109(14),
+  E821-E830 ; Damer B., Deamer D. (2020). *The hot spring hypothesis for an origin of life.*
+  Astrobiology 20(4), 429-452. — milieux hydrothermaux comme berceaux de la vie.
+- Hurwitz S., Manga M. (2017). *The fascinating and complex dynamics of geyser eruptions.* Annual
+  Review of Earth and Planetary Sciences 45, 31-59 ; Brock T. D. (1978). *Thermophilic
+  Microorganisms and Life at High Temperatures.* Springer. — geysers (périodes, hauteurs des
+  jets), couleurs des tapis microbiens selon la température de l'eau.
 - Wood C. A. (1980). *Morphometric evolution of cinder cones.* Journal of Volcanology and
   Geothermal Research 7, 387-413. — proportions des cônes de scories (hauteur ~0,18 × diamètre).
 - Walker G. P. L. (1988). *Three Hawaiian calderas: an origin through loading by shallow

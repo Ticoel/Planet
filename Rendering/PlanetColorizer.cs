@@ -28,6 +28,8 @@ public enum DisplayMode
     OceanCurrents,
     /// <summary>Remontées d'eau froide (étape 11c).</summary>
     Upwelling,
+    /// <summary>Milieux hydrothermaux (étape 14a) : couleurs calculées par le jeu (Main.Habitats).</summary>
+    VolcanicHabitats,
 }
 
 /// <summary>Calcule la couleur de chaque cellule selon le mode d'affichage.</summary>

@@ -62,6 +62,7 @@ public partial class Main
         RegisterLayers();
         RegisterProbe();
         RegisterSeries();
+        RegisterHabitats();
     }
 
     private void TogglePause()
@@ -81,13 +82,14 @@ public partial class Main
         var explorer = _terrain.Explorer;
         Vector3 p = explorer.Position.Normalized().ToVector3();
         float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
-        float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
+        float longitude = Mathf.RadToDeg(Mathf.Atan2(-p.Z, p.X));
         return $"{Math.Abs(latitude):0.0}° {(latitude >= 0 ? "N" : "S")}  {Math.Abs(longitude):0.0}° {(longitude >= 0 ? "E" : "O")}   " +
                $"{Distance(explorer.AltitudeAboveGround)}   {Engine.GetFramesPerSecond():0} img/s";
     }
 
     private void UpdateUi(double delta)
     {
+        EnsureHabitats(delta);
         if (_running)
         {
             _seriesTimer -= delta;
@@ -237,7 +239,7 @@ public partial class Main
     {
         Vector3 p = _grid.Positions[cell];
         float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
-        float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
+        float longitude = Mathf.RadToDeg(Mathf.Atan2(-p.Z, p.X));
         return $"{Math.Abs(latitude):0}° {(latitude >= 0 ? "N" : "S")}, {Math.Abs(longitude):0}° {(longitude >= 0 ? "E" : "O")}" +
                (_probePinned ? " (épinglée)" : "");
     }
