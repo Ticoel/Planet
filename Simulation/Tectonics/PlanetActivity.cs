@@ -77,6 +77,9 @@ public sealed class PlanetActivity
     public List<Earthquake> RecentEarthquakes { get; } = new();
     /// <summary>Voile d'aérosols volcaniques : forçage radiatif (W/m², positif = moins de Soleil).</summary>
     public float AerosolForcing { get; private set; }
+
+    /// <summary>Fréquence des éruptions par rapport à la Terre (1 = comme sur Terre, 0 = aucune).</summary>
+    public double ActivityFactor { get; set; } = 1.0;
     public int ActiveVolcanoCount => _volcanoes.Length;
 
     /// <summary>Relief figé de l'horloge climatique : volcans actifs, frontières de plaques.</summary>
@@ -129,7 +132,8 @@ public sealed class PlanetActivity
         // Nouvelles éruptions (au plus quelques-unes par pas, même à grande vitesse)
         foreach (var volcano in _volcanoes)
         {
-            double interval = volcano.Kind == LandformKind.ShieldVolcano ? ShieldIntervalYears : StratoIntervalYears;
+            double interval = (volcano.Kind == LandformKind.ShieldVolcano ? ShieldIntervalYears : StratoIntervalYears)
+                              / Math.Max(ActivityFactor, 1e-3);
             if (_random.NextDouble() > 1 - Math.Exp(-years / interval))
                 continue;
             bool busy = false;

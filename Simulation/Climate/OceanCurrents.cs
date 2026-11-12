@@ -298,12 +298,44 @@ public sealed class OceanCurrents
     /// Résolution de r ∇²ψ + β ∂ψ/∂x = F par sur-relaxation (Gauss-Seidel accéléré, séquentiel :
     /// résultat reproductible). ∂ψ/∂x : gradient de Green-Gauss projeté vers l'est.
     /// </summary>
+    /// <summary>
+    /// Résout la fonction de courant par surrelaxation (SOR). Le terme β rend le système non
+    /// symétrique : sur certaines géographies, la surrelaxation forte (1,75) diverge au lieu de
+    /// converger (les courants montaient à 10^15 m/s, puis le climat entier partait en vrille).
+    /// On surveille donc la solution : si elle s'emballe, on repart de zéro avec une relaxation
+    /// plus prudente (1,4, puis 1 : Gauss-Seidel, qui converge toujours ici, plus lentement).
+    /// </summary>
     private void Solve(int iterations)
+    {
+        for (; ; _relaxationIndex++)
+        {
+            float relaxation = Relaxations[Math.Min(_relaxationIndex, Relaxations.Length - 1)];
+            if (Iterate(iterations, relaxation))
+                return;
+            if (_relaxationIndex >= Relaxations.Length - 1)
+            {
+                // Ne devrait pas arriver : plutôt pas de courants que des courants absurdes
+                Array.Clear(_psi);
+                return;
+            }
+            Array.Clear(_psi);
+            iterations = FirstIterations;
+        }
+    }
+
+    private static readonly float[] Relaxations = { SorFactor, 1.4f, 1.0f };
+    // Fonction de courant maximale plausible (m²/s) : ~1 m/s sur 10 000 km
+    private const float MaxPlausiblePsi = 1e8f;
+    private int _relaxationIndex;
+
+    /// <summary>Itérations de relaxation ; faux si la solution diverge.</summary>
+    private bool Iterate(int iterations, float relaxation)
     {
         int count = OceanGrid.CellCount;
         float friction = BetaReference * BoundaryWidth;
         for (int iteration = 0; iteration < iterations; iteration++)
         {
+            float largest = 0f;
             for (int c = 0; c < count; c++)
             {
                 if (!_ocean[c])
@@ -322,8 +354,13 @@ public sealed class OceanCurrents
                 if (MathF.Abs(diagonal) < 1e-30f)
                     continue;
                 float target = (offDiagonal - _forcing[c]) / diagonal;
-                _psi[c] += SorFactor * (target - _psi[c]);
+                _psi[c] += relaxation * (target - _psi[c]);
+                largest = MathF.Max(largest, MathF.Abs(_psi[c]));
             }
+            // (NaN compris : la comparaison est alors fausse)
+            if (!(largest < MaxPlausiblePsi))
+                return false;
         }
+        return true;
     }
 }

@@ -23,6 +23,7 @@
     <Compile Include="../../Rendering/PlanetColorizer.cs" />
     <Compile Include="../../Rendering/ExplorerCamera.cs" />
     <Compile Include="../../Rendering/AviWriter.cs" />
+    <Compile Include="../../Ui/UiRegistry.cs" />
   </ItemGroup>
 
   <!-- GodotSharp (Vector3, Color…) : paquet NuGet par défaut, ou chemin direct vers la DLL -->

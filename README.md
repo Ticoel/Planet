@@ -99,6 +99,19 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
   (`git clone https://github.com/Ticoel/Planet.git`).
 - Ouvrir le dossier dans Godot 4.7.2 (.NET), lancer la scène `Main.tscn`.
 - Tests : `dotnet run -c Release --project tests/Planet.Tests`.
+- **Interface** (Tab pour la masquer) : le jeu est une boîte de Petri à l'échelle d'une planète ;
+  on règle les paramètres, on laisse tourner, on observe.
+  - barre du haut : pause, vitesse, horloge, date, qualité graphique ;
+  - à gauche, les **couches** (ce qu'on regarde) ; à droite, les **paramètres** (ce qu'on règle :
+    masse de l'étoile, lumière reçue, inclinaison de l'axe, excentricité, effet de serre,
+    fréquence des éruptions), avec un repère de la valeur terrestre et un bouton pour y revenir ;
+    un réglage s'applique à la planète en cours, sans la recréer ;
+  - en bas : la **sonde** (clic sur la planète : fiche du lieu), les **courbes** (température,
+    lumière de l'étoile, terres émergées, glaces, niveau de la mer…) et le **journal** des
+    événements ;
+  - l'interface est modulaire : chaque paramètre, couche, ligne de sonde ou courbe est inscrit
+    une seule fois dans un registre (`Ui/UiRegistry.cs`, inscriptions dans `Main.Ui.cs`) et les
+    panneaux se construisent seuls.
 - Touches principales (H affiche l'aide complète dans le jeu) :
   - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : avancer / reculer dans l'axe du regard ; G : vol / marche ;
   - C : horloge géologique / climatique ; + / − : vitesse ; T : avance rapide jusqu'à 4,5 milliards d'années ;
@@ -239,9 +252,10 @@ Faites :
 
 À venir :
 
-- **Avant la vie : revoir l'interface ensemble.** Le texte à l'écran est devenu trop présent et
-  trop nombreux (aide, détails, messages, lignes d'état) : on en discute d'abord, puis on la
-  repense (moins de texte, regroupé, plus visuel) avant d'attaquer l'étape 14.
+- **Milieux volcaniques** : geysers, sources et mares chaudes, fumerolles, sources
+  hydrothermales sous-marines autour des volcans actifs (berceaux possibles de la vie).
+- **Chimie** : éléments répartis sur la planète (carbone, azote, phosphore, soufre, fer, eau…),
+  nourris par les roches, le volcanisme, l'érosion et les fleuves ; lisibles à la sonde.
 
 14. **Vie** : apparition et évolution d'espèces simples qui se répartissent selon le climat et
     s'adaptent ; leur action sur le milieu (voir plus bas).

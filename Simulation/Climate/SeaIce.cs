@@ -84,6 +84,8 @@ public sealed class SeaIce
         return current + turned * WindDriftFactor;
     }
 
+    private const int MaxSubsteps = 64;
+
     /// <summary>Avance de dtDays : dérive (courant + vent), puis formation et fonte.</summary>
     /// <param name="current">Courant de surface (m/s), ou null.</param>
     /// <param name="wind">Vent de surface (m/s), ou null.</param>
@@ -105,7 +107,9 @@ public sealed class SeaIce
                 outflow += MathF.Max(0f, velocity[c].Dot(_directions[c][k])) * _faceWeights[c][k];
             maxRate = MathF.Max(maxRate, outflow);
         }
-        int substeps = Math.Max(1, (int)Math.Ceiling(seconds * maxRate / 0.5));
+        // (borné : une vitesse aberrante ne doit jamais demander des milliards de sous-pas)
+        double wanted = seconds * maxRate / 0.5;
+        int substeps = wanted >= 1 && wanted < MaxSubsteps ? (int)Math.Ceiling(wanted) : wanted >= MaxSubsteps ? MaxSubsteps : 1;
         float dt = (float)(seconds / substeps);
         for (int step = 0; step < substeps; step++)
         {

@@ -143,4 +143,35 @@ public static class OceanTests
         double la = latDeg * Math.PI / 180, lo = lonDeg * Math.PI / 180;
         return new Vector3((float)(Math.Cos(la) * Math.Sin(lo)), (float)Math.Sin(la), (float)(Math.Cos(la) * Math.Cos(lo)));
     }
+
+    [Test]
+    public static void CurrentsStayFiniteOnAYoungPlanet()
+    {
+        // Planète de départ du jeu après 16 Ma : la surrelaxation forte y divergeait (courants
+        // de 10^15 m/s, puis banquise et climat bloqués). Le solveur doit s'en apercevoir et
+        // repartir avec une relaxation plus prudente
+        var grid = Fixtures.Grid(5);
+        var tectonics = Planet.Simulation.Tectonics.TectonicPlates.Generate(grid, 14, 1);
+        while (tectonics.TimeMyr < 16)
+            tectonics.Step(tectonics.MaxTimeStep());
+        var climate = new ClimateSimulation(grid, new OrbitalParameters(), useGpu: false, startDay: 79.5);
+        climate.SetSurface(tectonics.CellElevation);
+        climate.WaitForHydrology();
+        var ocean = new OceanCurrents(grid);
+        ocean.SetSurface(tectonics.CellElevation);
+        ocean.Compute(climate.Winds.Wind);
+        ocean.Publish();
+        float fastest = ocean.Current.Max(v => v.Length());
+        Console.WriteLine($"     courant le plus rapide : {fastest:0.00} m/s");
+        Assert.True(fastest > 0.02f && fastest < 3f, $"courants invraisemblables : {fastest} m/s");
+        Assert.True(ocean.Upwelling.All(float.IsFinite), "remontées d'eau non finies");
+
+        // Et la banquise ne se bloque pas même si on lui donne des vitesses absurdes
+        var ice = new SeaIce(grid);
+        ice.Reset(tectonics.CellElevation, climate.SurfaceTemperature);
+        var absurd = Enumerable.Repeat(new Godot.Vector3(1e15f, 0, 0), grid.CellCount).ToArray();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        ice.Step(1.0, climate.SurfaceTemperature, absurd, climate.Winds.Wind);
+        Assert.True(watch.ElapsedMilliseconds < 2000, "la banquise ne doit pas se bloquer");
+    }
 }

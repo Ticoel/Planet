@@ -217,6 +217,8 @@ public partial class Main : Node3D
     private string _notice;
     private double _noticeTimer;
     private Label _hud;
+    // Interface masquée par le joueur (touche Tab)
+    private bool _uiHidden;
 
     private bool _running = true;
     private int _geologicalSpeed = DefaultGeologicalSpeed;
@@ -251,7 +253,11 @@ public partial class Main : Node3D
         _capture = new CaptureManager
         {
             Name = "Capture", Notify = ShowNotice,
-            SetInterfaceVisible = visible => { if (_hud != null) _hud.Visible = visible; },
+            SetInterfaceVisible = visible =>
+            {
+                if (_hud != null) _hud.Visible = visible;
+                if (_ui != null) _ui.Shown = visible && !_uiHidden;
+            },
         };
         AddChild(_capture);
 
@@ -265,6 +271,7 @@ public partial class Main : Node3D
         ApplyQuality();
         SetupOverlays();
         SetupHud();
+        SetupUi();
         GeneratePlanet();
         _terrain.Explorer.PlaceAbove(new Double3(0, 0, 1), OrbitAltitude);
     }
@@ -322,6 +329,7 @@ public partial class Main : Node3D
         UpdateOverlays(delta);
         UpdateHover();
         UpdateHud();
+        UpdateUi(delta);
     }
 
     // --- Horloges ----------------------------------------------------------------------------
@@ -375,9 +383,27 @@ public partial class Main : Node3D
     private OrbitalParameters OrbitAt(double timeMyr)
     {
         var orbit = new OrbitalParameters { AxialTiltDeg = AxialTiltDeg, Eccentricity = Eccentricity, SolarConstant = SolarConstant };
-        GlacialCycles.ApplyTo(orbit, GlacialCycles.ElementsAt(timeMyr));
-        _star.ApplyTo(orbit, timeMyr / 1000.0);
+        ApplyOrbit(orbit, timeMyr);
         return orbit;
+    }
+
+    // Valeurs terrestres autour desquelles oscillent les cycles de Milankovitch
+    private const float EarthAxialTiltDeg = 23.44f, EarthEccentricity = 0.0167f;
+
+    /// <summary>Lumière reçue par rapport à celle que fixe l'étoile (réglage du joueur).</summary>
+    public float InsolationFactor { get; set; } = 1f;
+
+    /// <summary>
+    /// Règle une orbite pour un instant géologique : cycles de Milankovitch (décalés des réglages
+    /// du joueur : inclinaison et excentricité moyennes), puis lumière de l'étoile à cet âge.
+    /// </summary>
+    private void ApplyOrbit(OrbitalParameters orbit, double timeMyr)
+    {
+        GlacialCycles.ApplyTo(orbit, GlacialCycles.ElementsAt(timeMyr));
+        orbit.AxialTiltDeg = Math.Clamp(orbit.AxialTiltDeg + AxialTiltDeg - EarthAxialTiltDeg, 0f, 90f);
+        orbit.Eccentricity = Math.Clamp(orbit.Eccentricity + Eccentricity - EarthEccentricity, 0f, 0.9f);
+        _star.ApplyTo(orbit, timeMyr / 1000.0);
+        orbit.SolarConstant *= InsolationFactor;
     }
 
     /// <summary>Changements de phase de l'étoile ; vrai si elle vient de mourir (fin de la partie).</summary>
@@ -495,7 +521,7 @@ public partial class Main : Node3D
 
         // Éruptions et séismes (étape 13a) ; les aérosols des grosses éruptions voilent le Soleil
         _activity.Step(_climate.TimeDays, simulated);
-        _climate.AerosolForcingWm2 = _activity.AerosolForcing;
+        _climate.AerosolForcingWm2 = _activity.AerosolForcing - GreenhouseForcingWm2;
         ReportActivity();
     }
 
@@ -718,8 +744,7 @@ public partial class Main : Node3D
             if (_climateSurfaceSource != _tectonics || _climateSurfaceTimeMyr != _tectonics.TimeMyr)
             {
                 // Orbite du moment (cycles de Milankovitch, étape 13c) et volcans actifs du relief figé
-                GlacialCycles.ApplyTo(_orbit, GlacialCycles.ElementsAt(_tectonics.TimeMyr));
-                _star.ApplyTo(_orbit, _tectonics.TimeMyr / 1000.0);
+                ApplyOrbit(_orbit, _tectonics.TimeMyr);
                 _activity.SetPlanet(_tectonics);
                 _climate.SetSurface(_tectonics.CellElevation);
                 _climateSurfaceSource = _tectonics;
@@ -809,6 +834,9 @@ public partial class Main : Node3D
         _fastForward = false;
         _gameOver = false;
         _starPhase = StarPhase.MainSequence;
+        // Nouvelle planète : les courbes repartent de zéro, la sonde est libérée
+        _ui?.Registry.ClearSeries();
+        _probePinned = false;
         var stopwatch = Stopwatch.StartNew();
         _tectonics = TectonicPlates.Generate(_grid, PlateCount, Seed);
         long platesMs = stopwatch.ElapsedMilliseconds;
@@ -1270,6 +1298,7 @@ public partial class Main : Node3D
     {
         _notice = text;
         _noticeTimer = 5;
+        _ui?.Registry.Log(TimeStamp(), text);
     }
 
     /// <summary>Climat de la cellule sous la caméra : pluie, neige, vent, poussière, brume.</summary>
@@ -1357,37 +1386,43 @@ public partial class Main : Node3D
         var lines = new List<string>();
         var explorer = _terrain.Explorer;
 
-        if (_clock == ClockMode.Geological)
+        // (avec l'interface, l'horloge, la position et la couche se lisent dans les panneaux)
+        if (!UiShown)
         {
-            string speed = !_running ? "EN PAUSE"
-                : _fastForward ? $"AVANCE RAPIDE jusqu'à {French((float)(FastForwardTargetMyr / 1000.0))} milliards d'années ({French(_effectiveSpeed)} Ma/s)"
-                : $"{French(GeologicalSpeeds[_geologicalSpeed])} Ma/s (réel {French(_effectiveSpeed)})";
-            lines.Add($"GÉOLOGIE   {AgeLabel(_tectonics.TimeMyr)}   {speed}");
-            if (_gameOver)
+            if (_clock == ClockMode.Geological)
             {
-                lines.Add("FIN : l'étoile est morte. Devenue géante rouge, elle a brûlé la planète, puis s'est éteinte en naine blanche.");
-                lines.Add("R : nouvelle planète   E : autre étoile");
+                string speed = !_running ? "EN PAUSE"
+                    : _fastForward ? $"AVANCE RAPIDE jusqu'à {French((float)(FastForwardTargetMyr / 1000.0))} milliards d'années ({French(_effectiveSpeed)} Ma/s)"
+                    : $"{French(GeologicalSpeeds[_geologicalSpeed])} Ma/s (réel {French(_effectiveSpeed)})";
+                lines.Add($"GÉOLOGIE   {AgeLabel(_tectonics.TimeMyr)}   {speed}");
+                if (_gameOver)
+                {
+                    lines.Add("FIN : l'étoile est morte. Devenue géante rouge, elle a brûlé la planète, puis s'est éteinte en naine blanche.");
+                    lines.Add("R : nouvelle planète   E : autre étoile");
+                }
             }
-        }
-        else
-        {
-            string speed = _running ? ClimateSpeedLabel(ClimateSpeeds[_climateSpeed]) : "EN PAUSE";
-            if (IsFastSky)
-                speed += " (ciel montré chaque jour à 13 h)";
-            string temperature = _climate.HasTemperature ? $"   {French(_climate.GlobalMeanTemperature)} °C en moyenne" : "";
-            lines.Add($"CLIMAT   {DateLabel(_climate.TimeDays)}   {speed}{temperature}");
-        }
+            else
+            {
+                string speed = _running ? ClimateSpeedLabel(ClimateSpeeds[_climateSpeed]) : "EN PAUSE";
+                if (IsFastSky)
+                    speed += " (ciel montré chaque jour à 13 h)";
+                string temperature = _climate.HasTemperature ? $"   {French(_climate.GlobalMeanTemperature)} °C en moyenne" : "";
+                lines.Add($"CLIMAT   {DateLabel(_climate.TimeDays)}   {speed}{temperature}");
+            }
 
-        Vector3 p = explorer.Position.Normalized().ToVector3();
-        float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
-        float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
-        string walking = explorer.Walking ? "à pied   " : "";
-        lines.Add($"{walking}{Math.Abs(latitude):0.0}° {(latitude >= 0 ? "N" : "S")}  {Math.Abs(longitude):0.0}° {(longitude >= 0 ? "E" : "O")}   " +
-                  $"hauteur {Distance(explorer.AltitudeAboveGround)}   sol {explorer.GroundHeight:N0} m   " +
-                  $"{Engine.GetFramesPerSecond():0} img/s");
-        lines.Add($"Couche : {LayerName()}");
-        if (_hoverCell >= 0)
-            lines.Add(ShortHoverLabel(_hoverCell));
+            Vector3 p = explorer.Position.Normalized().ToVector3();
+            float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(p.Y, -1f, 1f)));
+            float longitude = Mathf.RadToDeg(Mathf.Atan2(p.X, p.Z));
+            string walking = explorer.Walking ? "à pied   " : "";
+            lines.Add($"{walking}{Math.Abs(latitude):0.0}° {(latitude >= 0 ? "N" : "S")}  {Math.Abs(longitude):0.0}° {(longitude >= 0 ? "E" : "O")}   " +
+                      $"hauteur {Distance(explorer.AltitudeAboveGround)}   sol {explorer.GroundHeight:N0} m   " +
+                      $"{Engine.GetFramesPerSecond():0} img/s");
+            lines.Add($"Couche : {LayerName()}");
+            if (_hoverCell >= 0)
+                lines.Add(ShortHoverLabel(_hoverCell));
+        }
+        else if (_gameOver)
+            lines.Add("FIN : l'étoile est morte. R : nouvelle planète, ou réglez la masse de l'étoile.");
 
         if (_showDetails)
         {
@@ -1396,6 +1431,7 @@ public partial class Main : Node3D
         }
         if (_noticeTimer > 0 && _notice != null)
             lines.Add(_notice);
+        bool withUi = UiShown;
         if (_showHelp)
         {
             lines.Add("");
@@ -1407,12 +1443,12 @@ public partial class Main : Node3D
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
             lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
-            lines.Add("[O] Qualité graphique : basse / moyenne / haute");
+            lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
             lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
-        else
+        else if (!withUi)
         {
-            lines.Add("[H] Aide   [I] Détails");
+            lines.Add("[H] Aide   [I] Détails   [Tab] Interface");
         }
         _hud.Text = string.Join("\n", lines);
     }
@@ -1812,6 +1848,16 @@ public partial class Main : Node3D
             case InputEventMouseMotion motion when (motion.ButtonMask & MouseButtonMask.Right) != 0:
                 explorer.Look(motion.Relative);
                 break;
+            // Clic gauche sans glisser : épingle la sonde sur le lieu pointé
+            case InputEventMouseButton { ButtonIndex: MouseButton.Left } click:
+                if (click.Pressed)
+                    _pressPosition = click.Position;
+                else if (click.Position.DistanceTo(_pressPosition) < 4f && _hoverCell >= 0)
+                {
+                    _probeCell = _hoverCell;
+                    _probePinned = true;
+                }
+                break;
             case InputEventMouseButton { Pressed: true } button:
                 if (button.ButtonIndex == MouseButton.WheelUp)
                     explorer.Zoom(+1);
@@ -1935,6 +1981,11 @@ public partial class Main : Node3D
                 break;
             case Key.H:
                 _showHelp = !_showHelp;
+                break;
+            case Key.Tab:
+                // Interface masquée : pour contempler ou photographier
+                _uiHidden = !_uiHidden;
+                _ui.Shown = !_uiHidden;
                 break;
             case Key.I:
                 _showDetails = !_showDetails;

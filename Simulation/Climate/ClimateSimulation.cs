@@ -356,8 +356,9 @@ public sealed class ClimateSimulation : IDisposable
     private void UpdateInsolation()
     {
         Sun = Orbit.ComputeSun(TimeDays);
-        if (AerosolForcingWm2 > 0f)
-            Sun = Sun with { Flux = Sun.Flux * MathF.Max(0.5f, 1f - AerosolForcingWm2 / 240f) };
+        // (négatif : forçage qui réchauffe, par exemple un effet de serre plus fort)
+        if (AerosolForcingWm2 != 0f)
+            Sun = Sun with { Flux = Sun.Flux * Math.Clamp(1f - AerosolForcingWm2 / 240f, 0.5f, 1.5f) };
         if (_insolationKernel != null)
             _insolationKernel.Compute(Sun, InstantInsolation, DailyInsolation);
         else
