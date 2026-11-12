@@ -186,17 +186,32 @@ public partial class Main : Node3D
     // Qualité d'image (touche O) : rendu 3D à résolution réduite, agrandi par AMD FSR. FSR 1
     // (spatial) ne demande rien de plus ; FSR 2 (temporel) est plus net mais peut laisser des
     // traînées sur ce qui n'a pas de vecteurs de mouvement (nuages, pluie)
-    private static readonly (string label, Viewport.Scaling3DModeEnum mode, float scale)[] QualityModes =
+    private sealed record QualityLevel(
+        string Label, Viewport.Scaling3DModeEnum Mode, float Scale,
+        double LodFactor, int CachedChunks,
+        bool Shadows, int ShadowAtlas,
+        int CloudSteps, int PlumeSteps, float PlumeStep);
+
+    /// <summary>
+    /// Les trois niveaux de qualité graphique (touche O). Chacun règle d'un coup : la résolution
+    /// de calcul de l'image (agrandie par AMD FSR), la finesse du relief au loin (distance de
+    /// subdivision du quadtree), les ombres portées du relief, et le nombre de pas du lancer de
+    /// rayons dans les nuages et les panaches.
+    /// </summary>
+    private static readonly QualityLevel[] QualityLevels =
     {
-        // Le premier mode est celui du démarrage
-        ("FSR 2 qualité (67 %)", Viewport.Scaling3DModeEnum.Fsr2, 0.67f),
-        ("FSR 2 performance (50 %)", Viewport.Scaling3DModeEnum.Fsr2, 0.5f),
-        ("FSR 1 qualité (77 %)", Viewport.Scaling3DModeEnum.Fsr, 0.77f),
-        ("FSR 1 équilibré (67 %)", Viewport.Scaling3DModeEnum.Fsr, 0.67f),
-        ("FSR 1 performance (50 %)", Viewport.Scaling3DModeEnum.Fsr, 0.5f),
-        ("pleine résolution", Viewport.Scaling3DModeEnum.Bilinear, 1f),
+        new("basse (FSR 1 à 59 %, relief allégé, sans ombres portées)", Viewport.Scaling3DModeEnum.Fsr, 0.59f,
+            LodFactor: 2.0, CachedChunks: 2500, Shadows: false, ShadowAtlas: 2048,
+            CloudSteps: 24, PlumeSteps: 96, PlumeStep: 0.16f),
+        new("moyenne (FSR 2 à 67 %, ombres portées)", Viewport.Scaling3DModeEnum.Fsr2, 0.67f,
+            LodFactor: 2.5, CachedChunks: 3500, Shadows: true, ShadowAtlas: 4096,
+            CloudSteps: 36, PlumeSteps: 160, PlumeStep: 0.11f),
+        new("haute (pleine résolution lissée par FSR 2, relief fin, ombres douces)", Viewport.Scaling3DModeEnum.Fsr2, 1.0f,
+            LodFactor: 3.5, CachedChunks: 6000, Shadows: true, ShadowAtlas: 8192,
+            CloudSteps: 56, PlumeSteps: 256, PlumeStep: 0.08f),
     };
-    private int _quality;
+    // (niveau du démarrage : haute)
+    private int _quality = 2;
 
     // Message affiché quelques secondes (lieu choisi avec F1–F7, Maj+F4, F9–F11, L)
     private string _notice;
@@ -298,6 +313,8 @@ public partial class Main : Node3D
             _climateDataTimer = 0.25;
         }
         _terrain.Coloring = ColoringFor(_displayMode);
+        // (les morceaux hors champ qui peuvent projeter une ombre dans le champ sont gardés)
+        _terrain.Quadtree.ShadowCasterRange = Math.Min(_sky.ShadowRange, 150000);
         _terrain.Tick(delta, ReadInput());
         ApplyShake(delta);
         _noticeTimer -= delta;
@@ -541,11 +558,22 @@ public partial class Main : Node3D
         Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
         var erupting = new HashSet<Vector3>();
         Eruption nearestOnLand = null;
-        if (climate && _landformByPosition.Count != _tectonics.Landforms.Count)
+        // Volcans retrouvés par leur position : table refaite quand la planète a changé (les
+        // plaques déplacent les volcans ; une nouvelle planète en a d'autres)
+        if (climate && (!ReferenceEquals(_landformSource, _tectonics) || _landformTimeMyr != _tectonics.TimeMyr
+                        || _landformByPosition.Count != _tectonics.Landforms.Count))
         {
+            _landformSource = _tectonics;
+            _landformTimeMyr = _tectonics.TimeMyr;
             _landformByPosition.Clear();
             foreach (var l in _tectonics.Landforms)
                 _landformByPosition[l.Position] = l;
+        }
+        // Altitudes des bouches : valables pour un relief détaillé donné
+        if (!ReferenceEquals(_ventHeightField, _terrain.Field))
+        {
+            _ventHeightField = _terrain.Field;
+            _ventHeights.Clear();
         }
         if (climate)
         {
@@ -582,13 +610,18 @@ public partial class Main : Node3D
             }
         }
         // Volcans voisins : fumerolles des actifs (places restantes), flancs sombres de tous
-        var volcanoes = _tectonics.Landforms
-            .Where(l => l.Kind != LandformKind.ImpactCrater && l.Growth * l.Freshness > 0.2f)
-            .Select(l => (landform: l, distance: l.Position.AngleTo(camera)))
-            .Where(x => x.distance * PlanetConstants.RadiusKm < 600)
-            .OrderBy(x => x.distance).Take(_volcanoSites.Length).ToArray();
+        // (liste refaite quatre fois par seconde seulement : des milliers de reliefs à trier)
+        if (_nearVolcanoes == null || --_nearVolcanoCountdown <= 0 || !ReferenceEquals(_nearVolcanoSource, _tectonics))
+        {
+            _nearVolcanoSource = _tectonics;
+            _nearVolcanoCountdown = 15;
+            float cosRange = MathF.Cos(600f / (float)PlanetConstants.RadiusKm);
+            _nearVolcanoes = _tectonics.Landforms
+                .Where(l => l.Kind != LandformKind.ImpactCrater && l.Growth * l.Freshness > 0.2f && l.Position.Dot(camera) > cosRange)
+                .OrderByDescending(l => l.Position.Dot(camera)).Take(_volcanoSites.Length).ToArray();
+        }
         int sites = 0;
-        foreach (var (landform, _) in volcanoes)
+        foreach (var landform in _nearVolcanoes)
         {
             Vector3 p = landform.Position;
             // Teinte sombre (lave récente, cendres) près du sommet seulement : un bouclier est
@@ -620,6 +653,12 @@ public partial class Main : Node3D
     }
 
     private readonly Dictionary<Vector3, Landform> _landformByPosition = new();
+    private Landform[] _nearVolcanoes;
+    private TectonicPlates _nearVolcanoSource;
+    private int _nearVolcanoCountdown;
+    private TectonicPlates _landformSource;
+    private double _landformTimeMyr = double.NaN;
+    private TerrainHeightField _ventHeightField;
 
     /// <summary>Vent simulé à la cellule d'un volcan : direction (tangente) et vitesse (m/s).</summary>
     private Vector4 WindAt(Landform volcano)
@@ -877,7 +916,7 @@ public partial class Main : Node3D
         AddChild(_overlayRoot);
         MeshInstance3D Create(string name)
         {
-            var mesh = new MeshInstance3D { Name = name, MaterialOverride = VelocityArrows.CreateMaterial(), Visible = false };
+            var mesh = new MeshInstance3D { Name = name, MaterialOverride = VelocityArrows.CreateMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
             _overlayRoot.AddChild(mesh);
             return mesh;
         }
@@ -1214,11 +1253,17 @@ public partial class Main : Node3D
 
     private void ApplyQuality()
     {
-        var (_, mode, scale) = QualityModes[_quality];
+        var level = QualityLevels[_quality];
         var viewport = GetViewport();
-        viewport.Scaling3DMode = mode;
-        viewport.Scaling3DScale = scale;
+        viewport.Scaling3DMode = level.Mode;
+        viewport.Scaling3DScale = level.Scale;
         viewport.FsrSharpness = 0.3f;
+        _terrain.Quadtree.LodFactor = level.LodFactor;
+        _terrain.MaxCachedChunks = level.CachedChunks;
+        _terrain.CastShadows = level.Shadows;
+        _sky.ShadowsEnabled = level.Shadows;
+        SkyRenderer.SetShadowQuality(level.ShadowAtlas, soft: _quality == 2);
+        _sky.SetVolumeQuality(level.CloudSteps, level.PlumeSteps, level.PlumeStep);
     }
 
     private void ShowNotice(string text)
@@ -1362,7 +1407,7 @@ public partial class Main : Node3D
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
             lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
-            lines.Add("[O] Qualité d'image (résolution réduite + AMD FSR)");
+            lines.Add("[O] Qualité graphique : basse / moyenne / haute");
             lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
         else
@@ -1418,7 +1463,7 @@ public partial class Main : Node3D
         string stale = _terrain.StaleChunkCount > 0 ? $", {_terrain.StaleChunkCount} en mise à jour" : "";
         lines.Add($"Terrain : {_terrain.VisibleChunkCount} morceaux (niveau max {_terrain.DeepestVisibleLevel}{stale}), " +
                   $"{_terrain.CachedChunkCount} en mémoire, {_terrain.PendingChunkCount} en calcul   " +
-                  $"Vitesse de la caméra : {SpeedLabel(_terrain.Explorer.Speed)}   Image : {QualityModes[_quality].label}");
+                  $"Vitesse de la caméra : {SpeedLabel(_terrain.Explorer.Speed)}   Qualité : {QualityLevels[_quality].Label}");
     }
 
     private string LayerName() => _displayMode switch
@@ -1858,9 +1903,9 @@ public partial class Main : Node3D
                 ToggleFastForward();
                 break;
             case Key.O:
-                _quality = (_quality + 1) % QualityModes.Length;
+                _quality = (_quality + 1) % QualityLevels.Length;
                 ApplyQuality();
-                ShowNotice($"Qualité d'image : {QualityModes[_quality].label}");
+                ShowNotice($"Qualité graphique : {QualityLevels[_quality].Label}");
                 break;
             case Key.U:
                 // Eau masquée : on voit les fonds marins et le fond des lacs

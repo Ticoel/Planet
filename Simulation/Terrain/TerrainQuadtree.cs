@@ -26,11 +26,27 @@ public sealed class TerrainQuadtree
     /// <summary>Distance de subdivision, en tailles de morceau. Plus grand = plus de détail au loin.</summary>
     public double LodFactor { get; set; } = 2.5;
 
+    /// <summary>
+    /// Distance (m) jusqu'à laquelle on garde aussi les morceaux hors du champ de vision, pour
+    /// qu'ils projettent leur ombre dans le champ (une montagne derrière la caméra, Soleil bas) ;
+    /// 0 : aucun. Ces morceaux n'étant pas vus, ils restent plus grossiers (voir
+    /// <see cref="CasterLodScale"/>).
+    /// </summary>
+    public double ShadowCasterRange { get; set; }
+
+    /// <summary>Hors du champ, un morceau n'est subdivisé qu'à cette part de la distance habituelle.</summary>
+    private const double CasterLodScale = 0.4;
+
     // Altitudes extrêmes possibles (fonds marins compris), tant qu'un morceau n'est pas calculé (m)
     private const double UnknownMinHeight = -11000;
     private const double UnknownMaxHeight = 9000;
-    // Part de la plage de distance d'un niveau consacrée au morphing
-    private const double MorphFraction = 0.3;
+    // Part de la plage de distance d'un niveau consacrée au morphing. Elle doit rester assez
+    // petite pour que le morphing d'un morceau ne commence pas avant la fin de celui de ses
+    // voisins plus fins : un morceau de niveau n subdivisé peut s'étendre jusqu'à
+    // (LodFactor + 2 × 0,71) tailles du niveau n, alors que son voisin non subdivisé commence à
+    // se déformer à (1 − MorphFraction) × 2 × LodFactor tailles. Avec 0,3, les deux zones se
+    // chevauchaient et les bords ne coïncidaient plus tout à fait (dents le long des limites)
+    private const double MorphFraction = 0.15;
 
     /// <summary>Plage de distance où un morceau de ce niveau est remplacé par ses enfants (m).</summary>
     public double SubdivisionDistance(int level) => LodFactor * CubeSphere.ChunkSizeMeters(level);
@@ -79,11 +95,13 @@ public sealed class TerrainQuadtree
             double beyond = Math.Sqrt(Math.Max(0, farthest * farthest - radius * radius));
             if (distanceToCenter - box.radius > horizon + beyond)
                 return;
-            if (!inFrustum(box.center - camera, box.radius))
+            double distance = Math.Max(0, distanceToCenter - box.radius);
+            // Hors du champ : gardé seulement s'il peut projeter une ombre dans le champ
+            bool visible = inFrustum(box.center - camera, box.radius);
+            if (!visible && distance >= ShadowCasterRange)
                 return;
 
-            double distance = Math.Max(0, distanceToCenter - box.radius);
-            if (key.Level < MaxLevel && distance < SubdivisionDistance(key.Level))
+            if (key.Level < MaxLevel && distance < SubdivisionDistance(key.Level) * (visible ? 1.0 : CasterLodScale))
             {
                 var children = new (Double3, double)?[4];
                 bool allReady = true;

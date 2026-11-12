@@ -205,4 +205,31 @@ public static class ActivePlanetTests
         Assert.True(cliff.SlopeDegrees >= 15, $"paroi trop douce : {cliff.SlopeDegrees:0}°");
         Assert.True(watch.ElapsedMilliseconds < 3000, $"recherche trop lente : {watch.ElapsedMilliseconds} ms");
     }
+
+    [Test]
+    public static void VolcanoChunksAreBuiltFastEnough()
+    {
+        // Sur un grand bouclier (rifts, cônes, coulées, caldeira), les morceaux ne doivent pas
+        // coûter beaucoup plus cher qu'ailleurs
+        var grid = Fixtures.Grid(5);
+        var elevation = Enumerable.Repeat(0.3f, grid.CellCount).ToArray();
+        var top = new Vector3(0.2f, 0.5f, 0.84f).Normalized();
+        var landforms = new[] { new Landform { Kind = LandformKind.ShieldVolcano, Position = top, RadiusM = 50000, PeakHeightM = 3500, Growth = 1, Active = true } };
+        var field = new TerrainHeightField(grid, elevation, 1, null, landforms);
+        var (face, s, t) = CubeSphere.FromDirection(Double3.From(top));
+        double[] times = new double[2];
+        int[] levels = { 14, 17 };
+        for (int l = 0; l < 2; l++)
+        {
+            int n = 1 << levels[l];
+            int x = (int)((s + 1) / 2 * n), y = (int)((t + 1) / 2 * n);
+            TerrainChunkBuilder.Build(field, new ChunkKey(face, levels[l], x, y));
+            var watch = Stopwatch.StartNew();
+            for (int k = 0; k < 10; k++)
+                TerrainChunkBuilder.Build(field, new ChunkKey(face, levels[l], x + k, y));
+            times[l] = watch.Elapsed.TotalMilliseconds / 10;
+        }
+        Console.WriteLine($"     morceau sur un volcan bouclier : niveau 14 {times[0]:0.0} ms, niveau 17 (caldeira) {times[1]:0.0} ms");
+        Assert.True(times[0] < 30 && times[1] < 30, $"{times[0]:0.0} et {times[1]:0.0} ms par morceau");
+    }
 }

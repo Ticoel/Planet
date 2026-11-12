@@ -116,6 +116,12 @@ public sealed class VolcanoDetail
             double gullyAcross = radius / (shield ? 2200.0 : 900.0);
             double n = GradientNoise.Sample(r / (shield ? 9000.0 : 3000.0), cos * gullyAcross, sin * gullyAcross, _seed + 2);
             double valley = SmoothStep(0.75, 1.0, 1 - Math.Abs(n));
+            // Ravinement inégal d'un flanc à l'autre (versant au vent plus arrosé, coulées récentes
+            // qui ont comblé les ravines) : sinon les sillons, tous pareils, plissent le cône
+            // comme une jupe
+            double sector = GradientNoise.Sample(cos * 1.6, sin * 1.6, r / (0.7 * radius), _seed + 5)
+                            + 0.5 * GradientNoise.Sample(cos * 4.3, sin * 4.3, r / (0.3 * radius), _seed + 6);
+            valley *= 0.15 + 1.1 * SmoothStep(-0.35, 0.45, sector);
             h -= depth * valley * SmoothStep(0.08, 0.3, q) * (1 - SmoothStep(0.85, 1.0, q)) * Math.Pow(1 - q, 0.5);
         }
 

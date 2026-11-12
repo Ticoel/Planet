@@ -530,6 +530,37 @@ public static class TerrainTests
     }
 
     [Test]
+    public static void ShadowCastersBehindTheCameraAreKept()
+    {
+        // Champ de vision : le demi-espace devant la caméra (vers le nord). Sans ombres, rien
+        // derrière ; avec, les morceaux proches derrière la caméra sont gardés, plus grossiers
+        Double3 camera = At(10, 20) * (TerrainHeightField.RadiusMeters + 2000);
+        Double3 up = camera.Normalized();
+        Double3 north = (Double3.UnitY - up * up.Dot(Double3.UnitY)).Normalized();
+        bool Front(Double3 center, double radius) => center.Dot(north) > -radius;
+        List<SelectedChunk> Select(double range)
+        {
+            var quadtree = new TerrainQuadtree { ShadowCasterRange = range };
+            return quadtree.Select(camera, key => TerrainQuadtree.EstimatedBounds(key, 0, 50), Front, (_, _) => { });
+        }
+        bool Behind(SelectedChunk chunk)
+        {
+            var (center, radius) = TerrainQuadtree.EstimatedBounds(chunk.Key, 0, 50);
+            return (center - camera).Dot(north) < -radius;
+        }
+        var without = Select(0);
+        var with = Select(20000);
+        int behind = with.Count(Behind);
+        Console.WriteLine($"     {without.Count} morceaux sans ombres, {with.Count} avec ({behind} derrière la caméra)");
+        Assert.True(without.Count(Behind) == 0, "sans ombres, rien derrière la caméra");
+        Assert.True(behind > 0, "avec les ombres, des morceaux derrière la caméra");
+        Assert.True(with.Count < without.Count * 1.6, "les morceaux d'ombre doivent rester peu nombreux");
+        int finestFront = with.Where(c => !Behind(c)).Max(c => c.Key.Level), finestBehind = with.Where(Behind).Max(c => c.Key.Level);
+        Console.WriteLine($"     niveau le plus fin : {finestFront} devant, {finestBehind} derrière");
+        Assert.True(finestBehind <= finestFront, "derrière la caméra, le relief n'est pas plus fin que devant");
+    }
+
+    [Test]
     public static void WheelMovesAlongTheViewAxis()
     {
         var camera = new ExplorerCamera();

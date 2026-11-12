@@ -69,6 +69,12 @@ comme un fluide, qui descend du cratère en suivant le relief (à droite). Rendu
 moteur du projet ; les éruptions sont placées ici pour l'image, dans le jeu elles naissent sur
 les volcans simulés.*
 
+![Caldeira d'un volcan bouclier et cratère d'un stratovolcan](docs/images/cratere.jpg)
+
+*Sommets des volcans : caldeira d'un bouclier, au contour festonné, aux parois en gradins
+ravinées, au fond fissuré et au puits central (à gauche) ; cratère d'un stratovolcan, aux flancs
+creusés de ravines rayonnantes (à droite).*
+
 ![Falaise côtière vue du large](docs/images/falaise.jpg)
 
 *Falaise côtière trouvée par la vue Maj + F4 : la plus haute paroi raide de la côte, vue du large
@@ -99,7 +105,12 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
   - I : détails (Lune, marée sous la caméra, niveau moyen de la mer…) ;
-  - O : qualité d'image (résolution réduite + AMD FSR 1 ou 2 ; FSR 2 qualité au démarrage) ;
+  - O : qualité graphique, trois niveaux (haute au démarrage) :
+    - **basse** : image calculée à 59 % puis agrandie (AMD FSR 1), relief allégé, pas d'ombres
+      portées, lancer de rayons grossier dans les nuages et les panaches ;
+    - **moyenne** : image à 67 % (FSR 2), ombres portées du relief ;
+    - **haute** : pleine résolution lissée par FSR 2, relief plus fin au loin, ombres douces en
+      haute définition, nuages et panaches plus fins ;
   - U : masquer l'eau ; N : masquer les nuages ; K : couper le son ;
   - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
@@ -159,6 +170,9 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
 - **Nuages** : couverture tirée du climat, découpée par un « temps qu'il fait » procédural
   (systèmes de 500 à 1 500 km qui dérivent avec les vents) ; nuages en volume de 1,5 à ~9 km,
   ombres au sol ; pluie, neige et poussière autour de la caméra, éclairées par la lumière du moment.
+- **Ombres portées du relief** (qualité moyenne et haute) : quatre cartes d'ombre en cascade,
+  dont la portée suit l'altitude (fines au sol, larges vues d'avion, estompées depuis l'orbite) ;
+  les montagnes hors du champ de vision projettent aussi leur ombre dans le champ.
 - **Sol et saisons** : textures procédurales (strates, roche fissurée, éboulis, dunes et rides de
   sable, canopée des forêts) ; neige selon le climat ; feuillus qui se colorent puis perdent leurs
   feuilles, herbes qui jaunissent ; fleuves qui coulent (rapides, cascades), houle et écume ;
@@ -174,6 +188,11 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     hauts de ~7 % de leur rayon (de Skjaldbreiður au Mauna Loa), caldeira de ~5 % du diamètre ;
     stratovolcans à cratère de quelques centaines de mètres ; panaches et fumerolles à la mesure
     de l'édifice (plus hauts et plus larges sur un grand volcan) ;
+  - détails des volcans, propres à chacun : zones de rift (crêtes rayonnantes et fissures des
+    boucliers), cônes de scories avec leur cratère, coulées allongées dans la pente, relief des
+    champs de lave, ravines rayonnantes (dès la naissance d'un strato, avec l'âge pour un
+    bouclier) ; caldeira festonnée à parois en gradins ravinées, éboulis, fond fissuré et puits
+    central ;
   - volcans repérables de loin : flancs sombres de lave et de cendres, panache de vapeur des
     volcans actifs (touche L : vue de côté sur un volcan, en éruption s'il y en a une) ;
   - coulées de lave simulées comme un fluide autour de l'éruption la plus proche (automate
@@ -378,6 +397,11 @@ de ces mêmes ouvrages.
   cellulaire (échanges entre voisines selon les dénivelés, refroidissement, solidification).
 - Bonadonna C., Phillips J. C. (2003). *Sedimentation from strong volcanic plumes.* Journal of
   Geophysical Research 108(B7), 2340. — étalement de l'ombrelle et de la traînée sous le vent.
+- Wood C. A. (1980). *Morphometric evolution of cinder cones.* Journal of Volcanology and
+  Geothermal Research 7, 387-413. — proportions des cônes de scories (hauteur ~0,18 × diamètre).
+- Walker G. P. L. (1988). *Three Hawaiian calderas: an origin through loading by shallow
+  intrusions?* Journal of Geophysical Research 93(B11), 14773-14784. — caldeiras des boucliers,
+  zones de rift.
 - Sparks R. S. J. (1986). *The dimensions and dynamics of volcanic eruption columns.* Bulletin of
   Volcanology 48, 3-15. — colonne convective et ombrelle qui s'étale à sa hauteur d'équilibre.
 - Robock A. (2000). *Volcanic eruptions and climate.* Reviews of Geophysics 38(2), 191-219. —
@@ -404,6 +428,12 @@ de ces mêmes ouvrages.
 - Microsoft (1992). *AVI RIFF File Reference* (Video for Windows). — conteneur des vidéos.
 
 ## Rendu
+- Engel W. (2006). *Cascaded shadow maps.* In ShaderX5, Charles River Media, 197-206 ; Zhang F. et
+  al. (2006). *Parallel-split shadow maps for large-scale virtual environments.* VRCIA '06,
+  311-318. — ombres portées en cascade (celles du moteur Godot).
+- Jimenez J. (2014). *Next generation post processing in Call of Duty: Advanced Warfare.*
+  SIGGRAPH 2014, Advances in Real-Time Rendering. — bruit à gradient entrelacé (décalage des pas
+  du lancer de rayons dans les nuages et les panaches).
 - Strugar F. (2009). *Continuous Distance-Dependent Level of Detail for Rendering Heightmaps.*
   Journal of Graphics, GPU, and Game Tools 14(4), 57-74. — CDLOD : quadtree, morphing.
 - Rayleigh (Lord) (1871). *On the light from the sky, its polarization and colour.*

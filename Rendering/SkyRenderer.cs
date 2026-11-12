@@ -98,7 +98,15 @@ public sealed partial class SkyRenderer : Node3D
         _cellIndex = cellIndex;
         _cellIndexResolution = cellIndexResolution;
 
-        Sun = new DirectionalLight3D { Name = "Sun", LightEnergy = 1.0f, ShadowEnabled = false };
+        // Ombres portées du relief (réglées chaque image par UpdateShadows) : quatre cartes
+        // d'ombre en cascade, de plus en plus larges avec la distance
+        Sun = new DirectionalLight3D
+        {
+            Name = "Sun", LightEnergy = 1.0f, ShadowEnabled = false,
+            DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel4Splits,
+            DirectionalShadowBlendSplits = true,
+            ShadowBias = 0.1f, ShadowNormalBias = 2.0f,
+        };
         AddChild(Sun);
 
         _skyMaterial = new ShaderMaterial { Shader = new Shader { Code = SkyShaderCode } };
@@ -276,6 +284,44 @@ public sealed partial class SkyRenderer : Node3D
         HasClouds = true;
     }
 
+    // --- Ombres portées ---------------------------------------------------------------------------
+
+    /// <summary>Ombres portées du relief (qualité moyenne et haute).</summary>
+    public bool ShadowsEnabled { get; set; }
+
+    /// <summary>Distance jusqu'à laquelle le relief projette des ombres en ce moment (m ; 0 : aucune).</summary>
+    public float ShadowRange { get; private set; }
+
+    // Au-delà de cette altitude, les ombres du relief sont plus petites qu'un pixel : on les
+    // estompe (de 60 % à 100 % de cette altitude) puis on les coupe
+    private const float ShadowMaxAltitude = 150000f;
+
+    /// <summary>Taille de la texture des ombres (pixels) et douceur de leur bord.</summary>
+    public static void SetShadowQuality(int atlasSize, bool soft)
+    {
+        // (32 bits : avec un Soleil bas, la profondeur vue du Soleil couvre des dizaines de km)
+        RenderingServer.DirectionalShadowAtlasSetSize(atlasSize, false);
+        RenderingServer.DirectionalSoftShadowFilterSetQuality(soft
+            ? RenderingServer.ShadowQuality.SoftHigh : RenderingServer.ShadowQuality.SoftLow);
+    }
+
+    /// <summary>
+    /// Portée des ombres selon l'altitude : fines de près (~1 m par pixel d'ombre au sol), larges
+    /// de haut ; coupées la nuit et depuis l'orbite.
+    /// </summary>
+    private void UpdateShadows(float altitude, float sunHeight)
+    {
+        float fade = 1f - Mathf.SmoothStep(0.6f * ShadowMaxAltitude, ShadowMaxAltitude, altitude);
+        bool on = ShadowsEnabled && fade > 0f && sunHeight > -0.05f;
+        ShadowRange = on ? Mathf.Clamp(10f * altitude, 5000f, 400000f) : 0f;
+        if (Sun.ShadowEnabled != on)
+            Sun.ShadowEnabled = on;
+        if (!on)
+            return;
+        Sun.DirectionalShadowMaxDistance = ShadowRange;
+        Sun.ShadowOpacity = fade;
+    }
+
     // --- Image ------------------------------------------------------------------------------------
 
     public void Update(in SkyFrame frame, double delta)
@@ -288,6 +334,7 @@ public sealed partial class SkyRenderer : Node3D
         Vector3 reference = Mathf.Abs(sun.Y) > 0.99f ? Vector3.Right : Vector3.Up;
         // La lumière éclaire selon son axe −Z : on la fait regarder du Soleil vers la planète
         Sun.Basis = Basis.LookingAt(-sun, reference);
+        UpdateShadows((float)frame.AltitudeAboveGround, sun.Dot(up));
 
         // Lune : direction vue de la caméra (parallaxe : la Lune n'est qu'à 60 rayons)
         bool hasMoon = frame.Moon.HasValue;
@@ -623,6 +670,14 @@ void sky() {
     }
 
     /// <summary>Éruptions proches de la caméra, pour les panaches (même format que le terrain).</summary>
+    /// <summary>Finesse du rendu des volumes (nuages, panaches).</summary>
+    public void SetVolumeQuality(int cloudSteps, int plumeSteps, float plumeStep)
+    {
+        _postMaterial.SetShaderParameter("cloud_steps", cloudSteps);
+        _postMaterial.SetShaderParameter("plume_steps", plumeSteps);
+        _postMaterial.SetShaderParameter("plume_step", plumeStep);
+    }
+
     public void SetEruptions(int count, Vector4[] vents, Vector4[] shapes, Vector4[] winds)
     {
         _postMaterial.SetShaderParameter("eruption_count", count);
@@ -644,6 +699,11 @@ uniform float fog_density = 0.0;
 uniform vec3 fog_color = vec3(0.7);
 uniform float fog_height = 500.0;
 uniform float ground_altitude = 0.0;
+// Qualité : nombre de pas dans les nuages et dans les panaches, longueur d'un pas dans un panache
+// (en tailles de volute)
+uniform int cloud_steps = 36;
+uniform int plume_steps = 256;
+uniform float plume_step = 0.08;
 // Angle couvert par un pixel (radians), pour estomper les détails trop fins au loin
 uniform float pixel_angle = 0.0012;
 
@@ -722,7 +782,7 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
         float extinction_scale = (P.steam ? 0.004 : 0.01) * (1.0 + 0.5 * vei) * intensity;
         float t = t0;
         bool first = true;
-        for (int i = 0; i < 256 && t < t1; i++) {
+        for (int i = 0; i < plume_steps && t < t1; i++) {
             vec3 p = camera_planet + rd * t;
             float feature, thin, trail, safe;
             float e = plume_envelope(P, p, feature, thin, trail, safe);
@@ -733,7 +793,7 @@ vec4 plumes(vec3 rd, float t_scene, vec3 sun, vec2 pixel, out float t_hit) {
                 t += max(safe * 0.8, 0.08 * feature);
                 continue;
             }
-            float dt = 0.08 * feature * lod;
+            float dt = plume_step * feature * lod;
             if (first) {
                 t += dt * jitter;
                 first = false;
@@ -800,9 +860,11 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
                       apply_weather(cloud_cover_raw(normalize(camera_planet + rd * (0.5 * (t0 + t1)))), weather).r);
     if (probe < 0.03)
         return;
-    const int STEPS = 36;
+    // (décalage du premier pas : bruit à gradient entrelacé, au grain plus fin et plus régulier
+    // qu'un bruit blanc)
+    int STEPS = cloud_steps;
     float dt = (t1 - t0) / float(STEPS);
-    float t = t0 + dt * hash12(pixel);
+    float t = t0 + dt * fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
     float transmittance = 1.0;
     float nu = dot(rd, sun);
     // Diffusion vers l'avant (halo lumineux des nuages à contre-jour)

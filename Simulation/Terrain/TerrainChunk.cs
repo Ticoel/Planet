@@ -93,7 +93,7 @@ public static class TerrainChunkBuilder
         double step = key.FaceSize / Resolution;
         // Plus courte longueur d'onde utile : deux fois l'écart entre sommets
         double spacing = CubeSphere.ChunkSizeMeters(key.Level) / Resolution;
-        double minWavelength = 2.0 * spacing;
+        double minWavelength = 2.5 * spacing;
 
         // Le sol est affiché à sa vraie altitude, fonds marins compris : l'eau est une surface à part
         var surface = new Double3[Padded * Padded];
@@ -122,16 +122,28 @@ public static class TerrainChunkBuilder
         // du morphing : arrivé au bout, ce morceau coïncide exactement avec son voisin plus
         // grossier. Sans cela, les petites ondulations propres au morceau fin restaient et, près
         // du niveau de la mer, la côte changeait d'un coup le long de la limite entre niveaux
-        var parentSurface = new Double3[Side * Side];
-        var parentHeight = new double[Side * Side];
-        for (int j = 0; j <= Resolution; j += 2)
-            for (int i = 0; i <= Resolution; i += 2)
+        // (avec une rangée de plus de chaque côté, pour calculer aussi les normales du parent :
+        // garder la normale fine sur une géométrie devenue grossière donnait, un sommet sur deux,
+        // une normale bruitée, d'où des dents de scie dans l'éclairage et les matières)
+        const int ParentSide = Resolution / 2 + 3;
+        var parentSurface = new Double3[ParentSide * ParentSide];
+        var parentHeight = new double[ParentSide * ParentSide];
+        for (int j = 0; j < ParentSide; j++)
+            for (int i = 0; i < ParentSide; i++)
             {
-                Double3 direction = CubeSphere.Direction(key.Face, key.MinS + i * step, key.MinT + j * step);
+                Double3 direction = CubeSphere.Direction(key.Face, key.MinS + (i - 1) * 2 * step, key.MinT + (j - 1) * 2 * step);
                 double h = field.Sample(direction, 2.0 * minWavelength, ref hint).Height;
-                parentHeight[j * Side + i] = h;
-                parentSurface[j * Side + i] = direction * (radius + h);
+                parentHeight[j * ParentSide + i] = h;
+                parentSurface[j * ParentSide + i] = direction * (radius + h);
             }
+        // Sommet (i, j) pair de ce morceau → sommet du parent
+        Double3 PP(int i, int j) => parentSurface[(j / 2 + 1) * ParentSide + i / 2 + 1];
+        double PH(int i, int j) => parentHeight[(j / 2 + 1) * ParentSide + i / 2 + 1];
+        Double3 PN(int i, int j)
+        {
+            Double3 n = (PP(i + 2, j) - PP(i - 2, j)).Cross(PP(i, j + 2) - PP(i, j - 2)).Normalized();
+            return n.Dot(PP(i, j)) < 0 ? -n : n;
+        }
 
         Double3 center = CubeSphere.CenterDirection(key) * radius;
         int count = VertexCount;
@@ -165,9 +177,9 @@ public static class TerrainChunkBuilder
                 int i0 = i, i1 = i, j0 = j, j1 = j;
                 if ((i & 1) == 1) { i0 = i - 1; i1 = i + 1; }
                 if ((j & 1) == 1) { j0 = j - 1; j1 = j + 1; }
-                Double3 coarse = (parentSurface[j0 * Side + i0] + parentSurface[j1 * Side + i1]) * 0.5;
-                Double3 coarseNormal = (N(i0, j0) + N(i1, j1)).Normalized();
-                double coarseHeight = (parentHeight[j0 * Side + i0] + parentHeight[j1 * Side + i1]) * 0.5;
+                Double3 coarse = (PP(i0, j0) + PP(i1, j1)) * 0.5;
+                Double3 coarseNormal = (PN(i0, j0) + PN(i1, j1)).Normalized();
+                double coarseHeight = (PH(i0, j0) + PH(i1, j1)) * 0.5;
 
                 Write3(positions, v, p - center);
                 Write3(normals, v, n);

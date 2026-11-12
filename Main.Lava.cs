@@ -21,6 +21,7 @@ public partial class Main
     private const int LavaMaxStepsPerFrame = 120;
 
     private LavaFlow _lava;
+    private TerrainHeightField _lavaField, _lavaBuildField;
     private Vector3 _lavaVent;
     private Task<LavaFlow> _lavaBuild;
     private Task _lavaStep;
@@ -43,6 +44,17 @@ public partial class Main
             _lavaDay = double.NaN;
             return;
         }
+        // Relief changé (nouvelle planète, retour de l'horloge géologique) : la coulée ne vaut plus
+        if (!ReferenceEquals(_lavaField, _terrain.Field))
+        {
+            _lavaField = _terrain.Field;
+            if (_lavaStep is { IsCompleted: false })
+                _lavaStep.Wait();
+            _lavaStep = null;
+            _lava = null;
+            _lavaVent = default;
+            _lavaBuildField = null;
+        }
         double day = _climate.TimeDays;
         Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
         bool near = nearest != null && nearest.Position.AngleTo(camera) * PlanetConstants.RadiusKm < LavaMaxDistanceKm;
@@ -53,15 +65,23 @@ public partial class Main
             var field = _terrain.Field;
             var vent = Double3.From(nearest.Position).Normalized();
             _lavaVent = nearest.Position;
+            _lavaBuildField = field;
             _lavaBuild = Task.Run(() => new LavaFlow(field, vent));
         }
         if (_lavaBuild is { IsCompleted: true })
         {
             if (_lavaStep is { IsCompleted: false })
                 _lavaStep.Wait();
-            _lava = _lavaBuild.IsCompletedSuccessfully ? _lavaBuild.Result : null;
+            // (une grille posée sur un relief remplacé entre-temps est jetée)
+            _lava = _lavaBuild.IsCompletedSuccessfully && ReferenceEquals(_lavaBuildField, _terrain.Field) ? _lavaBuild.Result : null;
+            if (_lava == null)
+                _lavaVent = default;
             _lavaBuild = null;
+            _lavaStep = null;
             _lavaPendingSeconds = 0;
+            // L'image de l'ancienne coulée ne doit pas s'afficher sur le nouveau volcan : rien
+            // n'est montré avant le premier pas de la nouvelle
+            _terrain.SetShaderParameter("lava_active", 0f);
             if (_lava != null)
             {
                 _terrain.SetShaderParameter("lava_center", _lava.Vent.ToVector3());

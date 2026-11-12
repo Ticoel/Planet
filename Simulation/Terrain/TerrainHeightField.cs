@@ -93,6 +93,12 @@ public sealed class TerrainHeightField
     private const double RidgedMean = 0.455;
     // Arrondi des arêtes du relief de montagne (m de longueur d'onde équivalente)
     private const double RidgeRounding = 30.0;
+    // ... et jamais plus fin que cette part de la plus courte longueur d'onde du maillage : une arête
+    // plus vive que les mailles y dessine des dents de scie (le passage d'un niveau de détail à
+    // l'autre est fondu par le morphing)
+    // Demi-largeur (en unités de bruit) de la bande, autour d'une crête, où l'érosion s'estompe
+    private const double ErosionCrestWidth = 0.12;
+    private const double RidgeRoundingPerWavelength = 0.12;
 
     // Le bruit de gradient vaut 0 sur les nœuds de son réseau cubique : les crêtes (|n| = 0)
     // suivaient donc souvent les arêtes du réseau, en segments rectilignes. Chaque octave est
@@ -153,6 +159,8 @@ public sealed class TerrainHeightField
     // Tracé de chaque fleuve d'une cellule à la suivante : courbe lissée (Catmull-Rom) passant
     // par les centres des cellules, ondulée à grande échelle ; null hors des fleuves
     private readonly Double3[][] _riverCurve;
+    // Tronçon de tête (aucun fleuve en amont) : sa vallée naît progressivement
+    private bool[] _riverHead;
     private const int RiverCurveSegments = 12;
     // Grandes boucles du tracé : écart latéral maximal, en part de la longueur du tronçon
     private const double RiverBendAmplitude = 0.18, RiverBendWavelength = 45000.0;
@@ -363,6 +371,7 @@ public sealed class TerrainHeightField
     private Double3[][] BuildRiverCurves(int count)
     {
         var curves = new Double3[count][];
+        _riverHead = new bool[count];
         // Affluent principal : la cellule de fleuve d'amont au plus fort débit
         var mainUpstream = new int[count];
         Array.Fill(mainUpstream, -1);
@@ -386,6 +395,7 @@ public sealed class TerrainHeightField
                 continue;
             Double3 a = _positions[c], b = End(c);
             int up = mainUpstream[c], down = _downstream[c];
+            _riverHead[c] = up < 0;
             Double3 before = up >= 0 ? _positions[up] : a - (b - a);
             Double3 after = _riverCell[down] ? End(down) : b + (b - a);
             Double3 ta = (b - before) * 0.5, tb = (after - a) * 0.5;
@@ -700,7 +710,7 @@ public sealed class TerrainHeightField
             // arête vive, plus fine que le maillage, y dessinait des dents de scie. Largeur fixe,
             // la même à tous les niveaux de détail (sinon le relief sauterait d'un niveau à l'autre)
             double x = n - RidgeLevel;
-            double soft = Math.Min(0.3, RidgeRounding / wavelength);
+            double soft = Math.Min(0.3, Math.Max(RidgeRounding, RidgeRoundingPerWavelength * lowest) / wavelength);
             double rounded = Math.Sqrt(x * x + soft * soft);
             double linear = 1 - (rounded - soft) * 1.6;
             double ridge = linear * linear;
@@ -710,7 +720,11 @@ public sealed class TerrainHeightField
             ridgeWeight = Math.Clamp(ridge * 1.4, 0.2, 1.0);
 
             // Érosion : pente de cette octave (dérivée du bruit tournée vers le repère de la planète)
-            double dr = -2 * linear * 1.6 * (x / rounded) * amplitude * inverse;
+            // (pente adoucie largement autour de la crête : avec l'arrondi étroit de l'arête, la
+            // pente ne s'annulait que sur quelques mètres ; l'érosion y cessait d'un coup et les
+            // octaves fines, à pleine amplitude sur ce seul ruban, dressaient une lame de quelques
+            // dizaines de mètres tout le long des grandes crêtes)
+            double dr = -2 * linear * 1.6 * (x / Math.Sqrt(x * x + ErosionCrestWidth * ErosionCrestWidth)) * amplitude * inverse;
             gx += dr * (OctaveRotations[r] * dnx + OctaveRotations[r + 3] * dny + OctaveRotations[r + 6] * dnz);
             gy += dr * (OctaveRotations[r + 1] * dnx + OctaveRotations[r + 4] * dny + OctaveRotations[r + 7] * dnz);
             gz += dr * (OctaveRotations[r + 2] * dnx + OctaveRotations[r + 5] * dny + OctaveRotations[r + 8] * dnz);
@@ -791,12 +805,17 @@ public sealed class TerrainHeightField
                 continue;
             // Point le plus proche du tracé courbe (petits segments : sur la corde, ramené sur
             // la sphère)
-            double distance = double.MaxValue;
+            double distance = double.MaxValue, along = 0;
             for (int k = 0; k < RiverCurveSegments; k++)
             {
                 Double3 a = curve[k], ab = curve[k + 1] - a;
                 double t = Math.Clamp((p - a).Dot(ab) / Math.Max(ab.LengthSquared(), 1e-30), 0, 1);
-                distance = Math.Min(distance, (a + ab * t).Normalized().DistanceTo(p) * RadiusMeters);
+                double d = (a + ab * t).Normalized().DistanceTo(p) * RadiusMeters;
+                if (d < distance)
+                {
+                    distance = d;
+                    along = (k + t) / RiverCurveSegments;
+                }
             }
             if (distance >= width)
                 continue;
@@ -807,12 +826,18 @@ public sealed class TerrainHeightField
             // Lit du fleuve : 3 m de plus, avec une transition douce (une marche nette dessinait
             // des dents de scie le long des berges)
             double carve = depth * profile + 3.0 * (1 - SmoothStep(channel * 0.35, channel * 0.6, distance));
+            // À la source, la vallée se creuse peu à peu (sinon elle partait du centre de la
+            // cellule à pleine profondeur : un sillon droit jusqu'au sommet des montagnes)
+            if (_riverHead[cell])
+                carve *= SmoothStep(0.05, 0.6, along);
             if (carve > bestDepth)
             {
                 bestDepth = carve;
                 bestFloor = 1 - SmoothStep(floorHalf * 0.5, floorHalf * 2, distance);
                 // Le lit n'est visible que si le maillage est assez fin pour lui
                 bestRiver = channel > minWavelength ? 1 - SmoothStep(channel * 0.4, channel * 0.55, distance) : 0;
+                if (_riverHead[cell])
+                    bestRiver *= SmoothStep(0.05, 0.6, along);
             }
         }
         return ((bestDepth, bestFloor), bestRiver);

@@ -58,7 +58,30 @@ public partial class TerrainRenderer : Node3D
     // planter le jeu : le tampon est agrandi à 524 288 cases (32 768 instances) dans project.godot
     // (rendering/limits/global_shader_variables/buffer_size).
     private const double UploadBudgetMs = 3.0;
-    private const int MaxCachedChunks = 3000;
+
+    /// <summary>Nombre de morceaux gardés en mémoire (selon la qualité).</summary>
+    public int MaxCachedChunks { get; set; } = 3000;
+
+    private bool _castShadows;
+
+    /// <summary>Le relief projette des ombres (l'eau, jamais).</summary>
+    public bool CastShadows
+    {
+        get => _castShadows;
+        set
+        {
+            if (_castShadows == value)
+                return;
+            _castShadows = value;
+            foreach (var entry in _cache.Values)
+                RenderingServer.InstanceGeometrySetCastShadowsSetting(entry.Instance, ShadowSetting);
+            foreach (var entry in _pending.Values)
+                RenderingServer.InstanceGeometrySetCastShadowsSetting(entry.Instance, ShadowSetting);
+        }
+    }
+
+    private RenderingServer.ShadowCastingSetting ShadowSetting =>
+        _castShadows ? RenderingServer.ShadowCastingSetting.On : RenderingServer.ShadowCastingSetting.Off;
     // Plus haut sommet possible à l'échelle réelle (m)
     public const double MaxMountainHeight = 11000.0;
     // Résolution des textures « numéro de cellule » (pixels par côté de face)
@@ -602,7 +625,7 @@ public partial class TerrainRenderer : Node3D
         Rid instance = RenderingServer.InstanceCreate2(mesh, GetWorld3D().Scenario);
         RenderingServer.InstanceSetCustomAabb(instance, bounds);
         RenderingServer.InstanceSetVisible(instance, false);
-        RenderingServer.InstanceGeometrySetCastShadowsSetting(instance, RenderingServer.ShadowCastingSetting.Off);
+        RenderingServer.InstanceGeometrySetCastShadowsSetting(instance, ShadowSetting);
         // Surface de l'eau : même maillage, autre matériau (le shader pose les sommets au niveau de l'eau)
         Rid waterInstance = default;
         if (chunk.HasWater)
@@ -1060,7 +1083,7 @@ shader_type spatial;
 render_mode cull_back;
 " + CommonShaderCode + @"
 void vertex() {
-    float m = morph_factor(VERTEX, MODEL_MATRIX, CAMERA_POSITION_WORLD);
+    float m = morph_factor(VERTEX, MODEL_MATRIX, vec3(0.0));
     VERTEX += CUSTOM0.xyz * m;
     vec3 n = normalize(mix(NORMAL, CUSTOM1.xyz, m));
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
@@ -1269,7 +1292,7 @@ varying float v_skirt;
 
 void vertex() {
     v_skirt = VERTEX_ID >= GRID_VERTICES ? 1.0 : 0.0;
-    float m = morph_factor(VERTEX, MODEL_MATRIX, CAMERA_POSITION_WORLD);
+    float m = morph_factor(VERTEX, MODEL_MATRIX, vec3(0.0));
     VERTEX += CUSTOM0.xyz * m;
     vec3 n = normalize(mix(NORMAL, CUSTOM1.xyz, m));
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
