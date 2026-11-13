@@ -105,6 +105,13 @@ au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement provoq
   (`git clone https://github.com/Ticoel/Planet.git`).
 - Ouvrir le dossier dans Godot 4.7.2 (.NET), lancer la scène `Main.tscn`.
 - Tests : `dotnet run -c Release --project tests/Planet.Tests`.
+- **Petite planète « éprouvette »** (case « Petite planète » du groupe « Planète », dans les
+  paramètres) : une planète de 2 000 km de rayon (à peu près la Lune), dix fois moins de surface
+  que la Terre, pour tout tester plus vite : 5 plaques, un point chaud, quelques dizaines de
+  volcans et une poignée de sources chaudes, une ou deux chaînes de montagnes, une grille quatre
+  fois plus légère. Tout y est simulé comme sur la Terre (tectonique, climat, eau, croûte
+  modulaire, chimie). Changer de taille crée une nouvelle planète. On peut aussi démarrer
+  directement dessus (propriété `StartSmall` de la scène `Main.tscn`).
 - **Interface** (Tab pour la masquer) : le jeu est une boîte de Petri à l'échelle d'une planète ;
   on règle les paramètres, on laisse tourner, on observe.
   - barre du haut : pause, vitesse, horloge, date, qualité graphique ;
@@ -149,7 +156,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, interface du jeu, 152 tests).
+Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète, interface du jeu, 154 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -157,6 +164,12 @@ Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, interface du
 - Godot 4.7.2 .NET : C# pour la logique, compute shaders GLSL pour le climat (vérifiés contre le
   calcul processeur au démarrage, repli automatique). Simulation (`Simulation/`, sans moteur hors
   types de base) séparée du rendu (`Rendering/`, `Main.cs`).
+- **Taille de la planète** réglable : la Terre (6 371 km) ou une petite planète de 2 000 km
+  (2 562 cellules de ~140 km, 5 plaques). Les taux planétaires (points chauds, impacts, séismes)
+  suivent la surface ; la petite planète garde la gravité, l'atmosphère, la rotation et l'orbite
+  de la Terre, et sa circulation atmosphérique est celle de la Terre ramenée à sa taille (sinon
+  les mêmes écarts de pression sur des distances trois fois plus courtes donnaient des vents trois
+  fois plus forts et cinq mètres de pluie par an).
 - **Deux grilles** : simulation sur une **icosphère** (10 242 cellules hexagonales de ~220 km par
   défaut, sans singularité aux pôles) ; affichage sur une **sphère cubique** en quadtree (morceaux
   de ~2 500 km à 38 m). Le relief détaillé interpole les cellules et ajoute les détails ; les
@@ -349,13 +362,19 @@ Faites :
   morceau du quadtree. Les voxels ne seraient utiles que pour des grottes ou des surplombs : on
   pourrait les limiter à de petites zones (quelques centaines de mètres) autour des lieux modifiés.
 
-### Bug à corriger
+### Bugs corrigés (2026-11-13)
 
-1.  Le son est présent même quand on regrde la planète depuis l'espace. Il devrait être présent
-    uniquement quand on est proche de la situation. Dans l'espace il n'y pas d'air donc pas de son,
-    non ?
-2.  Que tout ce qui est eau doit être traiter comme de l'eau et pas comme une texture peinte.
-3.  Dès le début des biomes existes sur la planètes alors que c'est encore une boule de feu non ?
+1.  **Son dans l'espace** : le son suit maintenant la densité de l'air (hauteur d'échelle ~8 km) et
+    s'éteint au-delà de ~60 km : silence vu de l'espace. Le grondement des volcans s'entend encore
+    d'avion, pas de l'orbite ; un séisme ne se ressent qu'au sol.
+2.  **L'eau des fleuves** : les fleuves sont de la vraie eau (la surface de l'eau, comme la mer et
+    les lacs), qui remplit leur lit creusé ; le courant y entraîne les vaguelettes vers l'aval,
+    avec des eaux blanches dans les rapides.
+3.  **Biomes dès le début** : la simulation ne part pas d'une boule de feu (la planète est déjà
+    refroidie, avec ses océans), mais il n'y a pas encore de vie : la vue réaliste montre donc un
+    sol minéral nu selon le climat, sans forêts ni prairies. La case « Végétation imaginée »
+    (Affichage) remet la végétation d'après le climat, en attendant l'étape « vie ». La couche
+    « Biomes » montre les milieux que le climat permettrait.
 
 # Sources et références
 

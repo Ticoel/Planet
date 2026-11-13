@@ -32,7 +32,10 @@ vec3 cube_face_uv(vec3 d) {
     /// en float, (R + a)² − R² perdrait toute précision près du sol.</para>
     /// </summary>
     public const string Atmosphere = @"
-const float PLANET_R = 6371000.0;
+// Rayon de la planète (m) : paramètre global (project.godot, [shader_globals]), réglé par le
+// jeu pour une petite planète
+global uniform float planet_global_radius;
+#define PLANET_R planet_global_radius
 const float ATMO_H = 100000.0;
 const vec3 RAYLEIGH = vec3(5.8e-6, 13.5e-6, 33.1e-6);
 const float MIE = 21e-6;

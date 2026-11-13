@@ -233,6 +233,7 @@ public partial class Main : Node3D
     public override void _Ready()
     {
         var stopwatch = Stopwatch.StartNew();
+        ApplyStartSize();
         _grid = PlanetGrid.Create(Subdivisions);
         GD.Print($"Grid: {_grid.CellCount} cells (subdivisions {Subdivisions}) in {stopwatch.ElapsedMilliseconds} ms");
 
@@ -274,7 +275,7 @@ public partial class Main : Node3D
         SetupHud();
         SetupUi();
         GeneratePlanet();
-        _terrain.Explorer.PlaceAbove(new Double3(0, 0, 1), OrbitAltitude);
+        _terrain.Explorer.PlaceAbove(new Double3(0, 0, 1), OrbitView);
     }
 
     public override void _ExitTree()
@@ -1074,6 +1075,8 @@ public partial class Main : Node3D
             {
                 Biome.HotDesert => -0.75f,
                 Biome.ColdDesert => -0.3f,
+                // (pas de forêt avant la vie, sauf végétation « imaginée » demandée)
+                _ when !PlanetColorizer.Vegetation => 0f,
                 _ => VegetationSeasons.ForestShare(biome) * (1f - 0.7f * deciduous * (1f - seasons.Leaves[cell])),
             };
         }
@@ -1968,7 +1971,7 @@ public partial class Main : Node3D
                 break;
             case Key.X:
                 // Retour en orbite au-dessus du point actuel
-                _terrain.Explorer.PlaceAbove(_terrain.Explorer.Position, OrbitAltitude);
+                _terrain.Explorer.PlaceAbove(_terrain.Explorer.Position, OrbitView);
                 break;
             case Key.P:
                 if (_gameOver)

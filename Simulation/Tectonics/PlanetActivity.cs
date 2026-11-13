@@ -161,7 +161,8 @@ public sealed class PlanetActivity
         AerosolForcing *= (float)Math.Exp(-dtDays / AerosolLifetimeDays);
 
         // Séismes : nombre attendu de magnitude ≥ 5 pendant le pas (au plus 50 tirés)
-        double expected = EarthquakesAbove5PerYear * years;
+        // (le taux terrestre, au prorata de la surface : une petite planète a moins de failles)
+        double expected = EarthquakesAbove5PerYear * PlanetConstants.AreaRatio * years;
         int count = Math.Min(50, Poisson(expected));
         for (int k = 0; k < count && _totalFaultWeight > 0; k++)
         {

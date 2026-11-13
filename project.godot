@@ -32,3 +32,10 @@ project/assembly_name="Planet"
 
 rendering_device/driver.windows="d3d12"
 limits/global_shader_variables/buffer_size=524288
+
+[shader_globals]
+
+planet_global_radius={
+"type": "float",
+"value": 6371000.0
+}

@@ -162,10 +162,16 @@ public sealed class AtmosphereModel
         MoistureCoupling = MoistureDiffusivity * 4f / (hMeters * hMeters);
         FaceWeightTable = new float[grid.CellCount * 6];
         float[][] faceWeights = grid.ComputeFaceWeights();
-        // Stabilité de la diffusion thermique sur les terres, et condensation non surcorrigée
-        MaxSubstepSeconds = MathF.Min(
+        // Stabilité de la diffusion thermique sur les terres, et condensation non surcorrigée ;
+        // plus, quand les cellules sont petites en mètres (petite planète, grille fine), la
+        // stabilité de la diffusion de l'humidité (Δt < ~1/(6 k)) et du transport par le vent
+        // (une cellule en deux pas au plus, vent de 20 m/s). Sur la grille de la Terre, ces deux
+        // limites ne jouent pas (~6 000 s contre ~5 100 s) ; sans elles, sur une planète de
+        // 2 000 km, l'humidité oscillait et explosait en NaN
+        MaxSubstepSeconds = MathF.Min(MathF.Min(
             StabilityFactor * LandHeatCapacity / (OutgoingB + NeighborCoupling),
-            0.5f * CondensationTimeHours * 3600f);
+            0.5f * CondensationTimeHours * 3600f),
+            MathF.Min(0.15f / MoistureCoupling, 0.5f * hMeters / 20f));
 
         NeighborTable = new int[grid.CellCount * 6];
         NeighborDirections = new Vector3[grid.CellCount * 6];

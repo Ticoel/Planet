@@ -189,9 +189,9 @@ public partial class TerrainRenderer : Node3D
         Camera = new Camera3D { Name = "ExplorerCamera", Near = 1f, Far = 1.0e6f, Fov = 70f };
         AddChild(Camera);
         _material = new ShaderMaterial { Shader = new Shader { Code = ShaderCode } };
-        _material.SetShaderParameter("planet_radius", (float)TerrainHeightField.RadiusMeters);
+        RefreshPlanetRadius();
         _waterMaterial = new ShaderMaterial { Shader = new Shader { Code = WaterShaderCode } };
-        _waterMaterial.SetShaderParameter("planet_radius", (float)TerrainHeightField.RadiusMeters);
+        RefreshPlanetRadius();
 
         int workerCount = Math.Max(1, System.Environment.ProcessorCount - 2);
         _workers = new Thread[workerCount];
@@ -279,6 +279,15 @@ public partial class TerrainRenderer : Node3D
 
     /// <summary>Paramètre commun aux shaders du sol et de l'eau (ciel, nuages : étape 10).</summary>
     public void SetShaderParameter(string name, Variant value) => SetBoth(name, value);
+
+    /// <summary>Rayon de la planète dans les shaders (terrain, eau, et paramètre global du ciel).</summary>
+    public void RefreshPlanetRadius()
+    {
+        float radius = (float)TerrainHeightField.RadiusMeters;
+        _material?.SetShaderParameter("planet_radius", radius);
+        _waterMaterial?.SetShaderParameter("planet_radius", radius);
+        RenderingServer.GlobalShaderParameterSet("planet_global_radius", radius);
+    }
 
     private void SetBoth(string name, Variant value)
     {
@@ -1500,6 +1509,8 @@ void vertex() {
     VERTEX += up * v_depth;
     NORMAL = up;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    // (pente du lit, pour le courant des fleuves)
+    v_world_normal = normalize((MODEL_MATRIX * vec4(n, 0.0)).xyz);
     v_sun = sun_transmittance(v_water.x, dot(up, sun_direction));
 }
 
@@ -1520,6 +1531,25 @@ void fragment() {
     vec3 swell = (texture_noise(p + vec3(TIME * 2.5, 0.0, TIME * 1.2), 128.0).yzw * detail_weight(128.0, footprint)
                 + texture_noise(p - vec3(TIME * 1.1, 0.0, TIME * 3.0), 512.0).yzw * 0.7) * open_sea;
     waves += swell * 1.4;
+    // Fleuves (vraie eau depuis l'étape 16) : vaguelettes entraînées vers l'aval, plus vite là
+    // où ça descend ; eaux blanches dans les rapides et les cascades
+    float river = v_water.y;
+    float rapids = 0.0;
+    if (river > 0.01) {
+        vec3 n0 = normalize(v_world_normal);
+        vec3 downhill = n0 - up * dot(n0, up);
+        float steep = length(downhill);
+        vec3 flow = steep > 1e-4 ? downhill / steep : vec3(0.0);
+        float speed = mix(0.7, 4.0, smoothstep(0.0, 0.25, steep));
+        const float FLOW_CYCLE = 2.0;
+        float t1 = fract(TIME / FLOW_CYCLE), t2 = fract(TIME / FLOW_CYCLE + 0.5);
+        float w1 = 1.0 - abs(2.0 * t1 - 1.0);
+        vec4 r1 = texture_noise(p - flow * speed * t1 * FLOW_CYCLE, 2.0);
+        vec4 r2 = texture_noise(p - flow * speed * t2 * FLOW_CYCLE + vec3(3.7, 1.3, 5.1), 2.0);
+        vec4 ripples = (r1 * w1 + r2 * (1.0 - w1)) * detail_weight(2.0, footprint);
+        rapids = clamp(smoothstep(0.12, 0.32, steep) * (0.55 + 0.45 * ripples.x), 0.0, 1.0) * river;
+        waves = mix(waves, ripples.yzw * (1.5 + 3.0 * rapids), river);
+    }
     vec3 water_normal = normalize(up - (waves - up * dot(waves, up)) * 0.06);
     NORMAL = normalize((VIEW_MATRIX * vec4(water_normal, 0.0)).xyz);
     // Couleur de l'eau, plus sombre et plus saturée que le sol (avant, de loin, eau peu
@@ -1543,6 +1573,7 @@ void fragment() {
         // vu de loin, les rouleaux se fondent en une frange blanche
         foam = mix(shore * 0.35, foam, detail_weight(4.0, footprint));
     }
+    foam = max(foam, rapids);
     color = mix(color, vec3(0.92, 0.95, 0.97), foam);
     v_shade = cloud_shadow(v_world, up, v_water.x) * plume_shadow(v_world, up, v_water.x);
     ALBEDO = color;

@@ -65,7 +65,8 @@ public sealed class Landform
 public sealed partial class TectonicPlates
 {
     // Points chauds
-    private const int HotspotCount = 12;
+    // Points chauds : 12 sur une planète comme la Terre, moins sur une petite (au moins 1)
+    private static int HotspotCount => Math.Max(1, (int)Math.Round(12 * PlanetConstants.AreaRatio));
     private const float HotspotSwellKmPerMyr = 0.6f;          // épaississement sous le panache
     // Volcans boucliers : du petit bouclier islandais (Skjaldbreiður : ~10 km de large, 600 m de
     // haut) au géant hawaïen (Mauna Loa : ~120 km de large, 4 km au-dessus des fonds) ; pente
@@ -77,7 +78,7 @@ public sealed partial class TectonicPlates
     private const float ShieldGrowthMyr = 1.5f;               // temps pour s'édifier
 
     // Arcs volcaniques
-    private static readonly float CosArcSpacing = MathF.Cos(400f / PlanetConstants.RadiusKm);
+    private static float CosArcSpacing => MathF.Cos(400f / PlanetConstants.RadiusKm);
     private const float StratoRadiusM = 15000f;
     private const float StratoHeightM = 2500f;
     private const float StratoGrowthMyr = 0.5f;
@@ -312,7 +313,8 @@ public sealed partial class TectonicPlates
     /// <summary>Impacts du pas : nombre tiré selon le taux du moment (loi de Poisson).</summary>
     private void AddImpacts(float dtMyr)
     {
-        double ratePerMyr = CratersAbove20KmPerMyr * Math.Pow(20.0 / MinCraterDiameterKm, CraterSizeExponent)
+        // (le taux terrestre, au prorata de la surface de la planète)
+        double ratePerMyr = CratersAbove20KmPerMyr * PlanetConstants.AreaRatio * Math.Pow(20.0 / MinCraterDiameterKm, CraterSizeExponent)
                             * ImpactRateFactor(TimeMyr);
         // Bombardement des débuts (des centaines de milliers d'impacts par Ma) : la surface est
         // saturée, les petits cratères effacés aussitôt par les suivants. On ne garde alors que

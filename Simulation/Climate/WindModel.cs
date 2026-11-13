@@ -124,7 +124,8 @@ public sealed class WindModel
         _east = new Vector3[climateCount];
         _north = new Vector3[climateCount];
         _gradientInverse = new float[climateCount * 4];
-        float radiusMeters = PlanetConstants.RadiusKm * 1000f;
+        // (rayon de la Terre : voir PressureScaleMeters)
+        float radiusMeters = PressureScaleMeters;
         for (int c = 0; c < climateCount; c++)
         {
             Vector3 p = ClimateGrid.Positions[c];
@@ -243,7 +244,10 @@ public sealed class WindModel
                 Vector3 direction = (d - p * d.Dot(p)).Normalized();
                 outflow += 0.5f * (_climateWind[c] + _climateWind[n]).Dot(direction) * _faceWeights[c][k];
             }
-            _climateConvergence[c] = -outflow;
+            // (ramenée à l'échelle de la Terre : les vents diagnostiques sont ceux de la Terre ;
+            // sur une petite planète, les mêmes vents sur des distances plus courtes donnaient une
+            // convergence, donc des pluies de convergence, trois fois plus fortes)
+            _climateConvergence[c] = -outflow * PlanetConstants.RadiusKm / PlanetConstants.EarthRadiusKm;
         });
 
         // 7. Report sur la grille fine
@@ -264,10 +268,19 @@ public sealed class WindModel
         MaxSpeed = maxSpeed;
     }
 
+    /// <summary>
+    /// Distance utilisée pour les gradients de pression : celle de la Terre, quelle que soit la
+    /// taille de la planète. Les ceintures de pression sont celles de la circulation terrestre,
+    /// placées en latitude ; sur une petite planète, les mêmes écarts de pression sur des
+    /// distances trois fois plus courtes donnaient des vents trois fois plus forts (et un cycle
+    /// de l'eau emballé : cinq mètres de pluie par an).
+    /// </summary>
+    private static float PressureScaleMeters => PlanetConstants.EarthRadiusKm * 1000f;
+
     private Vector3 ComputeWind(int c)
     {
         Vector3 p = ClimateGrid.Positions[c];
-        float radiusMeters = PlanetConstants.RadiusKm * 1000f;
+        float radiusMeters = PressureScaleMeters;
 
         // Gradient de pression (Pa/m) par moindres carrés sur les voisines
         float bx = 0f, by = 0f;

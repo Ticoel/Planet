@@ -1,4 +1,5 @@
 using Godot;
+using Planet.Simulation;
 
 namespace Planet.Rendering;
 
@@ -12,11 +13,10 @@ public static class CellColorLayer
     public const int TextureWidth = 1024;
 
     // Rayon de la planète en km
-    private const float PlanetRadiusKm = 6371f;
 
     /// <summary>
     /// Hauteur (en fraction du rayon) du relief simulé d'une cellule, pour placer des tracés
     /// (flèches, fleuves, vents) au-dessus du sol. La mer compte comme un sol à 0 km.
     /// </summary>
-    public static float ReliefOffset(float elevationKm) => Mathf.Max(elevationKm, 0f) / PlanetRadiusKm;
+    public static float ReliefOffset(float elevationKm) => Mathf.Max(elevationKm, 0f) / PlanetConstants.RadiusKm;
 }

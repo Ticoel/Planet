@@ -83,11 +83,16 @@ public sealed class Soundscape
 
         // En altitude, les sons du sol s'éteignent (au-delà de ~1,5 km, il ne reste que le vent)
         float ground = 1f - SmoothStep(300f, 1500f, _smooth.AltitudeM);
-        float wind = MathF.Pow(Math.Clamp(_smooth.WindSpeed / 25f, 0f, 1.2f), 1.5f);
+        // Le son a besoin d'air : sa densité diminue de moitié tous les ~5,5 km (hauteur d'échelle
+        // ~8 km) ; au-delà de ~60 km, plus rien ne se propage. Depuis l'espace : silence
+        float air = MathF.Exp(-_smooth.AltitudeM / 8000f) * (1f - SmoothStep(30000f, 60000f, _smooth.AltitudeM));
+        float wind = MathF.Pow(Math.Clamp(_smooth.WindSpeed / 25f, 0f, 1.2f), 1.5f) * air;
         float rain = Math.Clamp(_smooth.Rain, 0f, 1f) * ground;
         float surf = Math.Clamp(_smooth.Surf, 0f, 1f) * ground;
-        float volcano = Math.Clamp(_smooth.Volcano, 0f, 1f);
-        float quake = Math.Clamp(_smooth.Quake, 0f, 1f);
+        // (le grondement d'un volcan s'entend encore d'avion, pas de l'espace ; un séisme se
+        // ressent au sol)
+        float volcano = Math.Clamp(_smooth.Volcano, 0f, 1f) * (1f - SmoothStep(3000f, 25000f, _smooth.AltitudeM));
+        float quake = Math.Clamp(_smooth.Quake, 0f, 1f) * ground;
         // La neige étouffe : filtre passe-bas plus fermé
         float muffle = 1f - 0.75f * Math.Clamp(_smooth.Snow, 0f, 1f) * ground;
 

@@ -669,15 +669,21 @@ public static class TerrainTests
         Double3 across = a.Cross(b).Normalized();
         // Profil en travers du fleuve, de −15 km à +15 km, au pas de 100 m
         int hint = -1;
-        double lowest = double.MaxValue, lowestOffset = 0, maxRiver = 0, sides = 0;
+        double lowest = double.MaxValue, lowestOffset = 0, maxRiver = 0, sides = 0, maxWater = 0;
         for (int k = -150; k <= 150; k++)
         {
             double offset = k * 100.0;
             var sample = field.Sample((middle + across * (offset / TerrainHeightField.RadiusMeters)).Normalized(), 10, ref hint);
             if (sample.Height < lowest) { lowest = sample.Height; lowestOffset = offset; }
             maxRiver = Math.Max(maxRiver, sample.River);
+            maxWater = Math.Max(maxWater, sample.WaterLevel - sample.Height);
             if (Math.Abs(k) > 120) sides += sample.Height / 60;
+            // Hors du lit, l'eau reste sous le sol (aucune nappe sur les versants)
+            if (sample.River < 0.01)
+                Assert.True(sample.WaterLevel <= sample.Height + 1e-9, $"eau au-dessus du sol hors du lit, à {offset:0} m de l'axe");
         }
+        // Le lit est rempli de vraie eau (surface de l'eau, comme la mer et les lacs)
+        Assert.True(maxWater is > 1.5 and < 3.5, $"profondeur d'eau dans le lit : {maxWater:0.0} m");
         Console.WriteLine($"     fleuve de {hydrology.Discharge[cell]:N0} m³/s : fond à {lowest:0} m ({lowestOffset / 1000:0.0} km de l'axe), versants à {sides:0} m en moyenne");
         Assert.True(Math.Abs(lowestOffset) < 6000, $"le point le plus bas est à {lowestOffset:0} m de l'axe du fleuve (méandres compris)");
         Assert.True(sides - lowest > 50, $"vallée trop peu marquée : {sides - lowest:0} m");

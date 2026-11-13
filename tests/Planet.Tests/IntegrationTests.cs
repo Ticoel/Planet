@@ -111,6 +111,22 @@ public static class IntegrationTests
     public static void EveryDisplayLayerGivesValidColors()
     {
         var (tectonics, climate, _) = Simulation.Value;
+        // Sans vie (par défaut) : pas de vert des forêts dans la vue réaliste
+        PlanetColorizer.Vegetation = false;
+        var barren = PlanetColorizer.Compute(tectonics, climate, DisplayMode.Realistic);
+        PlanetColorizer.Vegetation = true;
+        var green = PlanetColorizer.Compute(tectonics, climate, DisplayMode.Realistic);
+        PlanetColorizer.Vegetation = false;
+        int forests = 0, greenBarren = 0;
+        for (int c = 0; c < barren.Length; c++)
+            if (climate.Biomes[c] is Biome.TropicalRainforest or Biome.TemperateForest or Biome.Taiga
+                && tectonics.CellElevation[c] > 0 && !climate.Hydrology.Lake[c] && !climate.Hydrology.Glacier[c])
+            {
+                forests++;
+                if (barren[c].G > barren[c].R + 0.02f) greenBarren++;
+            }
+        Assert.True(forests > 0 && greenBarren == 0, "planète sans vie : sol minéral, pas de forêts vertes");
+        Assert.True(barren.Zip(green).Any(p => p.First != p.Second), "la végétation imaginée change la vue réaliste");
         foreach (var mode in Enum.GetValues<DisplayMode>())
         {
             var colors = PlanetColorizer.Compute(tectonics, climate, mode);

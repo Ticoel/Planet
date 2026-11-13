@@ -65,6 +65,7 @@ public partial class Main
         RegisterHabitats();
         RegisterCrust();
         RegisterChemistry();
+        RegisterPlanetSize();
     }
 
     private void TogglePause()
@@ -198,6 +199,12 @@ public partial class Main
             Group = "Affichage", Label = "Mouvement des plaques (géologie)", Help = "Touche V dans l'horloge géologique",
             Get = () => _showArrows, Set = v => { _showArrows = v; _arrowsDirty = true; },
         });
+        registry.Add(new SimToggle
+        {
+            Group = "Affichage", Label = "Végétation imaginée",
+            Help = "La planète n'a pas encore de vie : ni forêt ni prairie, le sol est minéral. Cochée : végétation imaginée d'après le climat, en attendant l'étape « vie »",
+            Get = () => PlanetColorizer.Vegetation, Set = v => { PlanetColorizer.Vegetation = v; _colorsDirty = true; _climateDataTimer = 0; },
+        });
         registry.Add(new SimToggle { Group = "Affichage", Label = "Son", Help = "Touche K", Get = () => !_muted, Set = v => _muted = !v });
         registry.Add(new SimToggle { Group = "Affichage", Label = "Détails de la simulation", Help = "Touche I", Get = () => _showDetails, Set = v => _showDetails = v });
     }
@@ -227,7 +234,7 @@ public partial class Main
         Layer("Climat", "Pluie récente", DisplayMode.RecentPrecipitation, climate);
         Layer("Climat", "Pluie annuelle", DisplayMode.AnnualPrecipitation, climate);
         Layer("Climat", "Humidité", DisplayMode.Humidity, climate);
-        Layer("Climat", "Biomes", DisplayMode.Biomes, climate);
+        Layer("Climat", "Biomes", DisplayMode.Biomes, "Milieux que le climat permettrait (Köppen) ; " + climate);
         Layer("Océan", "Courants", DisplayMode.OceanCurrents, climate);
         Layer("Océan", "Remontées d'eau froide", DisplayMode.Upwelling, climate);
     }

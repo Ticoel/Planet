@@ -261,6 +261,30 @@ public static class PlanetColorizer
     /// Couleur « vue de l'espace » : biome, assombri en forêt, roche nue au-dessus de 3 km,
     /// neige au sol, glaciers, banquise, lacs, et océan d'autant plus sombre qu'il est profond.
     /// </summary>
+    /// <summary>
+    /// Végétation dessinée dans la vue réaliste. Avant l'apparition de la vie (étape 15), il n'y
+    /// a ni forêt ni prairie : le sol est minéral (faux par défaut). Vrai : végétation
+    /// « imaginée » d'après le climat, en attendant que la vie la fasse pousser.
+    /// </summary>
+    public static bool Vegetation { get; set; }
+
+    /// <summary>
+    /// Sol nu d'une planète sans vie, selon le climat : graviers et roches gélives des régions
+    /// froides, sols d'altération bruns des régions humides, sombres sous les tropiques
+    /// (sans oxygène, le fer ne rougit pas les sols), sables des déserts.
+    /// </summary>
+    public static Color BarrenColor(Biome biome) => biome switch
+    {
+        // (sols nus sombres : albédo de 0,15 à 0,25 ; seuls les sables des déserts sont clairs)
+        Biome.Tundra or Biome.ColdDesert => new Color(0.31f, 0.29f, 0.27f),
+        Biome.Taiga => new Color(0.28f, 0.26f, 0.23f),
+        Biome.Steppe => new Color(0.37f, 0.32f, 0.25f),
+        Biome.TemperateForest or Biome.TemperateRainforest => new Color(0.29f, 0.24f, 0.19f),
+        Biome.HotDesert => new Color(0.58f, 0.45f, 0.30f),
+        Biome.Savanna => new Color(0.41f, 0.33f, 0.24f),
+        _ => new Color(0.26f, 0.22f, 0.19f),
+    };
+
     private static Color RealisticColor(TectonicPlates tectonics, ClimateSimulation climate, int cell)
     {
         float elevation = tectonics.CellElevation[cell];
@@ -280,7 +304,10 @@ public static class PlanetColorizer
         if (biome == Biome.IceSheet || (hydrology != null && hydrology.Glacier[cell]))
             return SnowColor;
         ground = ground.Darkened(0.15f);
-        ground = SeasonalTint(ground, biome, climate.Seasons, cell);
+        if (Vegetation)
+            ground = SeasonalTint(ground, biome, climate.Seasons, cell);
+        else
+            ground = BarrenColor(biome);
         // Roche nue en haute montagne
         ground = ground.Lerp(RockColor, Mathf.Clamp((elevation - 2.5f) / 2f, 0f, 0.8f));
         // La neige au sol est dessinée par le shader du terrain, point par point selon l'altitude

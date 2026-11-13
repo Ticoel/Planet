@@ -60,7 +60,7 @@ public readonly record struct TerrainSample(double Height, double WaterLevel, do
 /// </summary>
 public sealed class TerrainHeightField
 {
-    public static readonly double RadiusMeters = PlanetConstants.RadiusKm * 1000.0;
+    public static double RadiusMeters => PlanetConstants.RadiusKm * 1000.0;
 
     // Plus grande longueur d'onde du détail (m) ; les octaves suivantes la divisent par deux
     public const double MaxDetailWavelength = 64000.0;
@@ -723,7 +723,7 @@ public sealed class TerrainHeightField
         Double3 position = direction * RadiusMeters;
 
         // Vallées des fleuves (calculées d'abord : le fond des vallées est lissé)
-        var (valley, river) = Valley(direction, position, near, baseHeight, minWavelength);
+        var (valley, river, bed) = Valley(direction, position, near, baseHeight, minWavelength);
 
         double folds = Folds(position, baseHeight, baseSlope, SlopeCoherence(position / RadiusMeters, near), minWavelength, out double foldShare);
         double height = baseHeight
@@ -750,6 +750,15 @@ public sealed class TerrainHeightField
             // Même sous le sol, on garde ce niveau (et non 0) : entre deux sommets, l'eau
             // s'interpole alors en douceur jusqu'à la rive
             water = Math.Max(0.0, dry + (lakeLevel - dry) * full);
+        }
+        // Fleuves : de la vraie eau (la surface de l'eau, comme pour la mer et les lacs), pas une
+        // couleur peinte. Le lit est creusé 3 m sous les berges ; l'eau le remplit jusqu'à 40 cm
+        // sous elles (surface plane d'une berge à l'autre). Hors du lit, son niveau reste sous le
+        // sol (caché), pour que l'eau s'interpole sans nappe entre deux sommets
+        if (valley.depth > 0 && height > 1.0)
+        {
+            double riverWater = height - 3.0 + (3.0 * bed + 2.6) * SmoothStep(0.0, 0.1, bed);
+            water = Math.Max(water, riverWater);
         }
         return new TerrainSample(height, water, river);
     }
@@ -884,14 +893,14 @@ public sealed class TerrainHeightField
     /// plat, méandres (le tracé entre deux cellules est ondulé par un bruit). Renvoie la
     /// profondeur creusée, la part du point en fond de vallée, et la part dans le lit du fleuve.
     /// </summary>
-    private ((double depth, double floor) valley, double river) Valley(
+    private ((double depth, double floor) valley, double river, double bed) Valley(
         Double3 direction, Double3 position, ReadOnlySpan<int> cells, double baseHeight, double minWavelength)
     {
         bool any = false;
         foreach (int cell in cells)
             if (_riverCell[cell]) { any = true; break; }
         if (!any || baseHeight <= -50)
-            return ((0, 0), 0);
+            return ((0, 0), 0, 0);
 
         // Méandres : on déplace le point plutôt que le tracé
         double mx = position.X / MeanderWavelength, my = position.Y / MeanderWavelength, mz = position.Z / MeanderWavelength;
@@ -903,7 +912,7 @@ public sealed class TerrainHeightField
         meander -= direction * meander.Dot(direction);
         Double3 p = (direction + meander * (MeanderAmplitude / RadiusMeters)).Normalized();
 
-        double bestDepth = 0, bestFloor = 0, bestRiver = 0;
+        double bestDepth = 0, bestFloor = 0, bestRiver = 0, bestBed = 0;
         foreach (int cell in cells)
         {
             if (!_riverCell[cell])
@@ -949,11 +958,16 @@ public sealed class TerrainHeightField
                 bestFloor = 1 - SmoothStep(floorHalf * 0.5, floorHalf * 2, distance);
                 // Le lit n'est visible que si le maillage est assez fin pour lui
                 bestRiver = channel > minWavelength ? 1 - SmoothStep(channel * 0.4, channel * 0.55, distance) : 0;
+                // Part du lit creusé (les 3 m de plus) : l'eau le remplit (voir SampleNatural)
+                bestBed = channel > minWavelength ? 1 - SmoothStep(channel * 0.35, channel * 0.6, distance) : 0;
                 if (_riverHead[cell])
+                {
                     bestRiver *= SmoothStep(0.05, 0.6, along);
+                    bestBed *= SmoothStep(0.05, 0.6, along);
+                }
             }
         }
-        return ((bestDepth, bestFloor), bestRiver);
+        return ((bestDepth, bestFloor), bestRiver, bestBed);
     }
 
     /// <summary>

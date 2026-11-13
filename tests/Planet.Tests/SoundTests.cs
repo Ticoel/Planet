@@ -67,6 +67,9 @@ public static class SoundTests
         double beach = Measure(new SoundscapeInput { Surf = 1, Rain = 0.5f }).rms;
         double plane = Measure(new SoundscapeInput { Surf = 1, Rain = 0.5f, AltitudeM = 3000 }).rms;
         Assert.True(plane < 0.01 * beach + 1e-4, "plus de vagues ni de pluie à 3 km d'altitude");
+        double space = Measure(new SoundscapeInput { WindSpeed = 30, Volcano = 1, Quake = 1, AltitudeM = 400000 }).rms;
+        double low = Measure(new SoundscapeInput { WindSpeed = 30, Volcano = 1 }).rms;
+        Assert.True(space < 1e-4 && low > 0.01, "dans l'espace, pas d'air : silence");
         var clear = Measure(new SoundscapeInput { WindSpeed = 15 });
         var snowy = Measure(new SoundscapeInput { WindSpeed = 15, Snow = 1 });
         Console.WriteLine($"     vent : {clear.zeroCrossings:0.000} passages par zéro, sous la neige {snowy.zeroCrossings:0.000}");
