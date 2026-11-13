@@ -85,6 +85,12 @@ creusés de ravines rayonnantes (à droite).*
 *Vue réaliste en juillet et en novembre : feuillus qui se colorent puis perdent leurs feuilles,
 herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
 
+![Glissement de terrain en temps réel : avant, pendant, après](docs/images/glissement.jpg)
+
+*Croûte modulaire : glissement de terrain de ~34 000 m³ sur un versant à 37°, avant, pendant
+(la masse descend, des blocs roulent) et après (niche d'arrachement, couloir et lobe de dépôt
+au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement provoqué pour l'image.*
+
 ## Auteurs
 
 - **Code et conception technique : Claude**, modèle d'intelligence artificielle créé par
@@ -114,7 +120,11 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
     panneaux se construisent seuls.
 - Touches principales (H affiche l'aide complète dans le jeu) :
   - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : avancer / reculer dans l'axe du regard ; G : vol / marche ;
-  - C : horloge géologique / climatique ; + / − : vitesse ; T : avance rapide jusqu'à 4,5 milliards d'années ;
+  - C : figer la géologie et passer à l'horloge climatique (confirmation demandée, **sans retour** :
+    on choisit d'abord l'âge géologique voulu, la croûte devient ensuite modulaire) ; + / − : vitesse ;
+    T : avance rapide jusqu'à 4,5 milliards d'années (avant de figer la géologie) ;
+  - B : provoquer un glissement de terrain ou un éboulement sur la pente visée (horloge climatique,
+    près du sol) ;
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
   - I : détails (Lune, marée sous la caméra, niveau moyen de la mer…) ;
@@ -139,7 +149,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-12 (étapes 1 à 13 et 14a faites, interface du jeu, 134 tests).
+Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, interface du jeu, 149 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -152,8 +162,9 @@ Mise à jour : 2026-11-12 (étapes 1 à 13 et 14a faites, interface du jeu, 134 
   de ~2 500 km à 38 m). Le relief détaillé interpole les cellules et ajoute les détails ; les
   couleurs sont lues dans les cellules et fondues entre voisines (~0,8 cellule).
 - **Deux horloges** (touche C) : géologique (0,2 à 1 Ma par pas, avance rapide jusqu'à 4,54 Ga)
-  et climatique (du temps réel à 3 mois/s, relief figé). Un climat moyen estimé tous les 25 Ma
-  pilote l'érosion. Au-delà de ~2 h/s, le ciel est montré chaque jour à 13 h (sinon jour et nuit
+  et climatique (du temps réel à 3 mois/s, relief figé). Le passage au climat est définitif : la
+  géologie est figée à l'âge choisi, ce qui rend la croûte modulaire (étape 16a). Un climat
+  moyen estimé tous les 25 Ma pilote l'érosion. Au-delà de ~2 h/s, le ciel est montré chaque jour à 13 h (sinon jour et nuit
   clignotent) ; le climat suit toujours le vrai Soleil.
 - Conventions : identifiants, fichiers et console en anglais ; commentaires et interface en français.
 
@@ -247,6 +258,44 @@ Mise à jour : 2026-11-12 (étapes 1 à 13 et 14a faites, interface du jeu, 134 
   une étoile faible mais pas une étoile trop forte : la planète finit par chauffer. En géante rouge,
   l'étoile enfle et rougit dans le ciel ; **quand elle meurt, la partie est finie** (R : nouvelle
   planète, E : autre étoile).
+- **Croûte modulaire** (étape 16a) : une fois la géologie figée, le relief détaillé reçoit des
+  **calques de modification** (grilles posées sur le plan tangent, qui s'additionnent ; bords
+  laissés intacts pour un raccord sans marche). Chaque événement y inscrit le sien, et seuls les
+  morceaux de terrain touchés sont recalculés, l'ancien restant affiché jusqu'à l'arrivée du
+  nouveau :
+  - **mouvements de terrain en temps réel** autour de la caméra : les pentes proches sont
+    examinées (pente infinie de Skempton et DeLory, forme pseudo-statique pour les séismes ; sol
+    détrempé par la pluie, gel et dégel des parois, secousses des séismes simulés). Une pente qui
+    cède part en **glissement** (sol sur la roche), **éboulement** (blocs d'une paroi de plus de
+    45°) ou **avalanche rocheuse** (fort séisme). La niche se creuse en cuillère (loi aire-volume
+    de Larsen), la masse est découpée en paquets qui glissent sous la loi de frottement de
+    Voellmy (comme le modèle RAMMS), s'étalent sous leur propre poids puis se déposent ; le
+    dépôt meuble se tasse sous l'angle de talus (~35°). Volume conservé ;
+  - on voit la masse descendre (le relief se met à jour plusieurs fois par seconde), des blocs
+    qui roulent, de la poussière qui monte et dérive avec le vent, on entend le grondement ;
+    ensuite restent la niche et le couloir en sol frais et le dépôt d'éboulis, que la végétation
+    recolonise en quelques dizaines d'années ;
+  - la lave figée des coulées simulées s'ajoute aussi à la croûte (basalte noir, nu des siècles) ;
+  - touche B : provoquer un mouvement de terrain sur la pente visée ; réglage « Instabilité des
+    pentes » ; fiche à la sonde, courbe, journal.
+- **Chimie** (étape 16b) : carbone, azote, phosphore, soufre, fer (et eau des roches), suivis
+  dans des réservoirs par cellule :
+  - **roches** : croûte continentale (Rudnick et Gao), océanique (basaltes de dorsale), d'arc ;
+    calcaires des plateaux chauds, gypse des bassins secs, soufre autour des volcans ;
+  - **sols** : nourris par l'altération (plus rapide au chaud et sous la pluie : loi d'Arrhenius),
+    l'azote des éclairs et le soufre des volcans ; vidés par le lessivage et l'érosion ;
+  - **fleuves** : ce que lessivent les sols descend le réseau hydrographique jusqu'à la mer ;
+  - **océan** : apports des fleuves et des sources hydrothermales des dorsales, temps de séjour
+    de chaque élément (nitrate ~3 000 ans, phosphate ~20 000 ans, sulfate ~10 Ma), panaches près
+    des embouchures et des dorsales ;
+  - **air** : gaz carbonique réglé par le thermostat des roches (jusqu'à ~0,4 bar autour d'une
+    jeune étoile faible), oxygène en traces avant la vie. Sans oxygène, la mer est
+    **ferrugineuse** (fer dissous ~3 mg/L) ; avec 21 % d'oxygène, le même modèle redonne les
+    ordres de grandeur terrestres (fleuves : carbone 12 mg/L ; mer : sulfate ~800 mg S/L,
+    phosphate ~0,02 mg P/L, fer ~3·10⁻⁵ mg/L). L'étape « vie » pourra faire monter l'oxygène ;
+  - équilibre recalculé dans l'horloge géologique, évolution au fil du temps dans l'horloge
+    climatique ; couches « Chimie » (un élément par couche), fiche à la sonde (roches, sol,
+    eau), courbes (gaz carbonique, fer et phosphore dissous).
 - **Sons** : vent, pluie, vagues, tonnerre, grondements des volcans et des séismes, entièrement
   synthétisés et pilotés par la simulation (extrait : `docs/sons.mp3`).
 - **Captures** : photos sans l'interface, vidéos AVI Motion JPEG à 30 images/s encodées en tâche de
@@ -263,18 +312,12 @@ Faites :
 - **11** : océans (courants, marées, remontées d'eau froide, niveau de la mer, banquise).
 - **12** : sol et saisons en haute définition, eau animée.
 - **13** : planète active (volcans, séismes, impacts, glaciations), sons, photos, vidéos et cartes.
+- **14a** : milieux hydrothermaux.
+- **16a** : croûte modulaire (géologie figée au passage au climat ; glissements de terrain,
+  éboulements, avalanches rocheuses en temps réel ; lave figée).
+- **16b** : chimie (carbone, azote, phosphore, soufre, fer : roches, sols, fleuves, océan, air).
 
 À venir :
-
-16. a. **Planète avec croute modulaire** : faire en sorte que la croute terrestre soit modulaire pour
-  pour voir des éboulments, des glisements de terrain en temps réel. Si cela n'est pas possible
-  techniquement dans l'état actuel, faire en sorte qu'au début on selectione un temps geologique.
-  Et une fois dans le temps climatique, aucun retour possible dans le temps géologique si cela
-  peut faire en sorte que la croute modlaire soit possible. C'est très important que la croute soit
-  modulaire
-  
-16. b. **Chimie** : éléments répartis sur la planète (carbone, azote, phosphore, soufre, fer, eau…),
-  nourris par les roches, le volcanisme, l'érosion et les fleuves ; lisibles à la sonde.
 
 15. **Vie** : apparition et évolution d'espèces simples qui se répartissent selon le climat et
     s'adaptent ; leur action sur le milieu (voir plus bas).
@@ -474,6 +517,65 @@ de ces mêmes ouvrages.
 - Laskar J. et al. (2004). *A long-term numerical solution for the insolation quantities of the
   Earth.* Astronomy & Astrophysics 428, 261-285. — référence pour les cycles orbitaux (ici
   remplacés par quelques termes périodiques aux périodes de Berger 1978).
+
+## Croûte modulaire : mouvements de terrain
+- Skempton A. W., DeLory F. A. (1957). *Stability of natural slopes in London Clay.* Proc. 4th
+  Int. Conf. Soil Mechanics 2, 378-381. — pente infinie (facteur de sécurité).
+- Newmark N. M. (1965). *Effects of earthquakes on dams and embankments.* Géotechnique 15(2),
+  139-160 ; Jibson R. W. (2011). *Methods for assessing the stability of slopes during
+  earthquakes — a retrospective.* Engineering Geology 122, 43-50. — forme pseudo-statique.
+- Keefer D. K. (1984). *Landslides caused by earthquakes.* GSA Bulletin 95(4), 406-421.
+- Wald D. J., Quitoriano V., Heaton T. H., Kanamori H. (1999). *Relationships between peak
+  ground acceleration, peak ground velocity, and Modified Mercalli Intensity in California.*
+  Earthquake Spectra 15(3), 557-564. — accélération du sol selon l'intensité.
+- Caine N. (1980). *The rainfall intensity-duration control of shallow landslides and debris
+  flows.* Geografiska Annaler A 62(1-2), 23-27. — seuil de pluie.
+- Larsen I. J., Montgomery D. R., Korup O. (2010). *Landslide erosion controlled by hillslope
+  material.* Nature Geoscience 3, 247-251. — loi aire-volume des glissements.
+- Scheidegger A. E. (1973). *On the prediction of the reach and velocity of catastrophic
+  landslides.* Rock Mechanics 5, 231-236. — distance parcourue selon le volume.
+- Voellmy A. (1955). *Über die Zerstörungskraft von Lawinen.* Schweizerische Bauzeitung 73 ;
+  Christen M., Kowalski J., Bartelt P. (2010). *RAMMS: numerical simulation of dense snow
+  avalanches in three-dimensional terrain.* Cold Regions Science and Technology 63, 1-14. —
+  loi de frottement des écoulements.
+- McDougall S., Hungr O. (2004). *A model for the analysis of rapid landslide motion across
+  three-dimensional terrain.* Canadian Geotechnical Journal 41, 1084-1097. — paquets lagrangiens.
+- Musgrave F. K., Kolb C. E., Mace R. S. (1989). *The synthesis and rendering of eroded fractal
+  terrains.* SIGGRAPH '89, 41-50. — tassement sous l'angle de talus (« thermal erosion »).
+
+## Chimie
+- Rudnick R. L., Gao S. (2003). *Composition of the continental crust.* Treatise on
+  Geochemistry 3, 1-64 ; Wedepohl K. H. (1995). *The composition of the continental crust.*
+  Geochimica et Cosmochimica Acta 59, 1217-1232. — roches continentales.
+- Gale A., Dalton C. A., Langmuir C. H., Su Y., Schilling J.-G. (2013). *The mean composition of
+  ocean ridge basalts.* G³ 14(3), 489-518 ; Alt J. C., Teagle D. A. H. (1999). *The uptake of
+  carbon during alteration of ocean crust.* GCA 63, 1527-1535. — croûte océanique.
+- Kelemen P. B., Hanghøj K., Greene A. R. (2003). *One view of the geochemistry of
+  subduction-related magmatic arcs.* Treatise on Geochemistry 3, 593-659. — roches d'arc.
+- West A. J., Galy A., Bickle M. (2005). *Tectonic and climatic controls on silicate
+  weathering.* Earth and Planetary Science Letters 235, 211-228. — altération (Arrhenius,
+  ruissellement, limite par l'apport de roche fraîche).
+- Gaillardet J., Dupré B., Louvat P., Allègre C. J. (1999). *Global silicate weathering and CO₂
+  consumption rates deduced from the chemistry of large rivers.* Chemical Geology 159, 3-30.
+- Heimsath A. M., Dietrich W. E., Nishiizumi K., Finkel R. C. (1997). *The soil production
+  function and landscape equilibrium.* Nature 388, 358-361. — vitesse du front d'altération.
+- Schumann U., Huntrieser H. (2007). *The global lightning-induced nitrogen oxides source.*
+  Atmospheric Chemistry and Physics 7, 3823-3907 ; Navarro-González R., McKay C. P., Mvondo D. N.
+  (2001). *A possible nitrogen crisis for Archaean life due to reduced nitrogen fixation by
+  lightning.* Nature 412, 61-64. — azote des éclairs.
+- Elderfield H., Schultz A. (1996). *Mid-ocean ridge hydrothermal fluxes and the chemical
+  composition of the ocean.* Annual Review of Earth and Planetary Sciences 24, 191-224.
+- Broecker W. S., Peng T.-H. (1982). *Tracers in the Sea.* Eldigio Press. — temps de séjour,
+  concentrations de l'océan ; Meybeck M. (1982). *Carbon, nitrogen, and phosphorus transport by
+  world rivers.* American Journal of Science 282, 401-450. — fleuves.
+- Holland H. D. (1984). *The Chemical Evolution of the Atmosphere and Oceans.* Princeton. — mer
+  ferrugineuse sans oxygène ; Pavlov A. A., Kasting J. F. (2002). *Mass-independent
+  fractionation of sulfur isotopes in Archean sediments.* Astrobiology 2, 27-41. — oxygène en traces.
+- Walker J. C. G., Hays P. B., Kasting J. F. (1981) (voir Climat) ; Myhre G. et al. (1998).
+  *New estimates of radiative forcing due to well mixed greenhouse gases.* GRL 25, 2715-2718 ;
+  Kasting J. F. (1993). *Earth's early atmosphere.* Science 259, 920-926 ; Feulner G. (2012).
+  *The faint young Sun problem.* Reviews of Geophysics 50, RG2006. — gaz carbonique.
+- Berner R. A. (2004). *The Phanerozoic Carbon Cycle: CO₂ and O₂.* Oxford. — modèles à réservoirs.
 
 ## Sons et captures
 - Farnell A. (2010). *Designing Sound.* MIT Press. — synthèse procédurale du vent, de la pluie,

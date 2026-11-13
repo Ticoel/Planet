@@ -192,6 +192,8 @@ public partial class Main
     /// <summary>Couleurs des cellules pour une couche (celle des milieux est calculée ici).</summary>
     private Color[] LayerColors(DisplayMode mode)
     {
+        if (ChemistryElement(mode) is { } element)
+            return ChemistryColors(element);
         if (mode != DisplayMode.VolcanicHabitats)
             return PlanetColorizer.Compute(_tectonics, _climate, mode);
         // Relief en gris, les cellules qui abritent des milieux en couleur (celle du plus chaud)
@@ -248,9 +250,8 @@ public partial class Main
     {
         if (_terrain.Field == null || _habitats == null)
             return;
-        // (la vapeur et les jets ne se voient que dans l'horloge climatique)
-        if (_clock != ClockMode.Climate)
-            SetClock(ClockMode.Climate);
+        // (la vapeur et les jets ne se voient que dans l'horloge climatique ; on ne change pas
+        // d'horloge pour autant : passer au climat fige la géologie, c'est au joueur de le décider)
         EnsureHabitats(0);
         Vector3 camera = _terrain.Explorer.Position.Normalized().ToVector3();
         var all = _habitats.All.Where(h => h.Kind is HabitatKind.HotSpring or HabitatKind.Geyser).ToArray();

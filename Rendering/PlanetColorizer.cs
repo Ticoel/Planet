@@ -30,6 +30,12 @@ public enum DisplayMode
     Upwelling,
     /// <summary>Milieux hydrothermaux (étape 14a) : couleurs calculées par le jeu (Main.Habitats).</summary>
     VolcanicHabitats,
+    /// <summary>Chimie (étape 16b) : couleurs calculées par le jeu (Main.Chemistry).</summary>
+    ChemCarbon,
+    ChemNitrogen,
+    ChemPhosphorus,
+    ChemSulfur,
+    ChemIron,
 }
 
 /// <summary>Calcule la couleur de chaque cellule selon le mode d'affichage.</summary>

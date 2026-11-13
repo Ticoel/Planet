@@ -129,6 +129,28 @@ public sealed class LavaFlow
     public double Heat(int i, int j) => _heat[j * Size + i];
     public double Basalt(int i, int j) => _basalt[j * Size + i];
 
+    /// <summary>
+    /// Lave figée à inscrire dans la croûte modulaire (étape 16a) : épaisseur de basalte (m) de
+    /// chaque cellule, ramenée à zéro sur les <paramref name="margin"/> rangées du bord (raccord
+    /// sans marche avec le relief autour). Null s'il n'y a pas encore de basalte.
+    /// </summary>
+    public float[] BasaltLayer(int margin = 4)
+    {
+        var layer = new float[Size * Size];
+        bool any = false;
+        for (int j = margin; j < Size - margin; j++)
+            for (int i = margin; i < Size - margin; i++)
+            {
+                double b = _basalt[j * Size + i];
+                if (b > 0.02)
+                {
+                    layer[j * Size + i] = (float)b;
+                    any = true;
+                }
+            }
+        return any ? layer : null;
+    }
+
     /// <summary>Volume de lave encore liquide plus figée sur la grille (m³).</summary>
     public double VolumeOnGrid()
     {

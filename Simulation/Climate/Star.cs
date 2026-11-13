@@ -89,6 +89,13 @@ public sealed class Star
         return 1.0 + (forcing + compensation) / AbsorbedWm2;
     }
 
+    /// <summary>
+    /// Effet de serre supplémentaire (W/m²) que le thermostat des roches fournit à cet âge par le
+    /// gaz carbonique : positif pour une étoile faible, négatif pour une étoile trop forte.
+    /// </summary>
+    public double Co2CompensationWm2(double ageGyr) =>
+        AbsorbedWm2 * (EffectiveIrradiance(ageGyr) - RelativeLuminosity(ageGyr));
+
     /// <summary>Applique l'étoile à l'orbite de la planète à l'âge donné (flux, distance, année).</summary>
     public void ApplyTo(OrbitalParameters orbit, double ageGyr)
     {

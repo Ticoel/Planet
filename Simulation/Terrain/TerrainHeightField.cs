@@ -15,7 +15,10 @@ namespace Planet.Simulation.Terrain;
 /// </summary>
 public readonly record struct TerrainBench(Double3 Direction, double RadiusM);
 
-public readonly record struct TerrainSample(double Height, double WaterLevel, double River)
+/// <param name="Debris">Sol remanié par la croûte modulaire (étape 16a) : −1 arraché (sol frais),
+/// +1 éboulis ; 0 : sol naturel.</param>
+/// <param name="DebrisDay">Jour (horloge climatique) où le sol a été remanié.</param>
+public readonly record struct TerrainSample(double Height, double WaterLevel, double River, float Debris = 0, float DebrisDay = 0)
 {
     /// <summary>Altitude de la surface visible (le sol, ou l'eau qui le recouvre).</summary>
     public double Surface => Math.Max(Height, WaterLevel);
@@ -686,7 +689,27 @@ public sealed class TerrainHeightField
     public TerrainSample Sample(Double3 direction, double minWavelength, ref int hint)
     {
         TerrainSample sample = SampleNatural(direction, minWavelength, ref hint);
-        return _benches.Length == 0 ? sample : sample with { Height = ApplyBenches(direction, hint, sample.Height) };
+        if (_benches.Length > 0)
+            sample = sample with { Height = ApplyBenches(direction, hint, sample.Height) };
+        var edits = Edits;
+        if (edits == null || edits.Count == 0)
+            return sample;
+        double offset = edits.Offset(direction, out float debris, out float day);
+        return sample with { Height = sample.Height + offset, Debris = debris, DebrisDay = day };
+    }
+
+    /// <summary>
+    /// Croûte modulaire (étape 16a) : calques de modification ajoutés au relief (glissements,
+    /// éboulements, lave figée). Null : relief naturel seul. Partagé par les reliefs successifs
+    /// d'une même planète (le relief de base ne change plus une fois la géologie figée).
+    /// </summary>
+    public CrustEdits Edits { get; set; }
+
+    /// <summary>Relief sans la croûte modulaire (le relief « naturel », replats compris).</summary>
+    public double BaseTerrainHeight(Double3 direction, double minWavelength, ref int hint)
+    {
+        TerrainSample sample = SampleNatural(direction, minWavelength, ref hint);
+        return _benches.Length > 0 ? ApplyBenches(direction, hint, sample.Height) : sample.Height;
     }
 
     /// <summary>Relief détaillé sans les replats des bassins.</summary>

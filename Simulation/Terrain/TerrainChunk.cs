@@ -23,6 +23,8 @@ public sealed class TerrainChunk
     public float[] Custom1 { get; init; }
     /// <summary>Eau : niveau de l'eau (x, m ; 0 = mer, plus haut pour un lac) et lit de fleuve (y, 0 à 1).</summary>
     public float[] Water { get; init; }
+    /// <summary>Croûte modulaire : sol remanié (x : −1 arraché, +1 éboulis) et jour de l'événement (y).</summary>
+    public float[] Debris { get; init; }
     /// <summary>Vrai si une partie du morceau est sous une étendue d'eau (mer ou lac).</summary>
     public bool HasWater { get; init; }
     public double MinHeight { get; init; }
@@ -100,6 +102,7 @@ public static class TerrainChunkBuilder
         var height = new double[Padded * Padded];
         var water = new double[Padded * Padded];
         var river = new double[Padded * Padded];
+        var debris = new float[Padded * Padded * 2];
         int hint = -1;
         bool hasWater = false;
         for (int j = 0; j < Padded; j++)
@@ -111,6 +114,8 @@ public static class TerrainChunkBuilder
                 height[index] = sample.Height;
                 water[index] = sample.WaterLevel;
                 river[index] = sample.River;
+                debris[index * 2] = sample.Debris;
+                debris[index * 2 + 1] = sample.DebrisDay;
                 // (côtes basses comprises : la marée haute et la remontée de la mer peuvent les couvrir)
                 hasWater |= sample.WaterLevel > sample.Height
                             || sample.Height < Climate.Tides.MaxHeightMeters + Climate.SeaLevel.MaxRiseMeters;
@@ -152,6 +157,7 @@ public static class TerrainChunkBuilder
         var custom0 = new float[count * 4];
         var custom1 = new float[count * 4];
         var waterData = new float[count * 2];
+        var debrisData = new float[count * 2];
         double minHeight = double.MaxValue, maxHeight = double.MinValue;
 
         Double3 P(int i, int j) => surface[(j + 1) * Padded + i + 1];
@@ -187,6 +193,8 @@ public static class TerrainChunkBuilder
                 Write4(custom1, v, coarseNormal, coarseHeight);
                 waterData[v * 2] = (float)water[(j + 1) * Padded + i + 1];
                 waterData[v * 2 + 1] = (float)river[(j + 1) * Padded + i + 1];
+                debrisData[v * 2] = debris[((j + 1) * Padded + i + 1) * 2];
+                debrisData[v * 2 + 1] = debris[((j + 1) * Padded + i + 1) * 2 + 1];
             }
 
         // Jupe : copie des sommets du bord, abaissée vers le centre de la planète
@@ -201,6 +209,7 @@ public static class TerrainChunkBuilder
             Array.Copy(custom0, source * 4, custom0, v * 4, 4);
             Array.Copy(custom1, source * 4, custom1, v * 4, 4);
             Array.Copy(waterData, source * 2, waterData, v * 2, 2);
+            Array.Copy(debrisData, source * 2, debrisData, v * 2, 2);
         }
 
         // Sphère englobante : tous les sommets (morphing compris)
@@ -222,6 +231,7 @@ public static class TerrainChunkBuilder
             Custom0 = custom0,
             Custom1 = custom1,
             Water = waterData,
+            Debris = debrisData,
             HasWater = hasWater,
             MinHeight = minHeight,
             MaxHeight = maxHeight,

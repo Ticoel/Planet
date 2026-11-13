@@ -153,7 +153,12 @@ public partial class TerrainRenderer : Node3D
     private readonly PriorityQueue<ChunkKey, double> _queue = new();
     private readonly HashSet<long> _queued = new();
     private readonly HashSet<long> _inProgress = new();
-    private readonly ConcurrentQueue<(TerrainChunk chunk, int generation)> _completed = new();
+    private readonly ConcurrentQueue<(TerrainChunk chunk, int generation, int stamp)> _completed = new();
+    // Croûte modulaire (étape 16a) : morceaux affichés dont le relief a changé, à recalculer
+    // (numéro de la modification la plus récente qui les touche) ; le morceau périmé reste
+    // affiché jusqu'à l'arrivée du nouveau
+    private readonly Dictionary<long, int> _stale = new();
+    private volatile int _editStamp;
     private Thread[] _workers;
     private volatile bool _stopping;
     private volatile int _generation;
@@ -351,6 +356,7 @@ public partial class TerrainRenderer : Node3D
             _queued.Clear();
         }
         Field = field;
+        _stale.Clear();
         // Un relief en préparation qui n'a pas abouti est abandonné
         foreach (var entry in _pending.Values)
             FreeResources(entry);
@@ -367,6 +373,35 @@ public partial class TerrainRenderer : Node3D
             _cache[new ChunkKey(face, 0, 0, 0).Packed] = CreateEntry(TerrainChunkBuilder.Build(field, new ChunkKey(face, 0, 0, 0)), _generation);
     }
 
+    /// <summary>
+    /// Croûte modulaire (étape 16a) : le relief a changé autour d'un point (glissement de terrain,
+    /// éboulement, lave figée). Les morceaux affichés qui touchent la zone sont recalculés, les
+    /// plus visibles d'abord ; chacun reste affiché jusqu'à l'arrivée de son remplaçant. Les
+    /// morceaux trop grossiers pour montrer la modification (sommets plus espacés que la zone)
+    /// ne sont pas refaits.
+    /// </summary>
+    public void InvalidateRegion(Double3 direction, double radiusM)
+    {
+        int stamp = Interlocked.Increment(ref _editStamp);
+        direction = direction.Normalized();
+        double planet = TerrainHeightField.RadiusMeters;
+        foreach (var (packed, entry) in _cache)
+        {
+            double spacing = CubeSphere.ChunkSizeMeters(entry.Key.Level) / TerrainChunkBuilder.Resolution;
+            if (spacing > 2 * radiusM && entry.Key.Level > 0)
+                continue;
+            double angle = Math.Acos(Math.Clamp(entry.BoundsCenter.Normalized().Dot(direction), -1, 1));
+            if (angle * planet <= radiusM + entry.BoundsRadius)
+                _stale[packed] = stamp;
+        }
+    }
+
+    /// <summary>Morceaux en attente d'un nouveau calcul après une modification de la croûte.</summary>
+    public int StaleRegionChunkCount => _stale.Count;
+
+    /// <summary>Jour du climat, pour la repousse de la végétation sur le sol remanié.</summary>
+    public void SetCrustDay(float day) => _material?.SetShaderParameter("crust_day", day);
+
     /// <summary>Bascule sur le nouveau relief : l'ancien est jeté, le nouveau devient le relief affiché.</summary>
     private void Swap()
     {
@@ -381,6 +416,7 @@ public partial class TerrainRenderer : Node3D
         foreach (var entry in _cache.Values)
             _toFree.Enqueue(entry);
         _cache.Clear();
+        _stale.Clear();
         foreach (var (packed, entry) in _pending)
         {
             entry.LastUsedFrame = _frame;
@@ -488,6 +524,21 @@ public partial class TerrainRenderer : Node3D
         }
         StaleChunkCount = stale;
 
+        // Morceaux à refaire après une modification de la croûte : ceux qu'on voit d'abord
+        if (!updating && _stale.Count > 0)
+        {
+            var shown = new HashSet<long>();
+            foreach (var chunk in selection)
+                shown.Add(chunk.Key.Packed);
+            foreach (var (packed, _) in _stale)
+            {
+                if (!_cache.TryGetValue(packed, out var entry))
+                    continue;
+                double distance = Math.Max(0, entry.BoundsCenter.DistanceTo(camera) - entry.BoundsRadius);
+                requests.Add((entry.Key, shown.Contains(packed) ? -1e9 + distance : entry.Key.Level * 1e9 + 5e8 + distance));
+            }
+        }
+
         // Demandes de l'image : elles remplacent celles de l'image précédente
         lock (_queueLock)
         {
@@ -561,8 +612,22 @@ public partial class TerrainRenderer : Node3D
             long packed = item.chunk.Key.Packed;
             if (item.generation == _displayGeneration)
             {
-                if (!_cache.ContainsKey(packed))
+                if (!_cache.TryGetValue(packed, out var old))
                     _cache[packed] = CreateEntry(item.chunk, item.generation);
+                else if (_stale.TryGetValue(packed, out int since))
+                {
+                    // Croûte modifiée : le nouveau morceau remplace l'ancien (affiché dès cette
+                    // image par la sélection) ; s'il a été calculé avant la dernière
+                    // modification, il reste à refaire
+                    if (item.stamp >= since)
+                        _stale.Remove(packed);
+                    var entry = CreateEntry(item.chunk, item.generation);
+                    entry.LastUsedFrame = old.LastUsedFrame;
+                    if (old.Visible)
+                        _visible.Remove(old);
+                    FreeResources(old);
+                    _cache[packed] = entry;
+                }
             }
             else if (item.generation == _generation)
             {
@@ -580,8 +645,10 @@ public partial class TerrainRenderer : Node3D
         var vertices = new Vector3[count];
         var normals = new Vector3[count];
         var water = new Vector2[count];
+        var debris = new Vector2[count];
         for (int v = 0; v < count; v++)
         {
+            debris[v] = new Vector2(chunk.Debris[v * 2], chunk.Debris[v * 2 + 1]);
             vertices[v] = new Vector3(chunk.Positions[v * 3], chunk.Positions[v * 3 + 1], chunk.Positions[v * 3 + 2]);
             normals[v] = new Vector3(chunk.Normals[v * 3], chunk.Normals[v * 3 + 1], chunk.Normals[v * 3 + 2]);
             water[v] = new Vector2(chunk.Water[v * 2], chunk.Water[v * 2 + 1]);
@@ -593,6 +660,7 @@ public partial class TerrainRenderer : Node3D
         arrays[(int)Mesh.ArrayType.Custom0] = chunk.Custom0;
         arrays[(int)Mesh.ArrayType.Custom1] = chunk.Custom1;
         arrays[(int)Mesh.ArrayType.TexUV] = water;
+        arrays[(int)Mesh.ArrayType.TexUV2] = debris;
         arrays[(int)Mesh.ArrayType.Index] = TerrainChunkBuilder.Indices;
         long format = ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom0Shift)
                       | ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom1Shift);
@@ -670,6 +738,7 @@ public partial class TerrainRenderer : Node3D
     {
         FreeResources(entry);
         _cache.Remove(entry.Key.Packed);
+        _stale.Remove(entry.Key.Packed);
     }
 
     private static void FreeResources(ChunkEntry entry)
@@ -688,6 +757,7 @@ public partial class TerrainRenderer : Node3D
             FreeResources(entry);
         _cache.Clear();
         _visible.Clear();
+        _stale.Clear();
     }
 
     // --- Threads de calcul ----------------------------------------------------------------------
@@ -698,7 +768,7 @@ public partial class TerrainRenderer : Node3D
         {
             ChunkKey key;
             TerrainHeightField field;
-            int generation;
+            int generation, stamp;
             lock (_queueLock)
             {
                 while (!_stopping && (_queue.Count == 0 || index >= _activeWorkers))
@@ -710,11 +780,12 @@ public partial class TerrainRenderer : Node3D
                 _inProgress.Add(key.Packed);
                 field = Field;
                 generation = _generation;
+                stamp = _editStamp;
             }
             try
             {
                 if (field != null)
-                    _completed.Enqueue((TerrainChunkBuilder.Build(field, key), generation));
+                    _completed.Enqueue((TerrainChunkBuilder.Build(field, key), generation, stamp));
             }
             catch (Exception exception)
             {
@@ -787,6 +858,10 @@ uniform float lava_half_extent = 5120.0;
 uniform int habitat_count = 0;
 uniform vec4 habitat_sites[16];
 uniform vec4 habitat_kinds[16];
+// Croûte modulaire (étape 16a) : jour du climat (le sol remanié reverdit en quelques dizaines
+// d'années ; le jour de l'événement est stocké dans le maillage)
+uniform float crust_day = 0.0;
+uniform float crust_regrow_days = 9000.0;
 
 float sea_surface(vec3 up) {
     float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
@@ -1088,12 +1163,16 @@ void light() {
 shader_type spatial;
 render_mode cull_back;
 " + CommonShaderCode + @"
+// Sol remanié par la croûte modulaire : x (−1 arraché, +1 éboulis), y : jour de l'événement
+varying vec2 v_debris;
+
 void vertex() {
     float m = morph_factor(VERTEX, MODEL_MATRIX, vec3(0.0));
     VERTEX += CUSTOM0.xyz * m;
     vec3 n = normalize(mix(NORMAL, CUSTOM1.xyz, m));
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
     v_water = UV;
+    v_debris = UV2;
     NORMAL = n;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -1132,6 +1211,13 @@ void fragment() {
     // Canopée des forêts (w > 0) ou part de sable des déserts (w < 0), vue réaliste (étape 12a)
     float canopy = coloring == 2 ? max(cdata.w, 0.0) : 0.0;
     float desertSand = coloring == 2 ? max(-cdata.w, 0.0) : 0.0;
+    // Sol remanié par la croûte modulaire, encore frais (étape 16a) : ni forêt ni sable dessus
+    // (x < 0 : sol arraché ; 0 à 1 : éboulis ; 2 : lave figée, qui reste nue des siècles)
+    float crustFresh = abs(v_debris.x) > 0.02
+        ? clamp(abs(v_debris.x), 0.0, 1.0)
+          * (1.0 - smoothstep(0.0, crust_regrow_days * (v_debris.x > 1.2 ? 30.0 : 1.0), crust_day - v_debris.y)) : 0.0;
+    canopy *= 1.0 - crustFresh;
+    desertSand *= 1.0 - crustFresh;
     float snowEstimate = snow_on_slope(snowBase, slope0);
     // Sable (plages, déserts) : dunes (~32 m) et rides (~0,5 m), crêtes ondulées par les bruits.
     // Coordonnée x + z : les deux sont périodiques de NOISE_PERIOD, multiple des longueurs
@@ -1204,9 +1290,25 @@ void fragment() {
         color = mix(color, cliff * (1.0 - 0.3 * cracks * detail_weight(4.0, footprint)), smoothstep(0.38, 0.62, slope));
         // Éboulis : grain clair et sombre sur la roche
         color *= 1.0 + rockiness * (0.08 * n2.x + 0.06 * n8.x);
+        // Croûte modulaire (étape 16a) : niche d'arrachement et couloir en sol frais (terre et
+        // roche à nu, sans végétation), dépôt en éboulis de blocs ; la végétation reprend ensuite
+        if (crustFresh > 0.0) {
+            vec3 soil = mix(vec3(0.33, 0.24, 0.16), rock * 0.85, smoothstep(0.15, 0.4, slope));
+            soil *= 1.0 + 0.10 * n8.x + 0.06 * n2.x;
+            // Blocs : taches claires et sombres de tailles variées, ombres entre les blocs
+            float blocks = clamp(n2.x * 1.6 + n8.x * 0.8, -1.0, 1.0);
+            vec3 rubble = mix(rock * 0.5, rock * 1.0, 0.5 + 0.5 * blocks);
+            rubble = mix(rubble, vec3(0.34, 0.28, 0.21), 0.3);
+            vec3 basalt = vec3(0.075, 0.07, 0.068) * (1.0 + 0.35 * n2.x + 0.2 * n8.x);
+            color = mix(color, v_debris.x < 0.0 ? soil : v_debris.x > 1.2 ? basalt : rubble, crustFresh);
+        }
         float snow = snow_on_slope(snowBase, slope);
         // La neige s'accroche d'abord dans les creux du micro-relief
         snow = clamp(snow + (snow * (1.0 - snow)) * 1.5 * n32.x, 0.0, 1.0);
+        // Sol tout juste remanié (croûte modulaire) : la neige a glissé avec lui ; elle ne le
+        // recouvre qu'au fil des chutes suivantes (quelques semaines)
+        if (abs(v_debris.x) > 0.02)
+            snow *= mix(1.0, smoothstep(0.0, 60.0, crust_day - v_debris.y), clamp(abs(v_debris.x), 0.0, 1.0));
         color = mix(color, vec3(0.86, 0.88, 0.92) * (1.0 + 0.03 * n8.x), snow);
         roughness = mix(0.95, 0.6, snow);
         // Estran (étape 11b) : sable mouillé, plus sombre et brillant, là où la mer vient de se

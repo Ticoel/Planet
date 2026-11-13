@@ -45,8 +45,8 @@ public partial class Main
             SpeedLabel = () => _clock == ClockMode.Geological
                 ? (_fastForward ? "avance rapide" : $"{French(GeologicalSpeeds[_geologicalSpeed])} Ma/s")
                 : ClimateSpeedLabel(ClimateSpeeds[_climateSpeed]),
-            ClockLabel = () => _clock == ClockMode.Geological ? "Géologie" : "Climat",
-            ToggleClock = () => SetClock(_clock == ClockMode.Geological ? ClockMode.Climate : ClockMode.Geological),
+            ClockLabel = () => _clock == ClockMode.Geological ? "Géologie" : "Climat (géologie figée)",
+            ToggleClock = () => { if (_clock == ClockMode.Geological) RequestClimate(); else RequestGeology(); },
             TimeLabel = TimeStamp,
             StatusLabel = StatusLabel,
             QualityNames = QualityLevels.Select(l => "Qualité " + l.Label.Split(' ')[0]).ToArray(),
@@ -63,6 +63,8 @@ public partial class Main
         RegisterProbe();
         RegisterSeries();
         RegisterHabitats();
+        RegisterCrust();
+        RegisterChemistry();
     }
 
     private void TogglePause()
@@ -216,7 +218,7 @@ public partial class Main
         Layer("Planète", "Plaques", DisplayMode.Plates);
         Layer("Planète", "Frontières de plaques", DisplayMode.Boundaries, "Rouge : convergente ; bleu : divergente ; jaune : transformante");
         Layer("Planète", "Âge des fonds marins", DisplayMode.CrustAge);
-        const string climate = "Passe dans l'horloge climatique (relief figé)";
+        const string climate = "Passe dans l'horloge climatique (géologie figée pour de bon, après confirmation)";
         Layer("Climat", "Ensoleillement", DisplayMode.InstantInsolation);
         Layer("Climat", "Ensoleillement sur 24 h", DisplayMode.DailyInsolation);
         Layer("Climat", "Température", DisplayMode.Temperature, climate);

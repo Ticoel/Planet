@@ -270,6 +270,7 @@ public partial class Main : Node3D
         SetupSky();
         ApplyQuality();
         SetupOverlays();
+        SetupCrust();
         SetupHud();
         SetupUi();
         GeneratePlanet();
@@ -322,6 +323,8 @@ public partial class Main : Node3D
         _terrain.Coloring = ColoringFor(_displayMode);
         // (les morceaux hors champ qui peuvent projeter une ombre dans le champ sont gardés)
         _terrain.Quadtree.ShadowCasterRange = Math.Min(_sky.ShadowRange, 150000);
+        UpdateCrust(delta);
+        UpdateChemistry(delta);
         _terrain.Tick(delta, ReadInput());
         ApplyShake(delta);
         _noticeTimer -= delta;
@@ -471,8 +474,8 @@ public partial class Main : Node3D
         }
         if (_tectonics.TimeMyr >= FastForwardTargetMyr)
             return;
-        if (_clock != ClockMode.Geological)
-            SetClock(ClockMode.Geological);
+        if (!RequestGeology())
+            return;
         _fastForward = true;
         _geologicalSpeed = GeologicalSpeeds.Length - 1;
         _running = true;
@@ -502,6 +505,7 @@ public partial class Main : Node3D
         {
             _tectonics.AnnualPrecipitation = _estimateTask.Result.AnnualPrecipitation;
             _estimatedMeanTemperature = _estimateTask.Result.MeanTemperature.Average();
+            _estimatedTemperatures = _estimateTask.Result.MeanTemperature;
         }
         else if (!_estimateTask.IsCompletedSuccessfully)
             GD.PushWarning($"Climate estimate failed: {_estimateTask.Exception?.GetBaseException().Message}");
@@ -862,11 +866,15 @@ public partial class Main : Node3D
         var estimate = FastClimateEstimator.Estimate(_grid, _tectonics.CellElevation, OrbitAt(_tectonics.TimeMyr));
         _tectonics.AnnualPrecipitation = estimate.AnnualPrecipitation;
         _estimatedMeanTemperature = estimate.MeanTemperature.Average();
+        _estimatedTemperatures = estimate.MeanTemperature;
         _nextEstimateMyr = ClimateEstimateIntervalMyr;
         GD.Print($"Climate estimate for erosion in {stopwatch.ElapsedMilliseconds} ms");
 
         _pendingTime = 0;
         _effectiveSpeed = 0;
+        // Nouvelle planète : la croûte modulaire repart de zéro, la géologie avance de nouveau
+        ResetCrust();
+        ResetChemistry();
         if (_clock == ClockMode.Climate)
             SetClock(ClockMode.Geological);
         RebuildTerrainNow(progressive: false);
@@ -881,7 +889,7 @@ public partial class Main : Node3D
         _terrainTask = null;
         var stopwatch = Stopwatch.StartNew();
         var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff(), _tectonics.SnapshotLandforms(),
-                                           HabitatBenches());
+                                           HabitatBenches()) { Edits = _crust };
         _terrain.SetField(field, progressive);
         _terrainSource = _tectonics;
         _terrainTimeMyr = _tectonics.TimeMyr;
@@ -915,7 +923,8 @@ public partial class Main : Node3D
         _terrainRefreshTimer = IsFastGeology ? FastTerrainRefreshSeconds : TerrainRefreshSeconds;
         var landforms = _tectonics.SnapshotLandforms();
         var benches = HabitatBenches();
-        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms, benches));
+        var crust = _crust;
+        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms, benches) { Edits = crust });
     }
 
     /// <summary>
@@ -1093,8 +1102,8 @@ public partial class Main : Node3D
             return;
         var explorer = _terrain.Explorer;
         bool needsClimate = index >= 4 && index < 10;
-        if (needsClimate && _clock != ClockMode.Climate)
-            SetClock(ClockMode.Climate);
+        if (needsClimate && !RequestClimate())
+            return;
         if (needsClimate && !_climate.HasTemperature)
         {
             ShowNotice("Climat pas encore prêt : réessayez dans un instant");
@@ -1445,7 +1454,8 @@ public partial class Main : Node3D
             lines.Add("Molette : avancer / reculer dans l'axe du regard   Clic gauche + glisser : déplacer   Clic droit + glisser : regarder");
             lines.Add("[↑ ↓] Avancer / reculer   [← →] Tourner   [Page préc. / suiv.] Monter / descendre   [Origine / Fin] Regard haut / bas");
             lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
-            lines.Add("[C] Horloge géologique / climatique   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
+            lines.Add("[C] Figer la géologie et passer au climat (sans retour)   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
+            lines.Add("[B] Provoquer un glissement de terrain ou un éboulement sur la pente visée (horloge climatique, près du sol)");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
             lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant");
@@ -1500,6 +1510,9 @@ public partial class Main : Node3D
                     lines.Add(BiomeSummary());
             }
         }
+        lines.Add(CrustLine());
+        if (ChemistryLine() is { } chemistry)
+            lines.Add(chemistry);
         lines.Add($"Légende : {DisplayModeLabel()}");
         if (_hoverCell >= 0)
             lines.Add(HoverLabel(_hoverCell));
@@ -1524,6 +1537,8 @@ public partial class Main : Node3D
         DisplayMode.OceanCurrents => "courants océaniques",
         DisplayMode.Upwelling => "remontées d'eau froide",
         DisplayMode.VolcanicHabitats => "milieux hydrothermaux",
+        DisplayMode.ChemCarbon or DisplayMode.ChemNitrogen or DisplayMode.ChemPhosphorus or DisplayMode.ChemSulfur or DisplayMode.ChemIron
+            => PlanetChemistryName(_displayMode),
         DisplayMode.RecentPrecipitation => "pluie des derniers jours",
         DisplayMode.AnnualPrecipitation => "pluie annuelle",
         DisplayMode.Humidity => "humidité de l'air",
@@ -1569,6 +1584,8 @@ public partial class Main : Node3D
         DisplayMode.Pressure => "Pression au niveau de la mer (bleu : dépressions, blanc : 1013 hPa, rouge : anticyclones)",
         DisplayMode.OceanCurrents => "Courants de surface (bleu nuit : calme, cyan, vert, jaune, rouge : plus de 0,4 m/s) ; flèches avec V",
         DisplayMode.VolcanicHabitats => "Milieux hydrothermaux (jaune : fumerolles ; orange : sources chaudes, geysers ; brun : mares de boue ; rouge sombre : fumeurs noirs ; cyan : sources alcalines ; vert : évents côtiers)",
+        DisplayMode.ChemCarbon or DisplayMode.ChemNitrogen or DisplayMode.ChemPhosphorus or DisplayMode.ChemSulfur or DisplayMode.ChemIron
+            => ChemistryLegend(_displayMode),
         DisplayMode.Upwelling => "Mouvement vertical de l'eau (bleu puis cyan : l'eau froide des profondeurs remonte, jusqu'à 1 m/jour ; rouge : l'eau de surface plonge)",
         DisplayMode.RecentPrecipitation => "Précipitations des derniers jours, en rythme annuel (beige : sec, vert, bleu, violet : plus de 4 m/an)",
         DisplayMode.AnnualPrecipitation => "Précipitations annuelles (beige : désert, < 250 mm ; vert : 1 m ; bleu : 2 m et plus)",
@@ -1724,7 +1741,8 @@ public partial class Main : Node3D
         if (_sound == null)
             return;
         _sound.Volume = _muted ? 0f : 0.8f;
-        var input = new SoundscapeInput { AltitudeM = (float)frame.AltitudeAboveGround, Quake = (float)Math.Min(1.0, _shakeStrength * 2) };
+        // (les mouvements de terrain grondent comme un séisme)
+        var input = new SoundscapeInput { AltitudeM = (float)frame.AltitudeAboveGround, Quake = Math.Max((float)Math.Min(1.0, _shakeStrength * 2), _slideRumble) };
         if (frame.Weather.HasValue)
         {
             LocalWeather w = frame.Weather.Value;
@@ -1924,7 +1942,14 @@ public partial class Main : Node3D
                 GoToPlace(7 + (int)(key.Keycode - Key.F9));
                 break;
             case Key.C:
-                SetClock(_clock == ClockMode.Geological ? ClockMode.Climate : ClockMode.Geological);
+                // Le passage au climat fige la géologie (confirmation demandée) ; pas de retour
+                if (_clock == ClockMode.Geological)
+                    RequestClimate();
+                else
+                    RequestGeology();
+                break;
+            case Key.B:
+                TriggerLandslide();
                 break;
             case Key.V:
                 if (_clock == ClockMode.Geological)
@@ -2020,10 +2045,10 @@ public partial class Main : Node3D
 
     private void SetDisplayMode(DisplayMode mode)
     {
+        // Les couches du climat demandent l'horloge climatique (géologie figée, après confirmation)
+        if (IsClimateLayer(mode) && _clock == ClockMode.Geological && !RequestClimate())
+            return;
         _displayMode = mode;
-        // Les couches du climat demandent l'horloge climatique (relief figé)
-        if (IsClimateLayer(mode) && _clock == ClockMode.Geological)
-            SetClock(ClockMode.Climate);
         _colorsDirty = true;
         _colorTimer = 0;
     }
