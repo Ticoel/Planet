@@ -109,6 +109,78 @@ public static class CrustTests
     }
 
     [Test]
+    public static void SpatialIndexMatchesBruteForce()
+    {
+        // Des centaines de calques partout sur la planète : l'index doit donner la même somme
+        var random = new Random(8);
+        var edits = new CrustEdits();
+        var patches = new List<CrustPatch>();
+        for (int p = 0; p < 300; p++)
+        {
+            var center = new Double3(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+            var patch = new CrustPatch(center, 32, 50 + 400 * random.NextDouble(), p, "test");
+            patch.Publish(Enumerable.Repeat((float)(1 + random.NextDouble()), 32 * 32).ToArray(), new float[32 * 32]);
+            edits.Add(patch);
+            patches.Add(patch);
+        }
+        int checkedPoints = 0;
+        foreach (var patch in patches.Take(100))
+            for (int k = 0; k < 20; k++)
+            {
+                Double3 d = patch.DirectionAt((random.NextDouble() - 0.5) * 2.2 * patch.HalfExtentM, (random.NextDouble() - 0.5) * 2.2 * patch.HalfExtentM);
+                double brute = patches.Sum(p => p.Sample(d, out _));
+                Assert.Near(edits.Offset(d, out _, out _), brute, 1e-9, "index spatial = somme de tous les calques");
+                if (brute > 0) checkedPoints++;
+            }
+        Assert.True(checkedPoints > 500, "points testés à l'intérieur des calques");
+    }
+
+    [Test]
+    public static void AshThinsWithDistanceAndDriftsDownwind()
+    {
+        var patch = VolcanicDeposits.NewPatch(Site, true, 0);
+        var (ax, _) = LavaFlow.TangentFrame(Site);
+        var ash = VolcanicDeposits.Tephra(patch, 3, ax, 1.0, out double placed);
+        double volume = VolcanicDeposits.TephraVolume(3);
+        Console.WriteLine($"     VEI 3 : {volume:G2} m³ émis, {placed:G2} m³ posés sur le calque");
+        Assert.True(placed > 0.8 * volume && placed <= volume * 1.001, "presque tout le volume retombe sur le calque");
+        double At(double x, double y) { patch.Publish(ash, new float[ash.Length]); return patch.Sample(patch.DirectionAt(x, y), out _); }
+        Assert.True(At(500, 0) > At(3000, 0) && At(3000, 0) > At(8000, 0), "les cendres s'amincissent en s'éloignant");
+        Assert.True(At(4000, 0) > 1.5 * At(-4000, 0), "plus épaisses sous le vent");
+        Assert.True(At(0, 0) is > 1 and < 30, $"épaisseur près de la bouche : {At(0, 0):0.0} m");
+        Assert.True(VolcanicDeposits.TephraVolume(1) == 0, "éruption effusive : pas de cendres");
+    }
+
+    [Test]
+    public static void LavaFlowsDownTheVolcanoAndAccumulates()
+    {
+        // Volcan bouclier : cône de 1 500 m à 7 % de pente
+        double Cone(Double3 d) { var (x, y) = Local(d); return 1500 - 0.07 * Math.Sqrt(x * x + y * y); }
+        var patch = VolcanicDeposits.NewPatch(Site, false, 0);
+        var lava = VolcanicDeposits.Lava(patch, Cone, 0, 5, out double placed);
+        Console.WriteLine($"     coulées : {placed:G2} m³ posés pour {VolcanicDeposits.LavaVolume(0):G2} m³ émis");
+        Assert.True(placed > 0.3 * VolcanicDeposits.LavaVolume(0) && placed < 2 * VolcanicDeposits.LavaVolume(0), "volume des coulées vraisemblable");
+        double far = 0, near = 0;
+        int n = patch.Size;
+        for (int j = 0; j < n; j++)
+            for (int i = 0; i < n; i++)
+            {
+                var (x, y) = Local(patch.DirectionOf(i, j));
+                double r = Math.Sqrt(x * x + y * y);
+                if (r > 2000) far += lava[j * n + i]; else near += lava[j * n + i];
+                if (i < 4 || j < 4 || i >= n - 4 || j >= n - 4)
+                    Assert.True(lava[j * n + i] == 0, "bords du calque intacts");
+            }
+        Assert.True(far > 0.3 * (far + near), "les coulées descendent loin de la bouche");
+        // Deux éruptions : le calque cumule (le volcan grandit)
+        patch.Accumulate(lava, VolcanicDeposits.LavaCode, 0.3f);
+        double once = patch.NetVolume();
+        patch.Accumulate(lava, VolcanicDeposits.LavaCode, 0.3f);
+        Assert.Near(patch.NetVolume(), 2 * once, 1e-6 * once, "les éruptions successives s'additionnent");
+        Assert.True(patch.Data.Debris.Any(d => d == VolcanicDeposits.LavaCode), "coulées marquées comme lave figée");
+    }
+
+    [Test]
     public static void InfiniteSlopeBehavesLikeRealSoils()
     {
         double Deg(double d) => d * Math.PI / 180;

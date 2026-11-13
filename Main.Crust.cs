@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Godot;
 using Planet.Rendering;
 using Planet.Simulation;
+using Planet.Simulation.Tectonics;
 using Planet.Simulation.Terrain;
 using Planet.Ui;
 
@@ -141,6 +142,13 @@ public partial class Main
         _slideVolume = 0;
         _lavaPatch = null;
         _lavaPatchFlow = null;
+        _depositTask?.Wait();
+        _depositTask = null;
+        _depositJobs.Clear();
+        _trackedEruptions.Clear();
+        _ventPatches.Clear();
+        _depositCount = 0;
+        _lavaDepositM3 = _ashDepositM3 = 0;
         _shakingIntensity = 0;
         _debris?.Clear();
     }
@@ -374,7 +382,7 @@ public partial class Main
             }
         }
 
-        UpdateLavaCrust();
+        UpdateVolcanicDeposits(climate);
 
         // Blocs et poussière
         int cell = _grid.NearestCell(cameraDirection, Math.Max(_weatherHint, 0));
@@ -471,16 +479,14 @@ public partial class Main
 
     /// <summary>
     /// Lave figée de la coulée simulée : son basalte est inscrit dans la croûte toutes les
-    /// quelques secondes (la grille de la coulée et le calque ont le même repère).
+    /// quelques secondes (la grille de la coulée et le calque ont le même repère). Appelé quand
+    /// un pas de la coulée vient de se terminer (sa grille n'est alors pas en train de changer).
     /// </summary>
     private void UpdateLavaCrust()
     {
-        if (_lava == null || (_lavaStep != null && !_lavaStep.IsCompleted))
+        if (_lava == null || _realSeconds < _lavaPublishTimer)
             return;
-        _lavaPublishTimer -= GetProcessDeltaTime();
-        if (_lavaPublishTimer > 0)
-            return;
-        _lavaPublishTimer = 3.0;
+        _lavaPublishTimer = _realSeconds + 2.0;
         float[] basalt = _lava.BasaltLayer();
         if (basalt == null)
             return;
@@ -495,6 +501,112 @@ public partial class Main
             debris[k] = basalt[k] > 0.05f ? 2f : 0f;   // 2 : lave figée (voir le shader du terrain)
         _crust.Publish(_lavaPatch, basalt, debris);
         _terrain.InvalidateRegion(_lavaPatch.Center, _lavaPatch.ReachM);
+    }
+
+    // --- Dépôts des éruptions ----------------------------------------------------------------------
+
+    private sealed record DepositJob(Vector3 Vent, int Vei, int Seed, Double3 Downwind, double Wind, float Day, bool WithLava,
+                                     CrustPatch LavaPatch, CrustPatch AshPatch);
+    private sealed record DepositResult(DepositJob Job, float[] Lava, float[] Ash, double LavaM3, double AshM3);
+
+    private const int MaxDepositQueue = 400;
+    private readonly HashSet<Eruption> _trackedEruptions = new();
+    private readonly Dictionary<Vector3, (CrustPatch lava, CrustPatch ash)> _ventPatches = new();
+    private readonly Queue<DepositJob> _depositJobs = new();
+    private Task<DepositResult> _depositTask;
+    private int _depositCount;
+    private double _lavaDepositM3, _ashDepositM3;
+
+    /// <summary>
+    /// Toute éruption qui se termine, où qu'elle soit sur la planète, laisse ses coulées et ses
+    /// cendres dans les calques de son volcan (<see cref="VolcanicDeposits"/>) : calcul en tâche
+    /// de fond, une éruption après l'autre ; les morceaux de terrain touchés sont refaits.
+    /// </summary>
+    private void UpdateVolcanicDeposits(bool climate)
+    {
+        if (climate)
+        {
+            var current = new HashSet<Eruption>(_activity.Eruptions);
+            foreach (var eruption in current)
+                _trackedEruptions.Add(eruption);
+            List<Eruption> ended = null;
+            foreach (var eruption in _trackedEruptions)
+                if (!current.Contains(eruption))
+                    (ended ??= new()).Add(eruption);
+            if (ended != null)
+                foreach (var eruption in ended)
+                {
+                    _trackedEruptions.Remove(eruption);
+                    EnqueueDeposit(eruption);
+                }
+        }
+
+        if (_depositTask is { IsCompleted: true })
+        {
+            var task = _depositTask;
+            _depositTask = null;
+            if (task.IsFaulted)
+                GD.PushError($"Volcanic deposit failed: {task.Exception?.GetBaseException().Message}");
+            else
+                ApplyDeposit(task.Result);
+        }
+        if (_depositTask == null && _depositJobs.Count > 0 && _terrain.Field != null)
+        {
+            var job = _depositJobs.Dequeue();
+            var height = ThreadSafeHeight(_terrain.Field, 2 * job.LavaPatch.CellM);
+            _depositTask = Task.Run(() =>
+            {
+                double lavaM3 = 0, ashM3 = 0;
+                float[] lava = job.WithLava ? VolcanicDeposits.Lava(job.LavaPatch, height, job.Vei, job.Seed, out lavaM3) : null;
+                float[] ash = VolcanicDeposits.TephraVolume(job.Vei) > 0
+                    ? VolcanicDeposits.Tephra(job.AshPatch, job.Vei, job.Downwind, job.Wind, out ashM3) : null;
+                return new DepositResult(job, lava, ash, lavaM3, ashM3);
+            });
+        }
+    }
+
+    private void EnqueueDeposit(Eruption eruption)
+    {
+        if (_depositJobs.Count >= MaxDepositQueue)
+            _depositJobs.Dequeue();   // (horloge très rapide : les plus anciennes sont abandonnées)
+        Double3 vent = Double3.From(eruption.Position).Normalized();
+        if (!_ventPatches.TryGetValue(eruption.Position, out var patches))
+        {
+            float day = (float)_climate.TimeDays;
+            patches = (VolcanicDeposits.NewPatch(vent, false, day), VolcanicDeposits.NewPatch(vent, true, day));
+            _crust.Add(patches.lava);
+            _crust.Add(patches.ash);
+            _ventPatches[eruption.Position] = patches;
+        }
+        int cell = _grid.NearestCell(eruption.Position, Math.Max(_weatherHint, 0));
+        Vector3 wind = _climate.Winds.Wind[cell];
+        // (la coulée simulée près de la caméra inscrit déjà son propre basalte)
+        bool simulated = _lava != null && _lavaVent == eruption.Position;
+        _depositJobs.Enqueue(new DepositJob(eruption.Position, eruption.Vei, _slideSeed++,
+            Double3.From(wind).Normalized(), wind.Length() / 15.0, (float)_climate.TimeDays,
+            !simulated && VolcanicDeposits.LavaVolume(eruption.Vei) > 0, patches.lava, patches.ash));
+    }
+
+    private void ApplyDeposit(DepositResult result)
+    {
+        var job = result.Job;
+        if (!_ventPatches.ContainsKey(job.Vent))
+            return;   // nouvelle planète entre-temps
+        if (result.Lava != null && result.LavaM3 > 0)
+        {
+            job.LavaPatch.Accumulate(result.Lava, VolcanicDeposits.LavaCode, 0.3f);
+            job.LavaPatch.Day = job.Day;
+            _terrain.InvalidateRegion(job.LavaPatch.Center, job.LavaPatch.ReachM);
+        }
+        if (result.Ash != null && result.AshM3 > 0)
+        {
+            job.AshPatch.Accumulate(result.Ash, VolcanicDeposits.TephraCode, 0.15f);
+            job.AshPatch.Day = job.Day;
+            _terrain.InvalidateRegion(job.AshPatch.Center, job.AshPatch.ReachM);
+        }
+        _depositCount++;
+        _lavaDepositM3 += result.LavaM3;
+        _ashDepositM3 += result.AshM3;
     }
 
     // --- Interface ---------------------------------------------------------------------------------
@@ -540,6 +652,7 @@ public partial class Main
         string moving = _slides.Count > 0 ? $"   en cours : {_slides.Count}" : "";
         string last = _lastSlide != null ? $"   dernier : {_lastSlide}" : "";
         return $"Croûte modulaire : {_crust.Count} calques, {_slideCount} mouvements de terrain dont {_rockfallCount} éboulements " +
-               $"({VolumeLabel(_slideVolume)}){moving}{last}   morceaux à refaire : {_terrain.StaleRegionChunkCount}";
+               $"({VolumeLabel(_slideVolume)}){moving}{last}   éruptions inscrites : {_depositCount} (lave {VolumeLabel(_lavaDepositM3)}, " +
+               $"cendres {VolumeLabel(_ashDepositM3)}, {_ventPatches.Count} volcans, {_depositJobs.Count} en attente)   morceaux à refaire : {_terrain.StaleRegionChunkCount}";
     }
 }

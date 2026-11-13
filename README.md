@@ -149,7 +149,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, interface du jeu, 149 tests).
+Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, interface du jeu, 152 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -276,6 +276,15 @@ Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, interface du
     ensuite restent la niche et le couloir en sol frais et le dépôt d'éboulis, que la végétation
     recolonise en quelques dizaines d'années ;
   - la lave figée des coulées simulées s'ajoute aussi à la croûte (basalte noir, nu des siècles) ;
+  - **les éruptions façonnent durablement le paysage**, partout sur la planète : chaque éruption
+    terminée laisse ses coulées (qui descendent la pente du relief actuel, sur ou à côté des
+    anciennes) et ses cendres (épaisseur qui s'amincit en exponentielle de la distance, Pyle 1989,
+    étirée sous le vent ; volumes selon l'indice d'explosivité). Chaque volcan cumule ses dépôts
+    d'éruption en éruption : son cône grandit au fil des siècles ;
+  - la végétation reprend en partie sur le sol remanié, mais la trace reste (éboulis pierreux,
+    coulées sombres, niches visibles des siècles plus tard) ;
+  - un index spatial range les calques par zone : des milliers de calques ne ralentissent pas
+    le calcul du relief ;
   - touche B : provoquer un mouvement de terrain sur la pente visée ; réglage « Instabilité des
     pentes » ; fiche à la sonde, courbe, journal.
 - **Chimie** (étape 16b) : carbone, azote, phosphore, soufre, fer (et eau des roches), suivis
@@ -542,6 +551,11 @@ de ces mêmes ouvrages.
   three-dimensional terrain.* Canadian Geotechnical Journal 41, 1084-1097. — paquets lagrangiens.
 - Musgrave F. K., Kolb C. E., Mace R. S. (1989). *The synthesis and rendering of eroded fractal
   terrains.* SIGGRAPH '89, 41-50. — tassement sous l'angle de talus (« thermal erosion »).
+
+- Pyle D. M. (1989). *The thickness, volume and grainsize of tephra fall deposits.* Bulletin of
+  Volcanology 51, 1-15. — cendres qui s'amincissent en exponentielle de la distance.
+- Walker G. P. L. (1973). *Lengths of lava flows.* Philosophical Transactions of the Royal
+  Society A 274, 107-118. — dimensions des coulées.
 
 ## Chimie
 - Rudnick R. L., Gao S. (2003). *Composition of the continental crust.* Treatise on

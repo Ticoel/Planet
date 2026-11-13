@@ -158,6 +158,7 @@ public partial class TerrainRenderer : Node3D
     // (numéro de la modification la plus récente qui les touche) ; le morceau périmé reste
     // affiché jusqu'à l'arrivée du nouveau
     private readonly Dictionary<long, int> _stale = new();
+    private readonly Queue<(Double3 direction, double radius, int stamp)> _recentEdits = new();
     private volatile int _editStamp;
     private Thread[] _workers;
     private volatile bool _stopping;
@@ -384,16 +385,37 @@ public partial class TerrainRenderer : Node3D
     {
         int stamp = Interlocked.Increment(ref _editStamp);
         direction = direction.Normalized();
-        double planet = TerrainHeightField.RadiusMeters;
         foreach (var (packed, entry) in _cache)
-        {
-            double spacing = CubeSphere.ChunkSizeMeters(entry.Key.Level) / TerrainChunkBuilder.Resolution;
-            if (spacing > 2 * radiusM && entry.Key.Level > 0)
-                continue;
-            double angle = Math.Acos(Math.Clamp(entry.BoundsCenter.Normalized().Dot(direction), -1, 1));
-            if (angle * planet <= radiusM + entry.BoundsRadius)
+            if (Touches(entry.Key, entry.BoundsCenter, entry.BoundsRadius, direction, radiusM))
                 _stale[packed] = stamp;
-        }
+        // (gardé un moment : un morceau en cours de calcul arrivera peut-être avec l'état d'avant)
+        _recentEdits.Enqueue((direction, radiusM, stamp));
+        while (_recentEdits.Count > 256)
+            _recentEdits.Dequeue();
+    }
+
+    /// <summary>Le morceau touche la zone modifiée et est assez fin pour montrer la modification.</summary>
+    private static bool Touches(ChunkKey key, Double3 boundsCenter, double boundsRadius, Double3 direction, double radiusM)
+    {
+        double spacing = CubeSphere.ChunkSizeMeters(key.Level) / TerrainChunkBuilder.Resolution;
+        if (spacing > 2 * radiusM && key.Level > 0)
+            return false;
+        double angle = Math.Acos(Math.Clamp(boundsCenter.Normalized().Dot(direction), -1, 1));
+        return angle * TerrainHeightField.RadiusMeters <= radiusM + boundsRadius;
+    }
+
+    /// <summary>
+    /// Modification la plus récente, faite après le début du calcul d'un morceau (numéro
+    /// <paramref name="stamp"/>), qui touche ce morceau ; 0 si aucune. Sans cela, un morceau
+    /// demandé pendant un glissement gardait pour toujours la masse figée en pleine descente.
+    /// </summary>
+    private int NewerEdit(TerrainChunk chunk, int stamp)
+    {
+        int newest = 0;
+        foreach (var (direction, radius, s) in _recentEdits)
+            if (s > stamp && s > newest && Touches(chunk.Key, chunk.BoundsCenter, chunk.BoundsRadius, direction, radius))
+                newest = s;
+        return newest;
     }
 
     /// <summary>Morceaux en attente d'un nouveau calcul après une modification de la croûte.</summary>
@@ -613,7 +635,11 @@ public partial class TerrainRenderer : Node3D
             if (item.generation == _displayGeneration)
             {
                 if (!_cache.TryGetValue(packed, out var old))
+                {
                     _cache[packed] = CreateEntry(item.chunk, item.generation);
+                    if (item.stamp < _editStamp && NewerEdit(item.chunk, item.stamp) is > 0 and var newer)
+                        _stale[packed] = newer;
+                }
                 else if (_stale.TryGetValue(packed, out int since))
                 {
                     // Croûte modifiée : le nouveau morceau remplace l'ancien (affiché dès cette
@@ -1212,10 +1238,15 @@ void fragment() {
     float canopy = coloring == 2 ? max(cdata.w, 0.0) : 0.0;
     float desertSand = coloring == 2 ? max(-cdata.w, 0.0) : 0.0;
     // Sol remanié par la croûte modulaire, encore frais (étape 16a) : ni forêt ni sable dessus
-    // (x < 0 : sol arraché ; 0 à 1 : éboulis ; 2 : lave figée, qui reste nue des siècles)
-    float crustFresh = abs(v_debris.x) > 0.02
-        ? clamp(abs(v_debris.x), 0.0, 1.0)
-          * (1.0 - smoothstep(0.0, crust_regrow_days * (v_debris.x > 1.2 ? 30.0 : 1.0), crust_day - v_debris.y)) : 0.0;
+    // (x < 0 : sol arraché ; 0 à 1 : éboulis ; 2 : lave figée, nue des siècles ; 3 : cendres).
+    // La végétation reprend en partie, mais la trace reste : un cône d'éboulis reste pierreux,
+    // une coulée reste sombre, une niche se voit encore des siècles plus tard
+    float crustKind = v_debris.x;
+    float crustSlow = crustKind > 2.5 ? 2.0 : crustKind > 1.2 ? 30.0 : 4.0;
+    float crustFloor = crustKind > 2.5 ? 0.15 : crustKind > 1.2 ? 0.7 : crustKind > 0.0 ? 0.5 : 0.35;
+    float crustFresh = abs(crustKind) > 0.02
+        ? clamp(abs(crustKind), 0.0, 1.0)
+          * max(crustFloor, 1.0 - smoothstep(0.0, crust_regrow_days * crustSlow, crust_day - v_debris.y)) : 0.0;
     canopy *= 1.0 - crustFresh;
     desertSand *= 1.0 - crustFresh;
     float snowEstimate = snow_on_slope(snowBase, slope0);
@@ -1300,7 +1331,8 @@ void fragment() {
             vec3 rubble = mix(rock * 0.5, rock * 1.0, 0.5 + 0.5 * blocks);
             rubble = mix(rubble, vec3(0.34, 0.28, 0.21), 0.3);
             vec3 basalt = vec3(0.075, 0.07, 0.068) * (1.0 + 0.35 * n2.x + 0.2 * n8.x);
-            color = mix(color, v_debris.x < 0.0 ? soil : v_debris.x > 1.2 ? basalt : rubble, crustFresh);
+            vec3 ash = vec3(0.20, 0.19, 0.18) * (1.0 + 0.12 * n8.x + 0.08 * n32.x);
+            color = mix(color, crustKind < 0.0 ? soil : crustKind > 2.5 ? ash : crustKind > 1.2 ? basalt : rubble, crustFresh);
         }
         float snow = snow_on_slope(snowBase, slope);
         // La neige s'accroche d'abord dans les creux du micro-relief

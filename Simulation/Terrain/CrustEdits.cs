@@ -25,8 +25,11 @@ public sealed class CrustPatch
     public Double3 Center { get; }
     public Double3 AxisX { get; }
     public Double3 AxisY { get; }
-    /// <summary>Jour (horloge climatique) de l'événement : la végétation repousse ensuite.</summary>
-    public float Day { get; }
+    /// <summary>
+    /// Jour (horloge climatique) du dernier événement : la végétation repousse ensuite. Avancé
+    /// quand un calque cumule plusieurs événements (éruptions successives d'un même volcan).
+    /// </summary>
+    public float Day { get; set; }
     /// <summary>Origine : glissement, éboulement, lave, travaux de la vie (à venir)…</summary>
     public string Kind { get; }
     public double HalfExtentM => Size * CellM / 2;
@@ -55,6 +58,27 @@ public sealed class CrustPatch
 
     /// <summary>Remplace les données (les tableaux ne doivent plus être modifiés ensuite).</summary>
     public void Publish(float[] delta, float[] debris) => _layer = new Layer(delta, debris);
+
+    /// <summary>
+    /// Ajoute une épaisseur (m) aux données actuelles (copie, puis publication d'un bloc). Le
+    /// sol remanié prend la valeur <paramref name="debrisCode"/> là où l'ajout dépasse
+    /// <paramref name="debrisMinM"/>. Les rangées du bord restent à zéro.
+    /// </summary>
+    public void Accumulate(float[] added, float debrisCode, float debrisMinM, int margin = 4)
+    {
+        var layer = _layer;
+        var delta = (float[])layer.Delta.Clone();
+        var debris = (float[])layer.Debris.Clone();
+        for (int j = margin; j < Size - margin; j++)
+            for (int i = margin; i < Size - margin; i++)
+            {
+                int k = j * Size + i;
+                delta[k] += added[k];
+                if (added[k] > debrisMinM)
+                    debris[k] = debrisCode;
+            }
+        _layer = new Layer(delta, debris);
+    }
 
     /// <summary>Direction (unitaire) du centre de la cellule (i, j).</summary>
     public Double3 DirectionOf(int i, int j) => DirectionAt((i + 0.5) * CellM - HalfExtentM, (j + 0.5) * CellM - HalfExtentM);
@@ -115,14 +139,47 @@ public sealed class CrustPatch
 /// </summary>
 public sealed class CrustEdits
 {
+    /// <summary>
+    /// Index spatial : la sphère cubique découpée en cases de ce niveau (~80 km) ; chaque calque
+    /// est rangé dans les cases qu'il touche, un point n'examine que ceux de sa case. Sans cela,
+    /// chaque point du relief passait en revue tous les calques de la planète (des milliers
+    /// après quelques siècles d'éruptions).
+    /// </summary>
+    private const int BucketLevel = 7;
+    /// <summary>Rayon maximal d'un calque (m) : au-delà, il déborderait des cases voisines.</summary>
+    public const double MaxReachM = 30000;
+
     private readonly object _lock = new();
     private volatile CrustPatch[] _patches = Array.Empty<CrustPatch>();
+    private volatile Dictionary<long, CrustPatch[]> _buckets = new();
     private int _version;
 
     /// <summary>Augmente à chaque ajout ou publication (les morceaux de terrain sont à refaire).</summary>
     public int Version => Volatile.Read(ref _version);
     public IReadOnlyList<CrustPatch> Patches => _patches;
     public int Count => _patches.Length;
+
+    private static long BucketOf(Double3 direction)
+    {
+        var (face, s, t) = CubeSphere.FromDirection(direction);
+        int n = 1 << BucketLevel;
+        int x = Math.Clamp((int)((s + 1) / 2 * n), 0, n - 1), y = Math.Clamp((int)((t + 1) / 2 * n), 0, n - 1);
+        return ((long)face << 40) | ((long)x << 20) | (long)y;
+    }
+
+    /// <summary>Cases touchées par un calque : celles de son centre et de 16 points de son pourtour.</summary>
+    private static HashSet<long> BucketsOf(CrustPatch patch)
+    {
+        var keys = new HashSet<long> { BucketOf(patch.Center) };
+        double reach = Math.Min(patch.ReachM, MaxReachM) + 2 * patch.CellM;
+        for (int k = 0; k < 16; k++)
+        {
+            double a = k * Math.PI / 8;
+            keys.Add(BucketOf(patch.DirectionAt(reach * Math.Cos(a), reach * Math.Sin(a))));
+            keys.Add(BucketOf(patch.DirectionAt(0.5 * reach * Math.Cos(a), 0.5 * reach * Math.Sin(a))));
+        }
+        return keys;
+    }
 
     public void Add(CrustPatch patch)
     {
@@ -131,6 +188,18 @@ public sealed class CrustEdits
             var list = new CrustPatch[_patches.Length + 1];
             Array.Copy(_patches, list, _patches.Length);
             list[^1] = patch;
+            // Index copié puis remplacé d'un bloc (les threads du terrain lisent l'ancien entre-temps)
+            var buckets = new Dictionary<long, CrustPatch[]>(_buckets);
+            foreach (long key in BucketsOf(patch))
+            {
+                buckets.TryGetValue(key, out var old);
+                old ??= Array.Empty<CrustPatch>();
+                var grown = new CrustPatch[old.Length + 1];
+                Array.Copy(old, grown, old.Length);
+                grown[^1] = patch;
+                buckets[key] = grown;
+            }
+            _buckets = buckets;
             _patches = list;
             Interlocked.Increment(ref _version);
         }
@@ -148,6 +217,7 @@ public sealed class CrustEdits
         lock (_lock)
         {
             _patches = Array.Empty<CrustPatch>();
+            _buckets = new Dictionary<long, CrustPatch[]>();
             Interlocked.Increment(ref _version);
         }
     }
@@ -157,8 +227,7 @@ public sealed class CrustEdits
     {
         debris = 0;
         day = 0;
-        var patches = _patches;
-        if (patches.Length == 0)
+        if (_patches.Length == 0 || !_buckets.TryGetValue(BucketOf(direction), out var patches))
             return 0;
         double sum = 0;
         foreach (var patch in patches)

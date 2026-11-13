@@ -138,5 +138,7 @@ public partial class Main
             _lavaTexture.Update(_lavaImage);
         }
         _terrain.SetShaderParameter("lava_active", 1f);
+        // (pas terminé : la grille est stable, son basalte peut être inscrit dans la croûte)
+        UpdateLavaCrust();
     }
 }
