@@ -6,6 +6,15 @@ using Planet.Simulation.Tectonics;
 namespace Planet.Simulation.Terrain;
 
 /// <summary>Résultat d'un échantillon du relief détaillé.</summary>
+/// <summary>
+/// Replat creusé dans le relief pour un bassin (source chaude, geyser, mare de boue) : une
+/// terrasse horizontale de 2,2 rayons, raccordée au terrain en 1 rayon de plus, avec au centre
+/// une cuvette peu profonde. L'eau ne tient pas sur une pente : sur un versant, une source bâtit
+/// justement de telles terrasses de dépôts (geysérite, travertin), en déblai côté amont et en
+/// remblai côté aval.
+/// </summary>
+public readonly record struct TerrainBench(Double3 Direction, double RadiusM);
+
 public readonly record struct TerrainSample(double Height, double WaterLevel, double River)
 {
     /// <summary>Altitude de la surface visible (le sol, ou l'eau qui le recouvre).</summary>
@@ -178,7 +187,8 @@ public sealed class TerrainHeightField
     /// <param name="runoffMm">Ruissellement annuel de chaque cellule (mm/an), pour les vallées
     /// et les lacs ; null : ni vallées ni lacs.</param>
     /// <param name="landforms">Volcans et cratères (étape 13), copies figées ; null : aucun.</param>
-    public TerrainHeightField(PlanetGrid grid, float[] elevationKm, int seed, float[] runoffMm = null, Landform[] landforms = null)
+    public TerrainHeightField(PlanetGrid grid, float[] elevationKm, int seed, float[] runoffMm = null, Landform[] landforms = null,
+                              TerrainBench[] benches = null)
     {
         Grid = grid;
         Seed = seed;
@@ -224,6 +234,79 @@ public sealed class TerrainHeightField
         }
         _riverCurve = BuildRiverCurves(count);
         BuildLandformIndex(landforms);
+        BuildBenches(benches);
+    }
+
+    // --- Replats des bassins hydrothermaux (étape 14a) ------------------------------------------
+
+    /// <summary>Profondeur de la cuvette sous la terrasse (m).</summary>
+    public const double BenchBasinDepthM = 0.6;
+    private const double BenchFlat = 2.2, BenchReach = 3.2;
+
+    private TerrainBench[] _benches = Array.Empty<TerrainBench>();
+    private double[] _benchLevel = Array.Empty<double>();
+    private int[][] _cellBenches;
+
+    /// <summary>Altitude de la terrasse de chaque replat : celle du terrain naturel en son centre.</summary>
+    private void BuildBenches(TerrainBench[] benches)
+    {
+        _cellBenches = new int[Grid.CellCount][];
+        if (benches == null || benches.Length == 0)
+            return;
+        var kept = new System.Collections.Generic.List<TerrainBench>();
+        var levels = new System.Collections.Generic.List<double>();
+        var lists = new System.Collections.Generic.List<int>[Grid.CellCount];
+        int hint = -1;
+        foreach (var bench in benches)
+        {
+            // (terrain lissé à l'échelle du bassin : la terrasse ne se cale pas sur une bosse)
+            double level = SampleNatural(bench.Direction, 2 * bench.RadiusM, ref hint).Height;
+            if (level < 2)
+                continue;   // sous la mer ou au ras de l'eau : pas de bassin
+            int index = kept.Count;
+            kept.Add(bench);
+            levels.Add(level);
+            // Rangé dans sa cellule et ses voisines (un bassin peut être à cheval sur une limite)
+            (lists[hint] ??= new()).Add(index);
+            foreach (int n in Grid.Neighbors[hint])
+                (lists[n] ??= new()).Add(index);
+        }
+        _benches = kept.ToArray();
+        _benchLevel = levels.ToArray();
+        for (int c = 0; c < lists.Length; c++)
+            _cellBenches[c] = lists[c]?.ToArray();
+    }
+
+    /// <summary>Altitude du fond du bassin au centre d'un replat proche de la direction, ou NaN.</summary>
+    public double BenchFloor(Double3 direction, ref int hint)
+    {
+        Span<int> cells = stackalloc int[64];
+        Gather(direction, ref hint, cells);
+        int[] list = _cellBenches?[cells[0]];
+        if (list == null)
+            return double.NaN;
+        foreach (int i in list)
+            if (direction.DistanceTo(_benches[i].Direction) * RadiusMeters < _benches[i].RadiusM)
+                return _benchLevel[i] - BenchBasinDepthM;
+        return double.NaN;
+    }
+
+    private double ApplyBenches(Double3 direction, int cell, double height)
+    {
+        int[] list = _cellBenches[cell];
+        if (list == null)
+            return height;
+        foreach (int i in list)
+        {
+            double radius = _benches[i].RadiusM;
+            double d = direction.DistanceTo(_benches[i].Direction) * RadiusMeters;
+            if (d >= BenchReach * radius)
+                continue;
+            // Terrasse horizontale, cuvette au centre (bord en pente douce sur 15 % du rayon)
+            double terrace = _benchLevel[i] - BenchBasinDepthM * (1 - SmoothStep(0.85, 1.0, d / radius));
+            height = terrace + (height - terrace) * SmoothStep(BenchFlat, BenchReach, d / radius);
+        }
+        return height;
     }
 
     // --- Volcans et cratères (étape 13) -----------------------------------------------------
@@ -601,6 +684,13 @@ public sealed class TerrainHeightField
     /// fleuve (0 à 1).
     /// </summary>
     public TerrainSample Sample(Double3 direction, double minWavelength, ref int hint)
+    {
+        TerrainSample sample = SampleNatural(direction, minWavelength, ref hint);
+        return _benches.Length == 0 ? sample : sample with { Height = ApplyBenches(direction, hint, sample.Height) };
+    }
+
+    /// <summary>Relief détaillé sans les replats des bassins.</summary>
+    private TerrainSample SampleNatural(Double3 direction, double minWavelength, ref int hint)
     {
         Span<int> cells = stackalloc int[64];
         int count = Gather(direction, ref hint, cells);

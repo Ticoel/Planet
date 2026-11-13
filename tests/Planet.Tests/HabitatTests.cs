@@ -75,4 +75,42 @@ public static class HabitatTests
         double active = Enumerable.Range(0, 6000).Count(i => geyser.GeyserActivity(i * 0.1) > 0) / 6000.0;
         Assert.Near(active, VolcanicHabitats.GeyserEruptionMinutes / 60, 0.01, "part du temps en éruption");
     }
+
+    [Test]
+    public static void PoolsSitOnLevelBenches()
+    {
+        // L'eau ne tient pas sur une pente : chaque bassin est posé sur un replat horizontal
+        var tectonics = Evolved.Value;
+        var habitats = new VolcanicHabitats(tectonics, Enumerable.Repeat(1200f, tectonics.Grid.CellCount).ToArray());
+        var landforms = tectonics.SnapshotLandforms();
+        var natural = new Planet.Simulation.Terrain.TerrainHeightField(tectonics.Grid, tectonics.CellElevation, 3, null, landforms);
+        var field = new Planet.Simulation.Terrain.TerrainHeightField(tectonics.Grid, tectonics.CellElevation, 3, null, landforms, habitats.Benches());
+        int checkedPools = 0;
+        double steepest = 0;
+        foreach (var h in habitats.All.Where(h => h.Kind is HabitatKind.HotSpring or HabitatKind.Geyser).Take(60))
+        {
+            var center = Planet.Simulation.Terrain.Double3.From(h.Position).Normalized();
+            int hint = -1;
+            double floor = field.BenchFloor(center, ref hint);
+            if (double.IsNaN(floor))
+                continue;   // (site au ras de la mer sur le relief détaillé : pas de bassin)
+            checkedPools++;
+            var east = Planet.Simulation.Terrain.Double3.UnitY.Cross(center).Normalized();
+            var north = center.Cross(east);
+            double before = 0;
+            for (int k = 0; k < 8; k++)
+            {
+                var side = east * Math.Cos(k * Math.PI / 4) + north * Math.Sin(k * Math.PI / 4);
+                Planet.Simulation.Terrain.Double3 At(double radii) =>
+                    (center + side * (radii * h.BenchRadiusM / Planet.Simulation.Terrain.TerrainHeightField.RadiusMeters)).Normalized();
+                Assert.Near(field.Height(At(0.6), 1, ref hint), floor, 0.01, "le fond du bassin est horizontal");
+                Assert.Near(field.Height(At(1.6), 1, ref hint), floor + Planet.Simulation.Terrain.TerrainHeightField.BenchBasinDepthM, 0.01, "la terrasse est horizontale");
+                Assert.Near(field.Height(At(4.0), 1, ref hint), natural.Height(At(4.0), 1, ref hint), 1e-6, "au-delà du replat, le relief est intact");
+                before = Math.Max(before, Math.Abs(natural.Height(At(0.6), 1, ref hint) - natural.Height(center, 1, ref hint)));
+            }
+            steepest = Math.Max(steepest, before);
+        }
+        Console.WriteLine($"     {checkedPools} bassins vérifiés ; avant, le terrain y variait jusqu'à {steepest:0.0} m d'un bord à l'autre");
+        Assert.True(checkedPools > 20, "trop peu de bassins vérifiés");
+    }
 }

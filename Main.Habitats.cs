@@ -46,9 +46,20 @@ public partial class Main
         bool climateRain = _clock == ClockMode.Climate && _climate.HasTemperature && _climate.Statistics.CompletedYears > 0;
         bool changed = !ReferenceEquals(_habitatSource, _tectonics) || _habitatAbundance != HydrothermalAbundance
                        || _habitatClimateRain != climateRain;
+        // (curseur d'abondance en cours de réglage : au plus un recalcul par seconde)
+        if (ReferenceEquals(_habitatSource, _tectonics) && _habitatClimateRain == climateRain && _habitatTimer > 0)
+            return;
         // (pendant que la tectonique tourne : au plus une fois par seconde)
         if (!changed && (_habitatTimeMyr == _tectonics.TimeMyr || _habitatTimer > 0))
             return;
+        // Abondance changée : les replats des bassins changent aussi, le relief est recalculé
+        if (_habitatSource != null && _habitatAbundance != HydrothermalAbundance && !double.IsNaN(_habitatAbundance))
+        {
+            if (_clock == ClockMode.Climate)
+                RebuildTerrainNow();
+            else
+                _terrainTimeMyr = double.NaN;
+        }
         _habitatTimer = HabitatRefreshSeconds;
         _habitatSource = _tectonics;
         _habitatTimeMyr = _tectonics.TimeMyr;
@@ -64,34 +75,20 @@ public partial class Main
     }
 
     /// <summary>
-    /// Pose un milieu sur le relief détaillé : les bassins se logent au point le plus bas des
-    /// environs (l'eau s'y rassemble), les fumerolles restent où elles sont.
+    /// Replats des bassins à creuser dans le relief détaillé (l'eau ne tient pas sur une pente) :
+    /// un par milieu émergé. Les emplacements ne dépendent que des volcans et de l'abondance.
     /// </summary>
+    private TerrainBench[] HabitatBenches() =>
+        new VolcanicHabitats(_tectonics, _tectonics.AnnualPrecipitation, HydrothermalAbundance).Benches();
+
+    /// <summary>Point du sol où se trouve un milieu : le fond de son bassin, sur le relief détaillé.</summary>
     private Double3 Anchor(Habitat habitat)
     {
         if (_habitatAnchors.TryGetValue(habitat, out Double3 anchor))
             return anchor;
-        var field = _terrain.Field;
         Double3 direction = Double3.From(habitat.Position).Normalized();
         int hint = -1;
-        double height = field.Height(direction, 4, ref hint);
-        if (habitat.Kind != HabitatKind.Fumarole)
-        {
-            Double3 east = Double3.UnitY.Cross(direction).Normalized();
-            Double3 north = direction.Cross(east);
-            for (int ring = 1; ring <= 2; ring++)
-                for (int k = 0; k < 8; k++)
-                {
-                    double angle = k * Math.PI / 4, reach = ring * 2.0 * habitat.RadiusM / TerrainHeightField.RadiusMeters;
-                    Double3 candidate = (direction + (east * Math.Cos(angle) + north * Math.Sin(angle)) * reach).Normalized();
-                    double h = field.Height(candidate, 4, ref hint);
-                    if (h < height && h > 1)
-                    {
-                        height = h;
-                        direction = candidate;
-                    }
-                }
-        }
+        double height = _terrain.Field.Height(direction, 2, ref hint);
         anchor = direction * (TerrainHeightField.RadiusMeters + height);
         _habitatAnchors[habitat] = anchor;
         return anchor;

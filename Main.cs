@@ -880,7 +880,8 @@ public partial class Main : Node3D
         _terrainTask?.Wait();
         _terrainTask = null;
         var stopwatch = Stopwatch.StartNew();
-        var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff(), _tectonics.SnapshotLandforms());
+        var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff(), _tectonics.SnapshotLandforms(),
+                                           HabitatBenches());
         _terrain.SetField(field, progressive);
         _terrainSource = _tectonics;
         _terrainTimeMyr = _tectonics.TimeMyr;
@@ -913,7 +914,8 @@ public partial class Main : Node3D
         _terrainTimeMyr = _tectonics.TimeMyr;
         _terrainRefreshTimer = IsFastGeology ? FastTerrainRefreshSeconds : TerrainRefreshSeconds;
         var landforms = _tectonics.SnapshotLandforms();
-        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms));
+        var benches = HabitatBenches();
+        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms, benches));
     }
 
     /// <summary>

@@ -37,6 +37,11 @@ public sealed class Habitat
     public float Ph { get; init; }
     /// <summary>Rayon du bassin, du champ de fumerolles ou du site (m).</summary>
     public float RadiusM { get; init; }
+    /// <summary>
+    /// Rayon du replat creusé dans le relief pour ce milieu (m ; 0 sous la mer). Il ne dépend
+    /// pas du type du milieu, qui peut changer avec le climat alors que le relief est déjà calculé.
+    /// </summary>
+    public float BenchRadiusM { get; init; }
     /// <summary>Altitude approximative (m ; négative : profondeur sous la mer).</summary>
     public float AltitudeM { get; init; }
     /// <summary>Geyser : durée entre deux éruptions (minutes) et hauteur du jet (m).</summary>
@@ -231,6 +236,7 @@ public sealed class VolcanicHabitats
             {
                 Kind = kind, Position = position, Cell = cell, TemperatureC = temperature, Ph = ph, RadiusM = radius,
                 AltitudeM = altitude, Variation = variation,
+                BenchRadiusM = altitude < 0 ? 0f : 12f + 33f * (float)size,
                 PeriodMinutes = kind == HabitatKind.Geyser ? 25f + 155f * (float)period : 0f,
                 JetHeightM = kind == HabitatKind.Geyser ? 15f + 55f * (float)jet : 0f,
             });
@@ -269,6 +275,10 @@ public sealed class VolcanicHabitats
                 });
         }
     }
+
+    /// <summary>Replats à creuser dans le relief détaillé : un par milieu émergé.</summary>
+    public Terrain.TerrainBench[] Benches() => _all.Where(h => h.BenchRadiusM > 0)
+        .Select(h => new Terrain.TerrainBench(Terrain.Double3.From(h.Position).Normalized(), h.BenchRadiusM)).ToArray();
 
     /// <summary>Fiche des milieux d'une cellule (pour la sonde), ou null s'il n'y en a pas.</summary>
     public string Describe(int cell)

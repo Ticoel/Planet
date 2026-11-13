@@ -139,7 +139,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
+Mise à jour : 2026-11-12 (étapes 1 à 13 et 14a faites, interface du jeu, 134 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -231,8 +231,9 @@ Mise à jour : 2026-11-09 (étapes 1 à 13 faites, 118 tests).
     mares de boue acides quand l'eau manque ; sous la mer, fumeurs noirs (~350 °C) le long des
     dorsales et sur les volcans sous-marins, sources alcalines tièdes (pH 9 à 11) sur leurs
     flancs, évents côtiers. Un volcan éteint depuis peu garde quelques sources tièdes. Dans le
-    jeu : bassins turquoise bordés de tapis microbiens jaunes et orange, terrasses de dépôts
-    clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
+    jeu : chaque bassin est posé sur un replat horizontal creusé dans le relief (l'eau ne tient
+    pas sur une pente : sur un versant, une source bâtit de telles terrasses de dépôts) ; bassins
+    turquoise bordés de tapis microbiens jaunes et orange, terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
     « Milieux hydrothermaux », fiche à la sonde (nombre, température, pH), réglage de leur
     abondance ; touche J : source chaude ou geyser suivant. Ce sont les berceaux possibles de
     la vie de l'étape suivante ;
@@ -265,12 +266,19 @@ Faites :
 
 À venir :
 
-- **Chimie** : éléments répartis sur la planète (carbone, azote, phosphore, soufre, fer, eau…),
+16. a. **Planète avec croute modulaire** : faire en sorte que la croute terrestre soit modulaire pour
+  pour voir des éboulments, des glisements de terrain en temps réel. Si cela n'est pas possible
+  techniquement dans l'état actuel, faire en sorte qu'au début on selectione un temps geologique.
+  Et une fois dans le temps climatique, aucun retour possible dans le temps géologique si cela
+  peut faire en sorte que la croute modlaire soit possible. C'est très important que la croute soit
+  modulaire
+  
+16. b. **Chimie** : éléments répartis sur la planète (carbone, azote, phosphore, soufre, fer, eau…),
   nourris par les roches, le volcanisme, l'érosion et les fleuves ; lisibles à la sonde.
 
-14. **Vie** : apparition et évolution d'espèces simples qui se répartissent selon le climat et
+15. **Vie** : apparition et évolution d'espèces simples qui se répartissent selon le climat et
     s'adaptent ; leur action sur le milieu (voir plus bas).
-15. **Confort** : sauvegarde et chargement d'une planète ; vue sous-marine ; arbres et herbes en
+16. **Confort** : sauvegarde et chargement d'une planète ; vue sous-marine ; arbres et herbes en
     objets au sol.
 
 ### Pistes pour la vie et son action sur le milieu
@@ -289,6 +297,13 @@ Faites :
   morceau du quadtree. Les voxels ne seraient utiles que pour des grottes ou des surplombs : on
   pourrait les limiter à de petites zones (quelques centaines de mètres) autour des lieux modifiés.
 
+### Bug à corriger
+
+1.  Le son est présent même quand on regrde la planète depuis l'espace. Il devrait être présent
+    uniquement quand on est proche de la situation. Dans l'espace il n'y pas d'air donc pas de son,
+    non ?
+2.  Que tout ce qui est eau doit être traiter comme de l'eau et pas comme une texture peinte.
+3.  Dès le début des biomes existes sur la planètes alors que c'est encore une boule de feu non ?
 
 # Sources et références
 
