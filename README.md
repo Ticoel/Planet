@@ -89,7 +89,8 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
 
 *Croûte modulaire : glissement de terrain de ~34 000 m³ sur un versant à 37°, avant, pendant
 (la masse descend, des blocs roulent) et après (niche d'arrachement, couloir et lobe de dépôt
-au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement provoqué pour l'image.*
+au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement déclenché par un script pour l'image (dans le jeu, ils
+se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
 
 ## Auteurs
 
@@ -105,13 +106,17 @@ au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement provoq
   (`git clone https://github.com/Ticoel/Planet.git`).
 - Ouvrir le dossier dans Godot 4.7.2 (.NET), lancer la scène `Main.tscn`.
 - Tests : `dotnet run -c Release --project tests/Planet.Tests`.
-- **Petite planète « éprouvette »** (case « Petite planète » du groupe « Planète », dans les
-  paramètres) : une planète de 2 000 km de rayon (à peu près la Lune), dix fois moins de surface
-  que la Terre, pour tout tester plus vite : 5 plaques, un point chaud, quelques dizaines de
-  volcans et une poignée de sources chaudes, une ou deux chaînes de montagnes, une grille quatre
-  fois plus légère. Tout y est simulé comme sur la Terre (tectonique, climat, eau, croûte
-  modulaire, chimie). Changer de taille crée une nouvelle planète. On peut aussi démarrer
-  directement dessus (propriété `StartSmall` de la scène `Main.tscn`).
+- **Une planète autonome, à contempler** : rien ne se provoque à la main. On laisse la géologie
+  avancer jusqu'à l'âge voulu, on la fige (C), puis la planète vit d'elle-même : saisons, pluies,
+  éruptions, séismes, glissements de terrain, sources chaudes. On ne fait que régler ses
+  paramètres et regarder ; l'étape suivante permettra d'y semer des souches de vie.
+- **Petite planète « éprouvette » par défaut** : 2 000 km de rayon (à peu près la Lune), dix fois
+  moins de surface que la Terre : 5 plaques, un point chaud, quelques dizaines de volcans et une
+  poignée de sources chaudes, une ou deux chaînes de montagnes, une grille quatre fois plus
+  légère. Tout y est simulé comme sur la Terre (tectonique, climat, eau, croûte modulaire,
+  chimie). Décocher « Petite planète » (groupe « Planète ») passe à une planète comme la Terre
+  (nouvelle planète) ; propriété `StartSmall` de la scène `Main.tscn` pour démarrer sur l'une ou
+  l'autre.
 - **Interface** (Tab pour la masquer) : le jeu est une boîte de Petri à l'échelle d'une planète ;
   on règle les paramètres, on laisse tourner, on observe.
   - barre du haut : pause, vitesse, horloge, date, qualité graphique ;
@@ -130,8 +135,6 @@ au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement provoq
   - C : figer la géologie et passer à l'horloge climatique (confirmation demandée, **sans retour** :
     on choisit d'abord l'âge géologique voulu, la croûte devient ensuite modulaire) ; + / − : vitesse ;
     T : avance rapide jusqu'à 4,5 milliards d'années (avant de figer la géologie) ;
-  - B : provoquer un glissement de terrain ou un éboulement sur la pente visée (horloge climatique,
-    près du sol) ;
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
   - I : détails (Lune, marée sous la caméra, niveau moyen de la mer…) ;
@@ -146,7 +149,7 @@ au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement provoq
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
-  - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, pluie, neige, puis
+  - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, averse, neige, puis
     nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ;
     Maj + F4 : la plus haute falaise de la côte, vue du large ; L : volcan.
 
@@ -156,7 +159,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète, interface du jeu, 154 tests).
+Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, interface du jeu, 156 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -208,6 +211,11 @@ Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
 - **Nuages** : couverture tirée du climat, découpée par un « temps qu'il fait » procédural
   (systèmes de 500 à 1 500 km qui dérivent avec les vents) ; nuages en volume de 1,5 à ~9 km,
   ombres au sol ; pluie, neige et poussière autour de la caméra, éclairées par la lumière du moment.
+- **Eau de pluie au sol** : sous la pluie, le sol fonce et luit ; quand il pleut plus vite que le
+  sol n'absorbe (infiltration de Horton : ~25 mm/h pour un sol sec, ~3 mm/h gorgé d'eau, presque
+  rien gelé ; il pleut par averses, ~4 fois l'intensité moyenne), l'eau stagne en flaques sur le
+  plat et dans les creux, avec des ronds de pluie, puis s'infiltre et s'évapore en quelques heures
+  après l'averse.
 - **Ombres portées du relief** (qualité moyenne et haute) : quatre cartes d'ombre en cascade,
   dont la portée suit l'altitude (fines au sol, larges vues d'avion, estompées depuis l'orbite) ;
   les montagnes hors du champ de vision projettent aussi leur ombre dans le champ.
@@ -256,8 +264,10 @@ Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     dorsales et sur les volcans sous-marins, sources alcalines tièdes (pH 9 à 11) sur leurs
     flancs, évents côtiers. Un volcan éteint depuis peu garde quelques sources tièdes. Dans le
     jeu : chaque bassin est posé sur un replat horizontal creusé dans le relief (l'eau ne tient
-    pas sur une pente : sur un versant, une source bâtit de telles terrasses de dépôts) ; bassins
-    turquoise bordés de tapis microbiens jaunes et orange, terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
+    pas sur une pente : sur un versant, une source bâtit de telles terrasses de dépôts) ; les
+    sources chaudes remplissent leur cuvette et les geysers une petite vasque autour de leur
+    bouche : de la vraie eau, comme la mer, les lacs et les fleuves (les mares de boue restent de
+    la boue) ; fond des bassins turquoise, bordé de tapis microbiens jaunes et orange, terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
     « Milieux hydrothermaux », fiche à la sonde (nombre, température, pH), réglage de leur
     abondance ; touche J : source chaude ou geyser suivant. Ce sont les berceaux possibles de
     la vie de l'étape suivante ;
@@ -298,8 +308,11 @@ Mise à jour : 2026-11-13 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     coulées sombres, niches visibles des siècles plus tard) ;
   - un index spatial range les calques par zone : des milliers de calques ne ralentissent pas
     le calcul du relief ;
-  - touche B : provoquer un mouvement de terrain sur la pente visée ; réglage « Instabilité des
-    pentes » ; fiche à la sonde, courbe, journal.
+  - **rien n'est provoqué** : les pentes examinées sont celles que regarde la caméra, les sols
+    varient d'un endroit à l'autre (cohésion, épaisseur : un sol mince cède à la première forte
+    pluie), et une pente fragilisée cède plus ou moins vite selon qu'elle est loin de
+    l'équilibre : quelques glissements par minute sous une pluie modérée, bien plus pendant un
+    orage ou un séisme ; réglage « Instabilité des pentes » ; fiche à la sonde, courbe, journal.
 - **Chimie** (étape 16b) : carbone, azote, phosphore, soufre, fer (et eau des roches), suivis
   dans des réservoirs par cellule :
   - **roches** : croûte continentale (Rudnick et Gao), océanique (basaltes de dorsale), d'arc ;
@@ -547,6 +560,8 @@ de ces mêmes ouvrages.
   remplacés par quelques termes périodiques aux périodes de Berger 1978).
 
 ## Croûte modulaire : mouvements de terrain
+- Horton R. E. (1933). *The role of infiltration in the hydrologic cycle.* Transactions of the
+  American Geophysical Union 14, 446-460. — capacité d'infiltration des sols, flaques sous la pluie.
 - Skempton A. W., DeLory F. A. (1957). *Stability of natural slopes in London Clay.* Proc. 4th
   Int. Conf. Soil Mechanics 2, 378-381. — pente infinie (facteur de sécurité).
 - Newmark N. M. (1965). *Effects of earthquakes on dams and embankments.* Géotechnique 15(2),

@@ -7,8 +7,8 @@ using Planet.Ui;
 namespace Planet;
 
 /// <summary>
-/// Taille de la planète : la Terre (rayon de 6 371 km), ou une petite planète « éprouvette »
-/// de 2 000 km de rayon, à peu près la taille de la Lune. Sa surface fait le dixième de celle de
+/// Taille de la planète : une petite planète « éprouvette » de 2 000 km de rayon (par défaut),
+/// à peu près la taille de la Lune, ou une planète comme la Terre (rayon de 6 371 km). Sa surface fait le dixième de celle de
 /// la Terre : moins de plaques (5 au lieu de 14), un point chaud au lieu de 12, une poignée de
 /// volcans et de sources chaudes, une ou deux chaînes de montagnes. Tout reste simulé de la même
 /// façon (tectonique, climat, eau, croûte modulaire, chimie), sur une grille quatre fois plus
@@ -23,8 +23,11 @@ public partial class Main
     private const int SmallPlanetSubdivisions = 4, SmallPlanetPlates = 5;
     private const int EarthSubdivisions = 5, EarthPlates = 14;
 
-    /// <summary>Démarrer sur une petite planète « éprouvette » (case de l'interface, groupe « Planète »).</summary>
-    [Godot.Export] public bool StartSmall { get; set; }
+    /// <summary>
+    /// Démarrer sur une petite planète « éprouvette » (par défaut) ; faux : une planète comme la
+    /// Terre. En jeu : case « Petite planète » du groupe « Planète ».
+    /// </summary>
+    [Godot.Export] public bool StartSmall { get; set; } = true;
 
     public bool SmallPlanet => PlanetConstants.RadiusKm < PlanetConstants.EarthRadiusKm - 1;
 

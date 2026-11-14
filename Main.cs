@@ -24,12 +24,14 @@ public enum ClockMode
 }
 
 /// <summary>
-/// Scène principale : génère la planète, fait tourner l'horloge géologique ou climatique, et
-/// l'affiche dans une vue unique, de l'orbite jusqu'au sol, à l'échelle réelle (le relief est
-/// exagéré automatiquement vu de loin).
+/// Scène principale : génère la planète (petite planète « éprouvette » par défaut), fait tourner
+/// l'horloge géologique puis, une fois la géologie figée, l'horloge climatique, et l'affiche dans
+/// une vue unique, de l'orbite jusqu'au sol, à l'échelle réelle. La planète vit d'elle-même
+/// (climat, éruptions, séismes, glissements de terrain) : on la contemple, on règle ses
+/// paramètres, rien n'est provoqué à la main.
 /// Souris : molette = avancer / reculer dans l'axe du regard, clic gauche + glisser = déplacer, clic droit + glisser = regarder.
-/// Clavier : flèches = avancer / tourner, Page préc. / suiv. = monter / descendre,
-/// C = horloge géologique / climatique, 1 à 0 = couches, E = exagération du relief,
+/// Clavier (H : aide complète) : flèches = avancer / tourner, Page préc. / suiv. = monter / descendre,
+/// C = figer la géologie et passer au climat, 1 à 0 = couches, E = étoile suivante,
 /// V = flèches (plaques ou vents), F = fleuves, G = vol / marche, X = retour en orbite,
 /// P = pause, + / - = vitesse de l'horloge, R = nouvelle planète.
 /// </summary>
@@ -1058,6 +1060,7 @@ public partial class Main : Node3D
         };
         _sky.Update(frame, delta);
         UpdateSound(frame);
+        UpdateRain(frame);
     }
 
     /// <summary>Densité de la canopée par cellule (0 à 1) : forêts, moins les feuillus sans feuilles ;
@@ -1091,7 +1094,7 @@ public partial class Main : Node3D
     private static readonly string[] PlaceNames =
     {
         "plus haut sommet", "plus grand fleuve", "grand lac", "côte", "désert venteux",
-        "forêt sous la pluie", "neige qui tombe", "au-dessus des nuages", "coucher de soleil", "Lune",
+        "averse", "neige qui tombe", "au-dessus des nuages", "coucher de soleil", "Lune",
         "volcan", "falaise",
     };
 
@@ -1458,13 +1461,12 @@ public partial class Main : Node3D
             lines.Add("[↑ ↓] Avancer / reculer   [← →] Tourner   [Page préc. / suiv.] Monter / descendre   [Origine / Fin] Regard haut / bas");
             lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
             lines.Add("[C] Figer la géologie et passer au climat (sans retour)   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
-            lines.Add("[B] Provoquer un glissement de terrain ou un éboulement sur la pente visée (horloge climatique, près du sol)");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
             lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
-            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] pluie  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
+            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] averse  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
         else if (!withUi)
         {
@@ -1514,6 +1516,8 @@ public partial class Main : Node3D
             }
         }
         lines.Add(CrustLine());
+        if (RainLine() is { } rain)
+            lines.Add(rain);
         if (ChemistryLine() is { } chemistry)
             lines.Add(chemistry);
         lines.Add($"Légende : {DisplayModeLabel()}");
@@ -1950,9 +1954,6 @@ public partial class Main : Node3D
                     RequestClimate();
                 else
                     RequestGeology();
-                break;
-            case Key.B:
-                TriggerLandslide();
                 break;
             case Key.V:
                 if (_clock == ClockMode.Geological)

@@ -13,7 +13,13 @@ namespace Planet.Simulation.Terrain;
 /// justement de telles terrasses de dépôts (geysérite, travertin), en déblai côté amont et en
 /// remblai côté aval.
 /// </summary>
-public readonly record struct TerrainBench(Double3 Direction, double RadiusM);
+/// <param name="BasinRadiusM">Rayon de la cuvette (m) ; 0 : celui du replat.</param>
+/// <param name="Water">La cuvette est pleine d'eau (source chaude, vasque d'un geyser) : une
+/// vraie surface d'eau, comme la mer, les lacs et les fleuves, à quelques centimètres sous le bord.</param>
+public readonly record struct TerrainBench(Double3 Direction, double RadiusM, double BasinRadiusM = 0, bool Water = false)
+{
+    public double Basin => BasinRadiusM > 0 ? BasinRadiusM : RadiusM;
+}
 
 /// <param name="Debris">Sol remanié par la croûte modulaire (étape 16a) : −1 arraché (sol frais),
 /// +1 éboulis ; 0 : sol naturel.</param>
@@ -289,27 +295,46 @@ public sealed class TerrainHeightField
         if (list == null)
             return double.NaN;
         foreach (int i in list)
-            if (direction.DistanceTo(_benches[i].Direction) * RadiusMeters < _benches[i].RadiusM)
+            if (direction.DistanceTo(_benches[i].Direction) * RadiusMeters < _benches[i].Basin)
                 return _benchLevel[i] - BenchBasinDepthM;
         return double.NaN;
     }
 
-    private double ApplyBenches(Double3 direction, int cell, double height)
+    /// <summary>Profondeur de l'eau sous le bord d'une cuvette pleine (m).</summary>
+    public const double BenchWaterFreeboardM = 0.12;
+
+    /// <summary>
+    /// Relief avec les replats, et niveau de l'eau des bassins pleins (−∞ s'il n'y en a pas) : au
+    /// niveau du bord moins quelques centimètres dans la cuvette ; juste autour, un niveau caché
+    /// sous le sol, pour que la surface de l'eau s'interpole sans nappe entre deux sommets.
+    /// </summary>
+    private (double height, double water) ApplyBenches(Double3 direction, int cell, double height)
     {
         int[] list = _cellBenches[cell];
+        double water = double.NegativeInfinity;
         if (list == null)
-            return height;
+            return (height, water);
+        bool nearPool = false;
         foreach (int i in list)
         {
-            double radius = _benches[i].RadiusM;
+            double radius = _benches[i].RadiusM, basin = _benches[i].Basin;
             double d = direction.DistanceTo(_benches[i].Direction) * RadiusMeters;
             if (d >= BenchReach * radius)
                 continue;
             // Terrasse horizontale, cuvette au centre (bord en pente douce sur 15 % du rayon)
-            double terrace = _benchLevel[i] - BenchBasinDepthM * (1 - SmoothStep(0.85, 1.0, d / radius));
+            double terrace = _benchLevel[i] - BenchBasinDepthM * (1 - SmoothStep(0.85, 1.0, d / basin));
             height = terrace + (height - terrace) * SmoothStep(BenchFlat, BenchReach, d / radius);
+            if (_benches[i].Water)
+            {
+                if (d < 0.97 * basin)
+                    water = Math.Max(water, _benchLevel[i] - BenchWaterFreeboardM);
+                else if (d < 1.6 * basin)
+                    nearPool = true;
+            }
         }
-        return height;
+        if (double.IsNegativeInfinity(water) && nearPool)
+            water = height - 1.0;
+        return (height, water);
     }
 
     // --- Volcans et cratères (étape 13) -----------------------------------------------------
@@ -690,7 +715,10 @@ public sealed class TerrainHeightField
     {
         TerrainSample sample = SampleNatural(direction, minWavelength, ref hint);
         if (_benches.Length > 0)
-            sample = sample with { Height = ApplyBenches(direction, hint, sample.Height) };
+        {
+            var (benchHeight, pool) = ApplyBenches(direction, hint, sample.Height);
+            sample = sample with { Height = benchHeight, WaterLevel = Math.Max(sample.WaterLevel, pool) };
+        }
         var edits = Edits;
         if (edits == null || edits.Count == 0)
             return sample;
@@ -709,7 +737,7 @@ public sealed class TerrainHeightField
     public double BaseTerrainHeight(Double3 direction, double minWavelength, ref int hint)
     {
         TerrainSample sample = SampleNatural(direction, minWavelength, ref hint);
-        return _benches.Length > 0 ? ApplyBenches(direction, hint, sample.Height) : sample.Height;
+        return _benches.Length > 0 ? ApplyBenches(direction, hint, sample.Height).height : sample.Height;
     }
 
     /// <summary>Relief détaillé sans les replats des bassins.</summary>

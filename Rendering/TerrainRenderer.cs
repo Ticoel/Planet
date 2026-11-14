@@ -896,6 +896,11 @@ uniform vec4 habitat_kinds[16];
 // Croûte modulaire (étape 16a) : jour du climat (le sol remanié reverdit en quelques dizaines
 // d'années ; le jour de l'événement est stocké dans le maillage)
 uniform float crust_day = 0.0;
+// Pluie sur le sol autour de la caméra (SurfacePonding) : eau en surface (mm), sol mouillé
+// (0 à 1), averse en cours (0 à 1, pour les ronds de pluie dans les flaques)
+uniform float puddle_mm = 0.0;
+uniform float ground_wet = 0.0;
+uniform float rain_now = 0.0;
 uniform float crust_regrow_days = 9000.0;
 
 float sea_surface(vec3 up) {
@@ -1343,6 +1348,30 @@ void fragment() {
             vec3 ash = vec3(0.20, 0.19, 0.18) * (1.0 + 0.12 * n8.x + 0.08 * n32.x);
             color = mix(color, crustKind < 0.0 ? soil : crustKind > 2.5 ? ash : crustKind > 1.2 ? basalt : rubble, crustFresh);
         }
+        // Pluie : le sol mouillé fonce et luit ; quand il pleut plus vite que le sol ne boit, l'eau
+        // stagne en flaques sur le plat et dans les creux du micro-relief, avant de s'infiltrer.
+        // (autour de la caméra seulement : c'est là que le climat du moment est connu)
+        if ((ground_wet > 0.01 || puddle_mm > 0.05) && coloring != 1 && coloring != 3) {
+            float near = 1.0 - smoothstep(3000.0, 10000.0, length(v_world));   // (v_world : relatif à la caméra)
+            float wet = ground_wet * near * (1.0 - 0.5 * rockiness);
+            color *= mix(1.0, 0.6, wet);
+            roughness = mix(roughness, 0.4, wet);
+            specular = mix(specular, 0.45, wet);
+            float level = sqrt(clamp(puddle_mm / 30.0, 0.0, 1.0));
+            float threshold = mix(0.75, -0.55, level);
+            float hollow = -(n32.x * 0.6 + n8.x * 0.3 + n2.x * 0.1);
+            float puddle = near * step(0.05, puddle_mm) * (1.0 - smoothstep(0.03, 0.11, slope0))
+                           * smoothstep(threshold, threshold + 0.06, hollow) * detail_weight(8.0, footprint);
+            if (puddle > 0.0) {
+                // Ronds de pluie : de petites ondes qui s'élargissent et s'effacent
+                vec4 drops = texture_noise(p + vec3(0.0, TIME * 1.5, 0.0), 0.5) * detail_weight(0.5, footprint);
+                vec3 ripples = drops.yzw * rain_now;
+                color = mix(color, color * 0.25 + vec3(0.03, 0.035, 0.04), puddle);
+                roughness = mix(roughness, 0.03, puddle);
+                specular = mix(specular, 0.9, puddle);
+                normal = normalize(mix(normal, normalize(up - (ripples - up * dot(ripples, up)) * 0.25), puddle));
+            }
+        }
         float snow = snow_on_slope(snowBase, slope);
         // La neige s'accroche d'abord dans les creux du micro-relief
         snow = clamp(snow + (snow * (1.0 - snow)) * 1.5 * n32.x, 0.0, 1.0);
@@ -1403,8 +1432,9 @@ void fragment() {
             color = mix(color, ash, volcanic * 0.8 * (1.0 - snowEstimate));
         }
     }
-    // Milieux hydrothermaux : bassins, dépôts minéraux et tapis microbiens
-    if (habitat_count > 0 && depth <= 0.0 && coloring != 1 && coloring != 3) {
+    // Milieux hydrothermaux : bassins, dépôts minéraux et tapis microbiens (le fond des bassins,
+    // sous leur eau peu profonde, garde ses couleurs : turquoise, tapis orange et jaunes)
+    if (habitat_count > 0 && depth <= 1.0 && coloring != 1 && coloring != 3) {
         for (int k = 0; k < habitat_count; k++) {
             vec3 r = v_world - habitat_sites[k].xyz;
             r -= up * dot(r, up);
@@ -1579,8 +1609,11 @@ void fragment() {
     ALBEDO = color;
     ROUGHNESS = mix(0.08, 0.7, foam);
     SPECULAR = 0.6;
-    // Plus opaque qu'avant : les fonds sableux ne transparaissent que sur les premiers mètres
-    ALPHA = max(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), foam);
+    // Plus opaque qu'avant : les fonds sableux ne transparaissent que sur les premiers mètres ;
+    // les eaux de moins d'un mètre (bassins des sources, bords des lacs et des fleuves) restent
+    // claires : on voit leur fond
+    float clear = 1.0 - smoothstep(0.1, 1.5, v_depth);
+    ALPHA = max(mix(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), 0.28, clear), foam);
 }
 ";
 }

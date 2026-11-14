@@ -115,8 +115,14 @@ public static class SlopeStability
     /// baisse avec le gel, la pluie et les séismes, et une part de hasard (la roche est fracturée
     /// ici et pas là) ; elles ne cèdent que sur un tirage (<paramref name="rockfallChance"/>).
     /// </summary>
+    /// <param name="heterogeneity">
+    /// Variété des sols (0 : sol type partout ; 1 : cohésion de 2,5 à 7,5 kPa et épaisseur de 1 à
+    /// 2,2 m selon l'endroit). Les sols réels varient d'un versant à l'autre : un sol mince et
+    /// peu cohérent cède à la première forte pluie, au hasard des circonstances.
+    /// </param>
     public static Candidate? FindWeakest(Func<Double3, double> height, Double3 center, double radiusM, int samples,
-                                        SlopeConditions conditions, Random random, double rockfallChance, double minHeight = 0.5)
+                                        SlopeConditions conditions, Random random, double rockfallChance, double minHeight = 0.5,
+                                        double heterogeneity = 0)
     {
         center = center.Normalized();
         var (ax, ay) = LavaFlow.TangentFrame(center);
@@ -142,7 +148,10 @@ public static class SlopeStability
             }
             else
             {
-                fs = FactorOfSafety(slope, conditions);
+                double u = random.NextDouble(), v = random.NextDouble();
+                double cohesion = SoilCohesionKpa * (1 + heterogeneity * (u - 0.5));
+                double depth = SoilDepthM * (1 + heterogeneity * 0.8 * (v - 0.4));
+                fs = FactorOfSafety(slope, conditions, depth, cohesion);
                 kind = conditions.SeismicK > 0.2 && slope > 32 * Math.PI / 180 ? SlideKind.RockAvalanche : SlideKind.Landslide;
             }
             if (best == null || fs < best.Value.FactorOfSafety)

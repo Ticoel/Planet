@@ -98,17 +98,40 @@ public static class HabitatTests
             var east = Planet.Simulation.Terrain.Double3.UnitY.Cross(center).Normalized();
             var north = center.Cross(east);
             double before = 0;
+            // (cuvette d'un geyser : une petite vasque autour de la bouche ; d'une source : tout le replat)
+            double basin = h.Kind == HabitatKind.Geyser ? 1.3 * h.RadiusM : h.BenchRadiusM;
             for (int k = 0; k < 8; k++)
             {
                 var side = east * Math.Cos(k * Math.PI / 4) + north * Math.Sin(k * Math.PI / 4);
                 Planet.Simulation.Terrain.Double3 At(double radii) =>
                     (center + side * (radii * h.BenchRadiusM / Planet.Simulation.Terrain.TerrainHeightField.RadiusMeters)).Normalized();
-                Assert.Near(field.Height(At(0.6), 1, ref hint), floor, 0.01, "le fond du bassin est horizontal");
+                Planet.Simulation.Terrain.Double3 InBasin(double radii) =>
+                    (center + side * (radii * basin / Planet.Simulation.Terrain.TerrainHeightField.RadiusMeters)).Normalized();
+                Assert.Near(field.Height(InBasin(0.6), 1, ref hint), floor, 0.01, "le fond du bassin est horizontal");
+                // Le bassin est plein de vraie eau, à quelques centimètres sous le bord
+                var pool = field.Sample(InBasin(0.6), 1, ref hint);
+                Assert.Near(pool.WaterLevel, floor + Planet.Simulation.Terrain.TerrainHeightField.BenchBasinDepthM
+                                             - Planet.Simulation.Terrain.TerrainHeightField.BenchWaterFreeboardM, 0.01, "eau du bassin");
+                var rim = field.Sample(At(1.6), 1, ref hint);
+                Assert.True(rim.WaterLevel <= rim.Height, "pas d'eau sur la terrasse autour du bassin");
                 Assert.Near(field.Height(At(1.6), 1, ref hint), floor + Planet.Simulation.Terrain.TerrainHeightField.BenchBasinDepthM, 0.01, "la terrasse est horizontale");
                 Assert.Near(field.Height(At(4.0), 1, ref hint), natural.Height(At(4.0), 1, ref hint), 1e-6, "au-delà du replat, le relief est intact");
                 before = Math.Max(before, Math.Abs(natural.Height(At(0.6), 1, ref hint) - natural.Height(center, 1, ref hint)));
             }
             steepest = Math.Max(steepest, before);
+        }
+        // Mares de boue : de la boue, pas d'eau libre
+        // (sauf une mare tombée dans le bassin d'une source voisine)
+        var pools = habitats.All.Where(p => p.Kind is HabitatKind.HotSpring or HabitatKind.Geyser && p.BenchRadiusM > 0).ToList();
+        foreach (var h in habitats.All.Where(h => h.Kind == HabitatKind.MudPot
+                     && pools.All(p => p.Position.AngleTo(h.Position) * Planet.Simulation.Terrain.TerrainHeightField.RadiusMeters > 2 * p.BenchRadiusM)).Take(10))
+        {
+            int hint = -1;
+            var center = Planet.Simulation.Terrain.Double3.From(h.Position).Normalized();
+            if (double.IsNaN(field.BenchFloor(center, ref hint)))
+                continue;   // (au ras de la mer sur le relief détaillé : pas de replat)
+            var mud = field.Sample(center, 1, ref hint);
+            Assert.True(mud.WaterLevel <= mud.Height, $"une mare de boue n'est pas un bassin d'eau ({mud.WaterLevel:0.00} m d'eau, sol à {mud.Height:0.00} m)");
         }
         Console.WriteLine($"     {checkedPools} bassins vérifiés ; avant, le terrain y variait jusqu'à {steepest:0.0} m d'un bord à l'autre");
         Assert.True(checkedPools > 20, "trop peu de bassins vérifiés");

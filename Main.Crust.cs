@@ -23,7 +23,8 @@ namespace Planet;
 /// glissement, éboulement ou avalanche rocheuse (<see cref="Landslide"/>, simulé en tâche de
 /// fond). Chaque événement inscrit son calque dans la croûte (<see cref="CrustEdits"/>) : les
 /// morceaux de terrain touchés sont recalculés pendant que la masse descend, et la cicatrice
-/// reste. Touche B : provoquer un mouvement de terrain sur la pente la plus raide en vue.</item>
+/// reste. Rien n'est provoqué : la planète vit d'elle-même, au gré de la pluie, du gel, des
+/// séismes et du hasard (les sols ne sont pas partout les mêmes).</item>
 /// <item><b>Lave figée</b> : le basalte des coulées simulées s'ajoute aussi à la croûte.</item>
 /// </list>
 /// </summary>
@@ -68,7 +69,6 @@ public partial class Main
 
     private readonly List<ActiveSlide> _slides = new();
     private Task<Landslide> _slideBuild;
-    private bool _slideBuildForced;
     private double _crustScanTimer;
     private double _shakingIntensity;    // intensité ressentie récente (Mercalli), décroît
     private readonly Random _crustRandom = new(17);
@@ -108,7 +108,7 @@ public partial class Main
         _geologyLocked = true;
         SetClock(ClockMode.Climate);
         if (first)
-            ShowNotice($"Géologie figée à {AgeLabel(_tectonics.TimeMyr)} : la croûte est modulaire (B : provoquer un mouvement de terrain)");
+            ShowNotice($"Géologie figée à {AgeLabel(_tectonics.TimeMyr)} : la croûte est modulaire (glissements, éboulements, dépôts des éruptions)");
         return true;
     }
 
@@ -214,61 +214,6 @@ public partial class Main
                 _crustScanTimer = 0;   // examen tout de suite : les pentes cèdent pendant la secousse
             }
         }
-    }
-
-    /// <summary>
-    /// Touche B : un mouvement de terrain sur la pente la plus raide autour du point visé
-    /// (centre de l'écran), comme si un séisme la secouait.
-    /// </summary>
-    private void TriggerLandslide()
-    {
-        if (_clock != ClockMode.Climate || _terrain.Field == null)
-        {
-            ShowNotice("Les mouvements de terrain demandent l'horloge climatique (géologie figée : touche C)");
-            return;
-        }
-        if (_terrain.Explorer.AltitudeAboveGround > CrustMaxCameraAltitude)
-        {
-            ShowNotice("Approchez-vous du sol pour voir un mouvement de terrain (moins de 12 km de haut)");
-            return;
-        }
-        if (_slideBuild != null || _slides.Count >= MaxActiveSlides)
-        {
-            ShowNotice("Un mouvement de terrain se prépare déjà");
-            return;
-        }
-        Double3 target = ViewTarget();
-        var field = _terrain.Field;
-        var height = ThreadSafeHeight(field, 2.0);
-        int seed = _slideSeed++;
-        float day = (float)_climate.TimeDays;
-        double scale = SlideScale(true);
-        _slideBuildForced = true;
-        _slideBuild = Task.Run(() =>
-        {
-            // La pente la plus raide autour du point visé
-            var random = new Random(seed);
-            var (ax, ay) = LavaFlow.TangentFrame(target);
-            Double3 best = target;
-            double bestSlope = -1;
-            for (int s = 0; s < 120; s++)
-            {
-                double rho = 600 * Math.Sqrt(random.NextDouble()), phi = random.NextDouble() * 2 * Math.PI;
-                Double3 d = (target + ax * (rho * Math.Cos(phi) / TerrainHeightField.RadiusMeters)
-                                    + ay * (rho * Math.Sin(phi) / TerrainHeightField.RadiusMeters)).Normalized();
-                var (slope, _, h) = SlopeStability.LocalSlope(height, d, 6);
-                if (h > 0.5 && slope > bestSlope)
-                {
-                    bestSlope = slope;
-                    best = d;
-                }
-            }
-            if (bestSlope < 15 * Math.PI / 180)
-                return null;
-            SlideKind kind = bestSlope >= SlopeStability.CliffSlope ? SlideKind.Rockfall
-                : scale > 1.8 && bestSlope > 30 * Math.PI / 180 ? SlideKind.RockAvalanche : SlideKind.Landslide;
-            return new Landslide(height, best, kind, kind == SlideKind.Rockfall ? scale * 1.5 : scale, seed, day);
-        });
     }
 
     /// <summary>Point du sol au centre de l'écran (ou sous la caméra si l'on regarde le ciel).</summary>
@@ -408,10 +353,9 @@ public partial class Main
             Saturation = Math.Min(1, conditions.Saturation * (0.6 + 0.4 * instability)),
             SeismicK = conditions.SeismicK * Math.Min(2, instability),
         };
-        // Zone examinée : vers où regarde la caméra
-        var explorer = _terrain.Explorer;
-        double ahead = Math.Min(1500, 300 + explorer.AltitudeAboveGround);
-        Double3 center = (explorer.Position.Normalized() + explorer.Forward() * (ahead / TerrainHeightField.RadiusMeters)).Normalized();
+        // Zone examinée : le point du sol que regarde la caméra (le centre de l'écran), pour que
+        // les mouvements naturels aient lieu sous les yeux de qui contemple la planète
+        Double3 center = ViewTarget();
         var height = ThreadSafeHeight(field, 2.0);
         int seed = _slideSeed++;
         float day = (float)_climate.TimeDays;
@@ -419,12 +363,17 @@ public partial class Main
         double rockfallChance = 0.004 * instability;
         bool strong = conditions.SeismicK > 0.1;
         double scale = SlideScale(strong);
-        _slideBuildForced = false;
         _slideBuild = Task.Run(() =>
         {
             var random = new Random(seed);
-            var candidate = SlopeStability.FindWeakest(height, center, CrustScanRadiusM, 140, conditions, random, rockfallChance);
+            var candidate = SlopeStability.FindWeakest(height, center, CrustScanRadiusM, 140, conditions, random, rockfallChance,
+                                                       heterogeneity: 1.0);
             if (candidate is not { } c)
+                return null;
+            // Une pente fragilisée ne cède pas forcément tout de suite : d'autant plus vite qu'elle
+            // est loin de l'équilibre (quelques glissements par minute sous une pluie modérée,
+            // bien plus pendant un orage ou un séisme). Les éboulements ont déjà leur propre tirage
+            if (c.Kind != SlideKind.Rockfall && random.NextDouble() > Math.Min(1.0, 3.0 * (1.0 - c.FactorOfSafety)) * 0.5)
                 return null;
             return new Landslide(height, c.Direction, c.Kind, c.Kind == SlideKind.Rockfall ? scale * 1.3 : scale, seed, day);
         });
@@ -444,8 +393,6 @@ public partial class Main
         var slide = build.Result;
         if (slide == null)
         {
-            if (_slideBuildForced)
-                ShowNotice("Pas de pente assez raide par ici pour un mouvement de terrain");
             return;
         }
         // Le relief a pu être remplacé entre-temps (nouvelle planète) : on jette
@@ -466,7 +413,7 @@ public partial class Main
             _ => "Glissement de terrain",
         };
         _lastSlide = $"{what} de {VolumeLabel(slide.ReleasedVolume)} à {Distance(km * 1000)}" +
-                     (_slideBuildForced ? " (provoqué)" : cause.Length > 0 ? $" ({cause})" : "");
+                     (cause.Length > 0 ? $" ({cause})" : "");
         ShowNotice(_lastSlide);
     }
 
@@ -618,7 +565,7 @@ public partial class Main
         {
             Id = "crust.instability", Group = "Croûte", Label = "Instabilité des pentes", Unit = "×", Min = 0, Max = 5, Step = 0.1, Reference = 1, Format = "0.0",
             Help = "Fréquence des glissements de terrain et des éboulements autour de la caméra (0 : rien ne bouge). " +
-                   "Agit dans l'horloge climatique, géologie figée. Touche B : provoquer un mouvement de terrain.",
+                   "Agit dans l'horloge climatique, géologie figée.",
             Get = () => SlopeInstability, Set = v => SlopeInstability = v,
         });
         registry.Add(new ProbeField

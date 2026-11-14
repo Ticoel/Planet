@@ -277,8 +277,20 @@ public sealed class VolcanicHabitats
     }
 
     /// <summary>Replats à creuser dans le relief détaillé : un par milieu émergé.</summary>
+    /// <summary>
+    /// Replats des milieux émergés. Les sources chaudes remplissent leur cuvette, les geysers une
+    /// petite vasque autour de leur bouche : de la vraie eau, comme la mer, les lacs et les
+    /// fleuves. Les mares de boue et les fumerolles n'ont pas d'eau libre.
+    /// </summary>
     public Terrain.TerrainBench[] Benches() => _all.Where(h => h.BenchRadiusM > 0)
-        .Select(h => new Terrain.TerrainBench(Terrain.Double3.From(h.Position).Normalized(), h.BenchRadiusM)).ToArray();
+        .Select(h => new Terrain.TerrainBench(Terrain.Double3.From(h.Position).Normalized(), h.BenchRadiusM,
+            h.Kind switch
+            {
+                HabitatKind.Geyser => 1.3 * h.RadiusM,
+                HabitatKind.MudPot => 1.3 * h.RadiusM,
+                _ => 0,
+            },
+            h.Kind is HabitatKind.HotSpring or HabitatKind.Geyser)).ToArray();
 
     /// <summary>Fiche des milieux d'une cellule (pour la sonde), ou null s'il n'y en a pas.</summary>
     public string Describe(int cell)
