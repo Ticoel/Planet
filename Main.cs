@@ -901,7 +901,7 @@ public partial class Main : Node3D
         _terrainTask = null;
         var stopwatch = Stopwatch.StartNew();
         var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff(), _tectonics.SnapshotLandforms(),
-                                           HabitatBenches()) { Edits = _crust };
+                                           HabitatBenches(), _glacial.SeaLevelM) { Edits = _crust };
         _terrain.SetField(field, progressive);
         _terrainSource = _tectonics;
         _terrainTimeMyr = _tectonics.TimeMyr;
@@ -936,7 +936,8 @@ public partial class Main : Node3D
         var landforms = _tectonics.SnapshotLandforms();
         var benches = HabitatBenches();
         var crust = _crust;
-        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms, benches) { Edits = crust });
+        double seaLevel = _glacial.SeaLevelM;
+        _terrainTask = Task.Run(() => new TerrainHeightField(grid, elevation, seed, runoff, landforms, benches, seaLevel) { Edits = crust });
     }
 
     /// <summary>

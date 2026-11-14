@@ -681,8 +681,10 @@ public partial class TerrainRenderer : Node3D
         var normals = new Vector3[count];
         var water = new Vector2[count];
         var debris = new Vector2[count];
+        var wetland = new Color[count];
         for (int v = 0; v < count; v++)
         {
+            wetland[v] = new Color(chunk.Wetland[v], 0f, 0f, 1f);
             debris[v] = new Vector2(chunk.Debris[v * 2], chunk.Debris[v * 2 + 1]);
             vertices[v] = new Vector3(chunk.Positions[v * 3], chunk.Positions[v * 3 + 1], chunk.Positions[v * 3 + 2]);
             normals[v] = new Vector3(chunk.Normals[v * 3], chunk.Normals[v * 3 + 1], chunk.Normals[v * 3 + 2]);
@@ -696,6 +698,7 @@ public partial class TerrainRenderer : Node3D
         arrays[(int)Mesh.ArrayType.Custom1] = chunk.Custom1;
         arrays[(int)Mesh.ArrayType.TexUV] = water;
         arrays[(int)Mesh.ArrayType.TexUV2] = debris;
+        arrays[(int)Mesh.ArrayType.Color] = wetland;
         arrays[(int)Mesh.ArrayType.Index] = TerrainChunkBuilder.Indices;
         long format = ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom0Shift)
                       | ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom1Shift);
@@ -1211,6 +1214,8 @@ render_mode cull_back;
 " + CommonShaderCode + @"
 // Sol remanié par la croûte modulaire : x (−1 arraché, +1 éboulis), y : jour de l'événement
 varying vec2 v_debris;
+// Deltas et vasières : part de plaine de boue (couleur des sommets, r)
+varying float v_wetland;
 
 vec3 crack_hash(vec3 c) {
     c = vec3(dot(c, vec3(127.1, 311.7, 74.7)), dot(c, vec3(269.5, 183.3, 246.1)), dot(c, vec3(113.5, 271.9, 124.6)));
@@ -1240,6 +1245,7 @@ void vertex() {
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
     v_water = UV;
     v_debris = UV2;
+    v_wetland = COLOR.r;
     NORMAL = n;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -1327,8 +1333,10 @@ void fragment() {
     } else if (coloring == 3) {
         color = elevation_color(h);
     } else if (depth > 0.0) {
-        // Fonds : sable près des côtes, vase sombre au large (l'eau est dessinée par-dessus)
+        // Fonds : sable près des côtes, vase sombre au large (l'eau est dessinée par-dessus) ;
+        // vase aussi au fond des chenaux et des mares des deltas
         color = mix(sand, vec3(0.30, 0.30, 0.26), smoothstep(5.0, 200.0, depth));
+        color = mix(color, vec3(0.20, 0.18, 0.14), v_wetland);
         color = mix(color, rock, smoothstep(0.25, 0.5, slope));
         color *= 1.0 + 0.08 * n128.x + 0.06 * n8.x;
     } else {
@@ -1399,15 +1407,37 @@ void fragment() {
                 normal = normalize(mix(normal, normalize(up - (ripples - up * dot(ripples, up)) * 0.25), puddle));
             }
         }
+        // Deltas et vasières : vase sombre et mouillée au ras de l'eau (luisante, flaques dans les
+        // creux, que la marée remplit et vide), plus claire et sèche un peu plus haut, où elle se
+        // fend ; les roseaux et la végétation des marais viendront avec la vie
+        float above = h - sea_level;
+        float marsh = v_wetland * (1.0 - smoothstep(2.8, 5.0, above)) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0);
+        float marshDry = 0.0;
+        if (marsh > 0.01) {
+            float soaked = 1.0 - smoothstep(0.8, 2.0, above);
+            vec3 mud = mix(vec3(0.17, 0.15, 0.12), vec3(0.30, 0.26, 0.20), smoothstep(-0.4, 0.4, n128.x + 0.4 * n512.x));
+            mud = mix(mud, vec3(0.33, 0.29, 0.23), (1.0 - soaked) * 0.6);   // vase sèche, un peu plus claire
+            mud *= 1.0 + 0.08 * n8.x + 0.05 * n2.x;
+            color = mix(color, mud, marsh);
+            roughness = mix(roughness, mix(0.9, 0.22, soaked), marsh);
+            specular = mix(specular, mix(0.25, 0.55, soaked), marsh);
+            // Flaques laissées dans les creux de la vase
+            float pools = marsh * soaked * smoothstep(0.05, 0.25, -(n32.x * 0.7 + n8.x * 0.3)) * detail_weight(8.0, footprint);
+            color = mix(color, color * 0.3 + vec3(0.02, 0.03, 0.035), pools);
+            roughness = mix(roughness, 0.03, pools);
+            specular = mix(specular, 0.9, pools);
+            normal = normalize(mix(normal, up, pools));
+            marshDry = marsh * smoothstep(1.8, 2.5, above) * 0.8;
+        }
         // Fentes de dessiccation : boue séchée là où des flaques ont stagné (autour de la caméra),
         // et fonds plats des déserts chauds (playas : la boue des rares pluies sèche et se fend)
         float playa = desertSand * (1.0 - smoothstep(0.01, 0.04, slope0)) * smoothstep(0.15, 0.35, -n512.x);
         float mudFlat = mud_cracks * (1.0 - smoothstep(3000.0, 10000.0, length(v_world))) * (1.0 - smoothstep(0.03, 0.11, slope0))
                         * smoothstep(-0.2, 0.3, -(n32.x * 0.6 + n8.x * 0.4));
-        float crackAmount = max(playa, mudFlat) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0);
+        float crackAmount = max(max(playa, mudFlat), marshDry) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0);
         if (crackAmount > 0.01 && footprint < 2.0) {
             // Polygones de ~20 cm dans la boue, de ~1,5 m sur les playas
-            float scale = mix(0.22, 1.5, step(mudFlat, playa));
+            float scale = playa > max(mudFlat, marshDry) ? 1.5 : marshDry > mudFlat ? 0.5 : 0.22;   // (boue des flaques ~20 cm, vase des deltas ~50 cm, playas ~1,5 m)
             float e = crack_edge(p / scale);
             float fissure = (1.0 - smoothstep(0.02, 0.07 + 0.05 * crackAmount, e)) * crackAmount * detail_weight(scale, footprint);
             vec3 dried = mix(vec3(0.62, 0.55, 0.45), color * 1.15, 0.4);   // croûte claire, desséchée

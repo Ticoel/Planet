@@ -691,6 +691,42 @@ public static class TerrainTests
     }
 
     [Test]
+    public static void BigRiversBuildMuddyDeltas()
+    {
+        var field = WetField.Value;
+        var grid = field.Grid;
+        var hydrology = field.Hydrology;
+        Assert.True(field.DeltaCount > 0, "les grands fleuves bâtissent des deltas");
+        // Delta du plus grand fleuve
+        var delta = field.Deltas.OrderByDescending(d => d.discharge).First();
+        Double3 center = delta.apex;
+        double step = delta.radiusM * 1.4 / 80;
+        var (ax, ay) = LavaFlow.TangentFrame(center);
+        int hint = -1, wet = 0, below = 0, plain = 0, total = 0;
+        for (int i = -40; i <= 40; i++)
+            for (int j = -40; j <= 40; j++)
+            {
+                Double3 d = (center + ax * (i * step / TerrainHeightField.RadiusMeters) + ay * (j * step / TerrainHeightField.RadiusMeters)).Normalized();
+                var sample = field.Sample(d, 5, ref hint);
+                // (pleinement en vasière : la pente du front du delta, vers le large, est à part)
+                if (sample.Wetland < 0.95f)
+                    continue;
+                total++;
+                wet++;
+                if (sample.Height < 0) below++;
+                if (sample.Height is > -4.5 and < 3.2) plain++;
+            }
+        Console.WriteLine($"     delta d'un fleuve de {delta.discharge:N0} m³/s ({delta.radiusM / 1000:0} km) : {wet} points de vasière sur 6 561, " +
+                          $"{100.0 * plain / Math.Max(1, total):0} % au ras de l'eau, {100.0 * below / Math.Max(1, total):0} % sous la mer (chenaux, mares)");
+        Assert.True(wet > 300, "une plaine de vase autour de l'embouchure");
+        Assert.True(plain > 0.9 * total, "la vasière est au ras de l'eau");
+        Assert.True(below > 0.03 * total && below < 0.6 * total, "des chenaux et des mares où entre la mer, mais surtout de la vase");
+        // Loin à l'intérieur des terres : rien de changé
+        int top = Enumerable.Range(0, grid.CellCount).OrderByDescending(c => field.Hydrology.FilledElevation[c]).First();
+        Assert.True(field.Sample(Double3.From(grid.Positions[top]).Normalized(), 5, ref hint).Wetland == 0, "pas de vasière en montagne");
+    }
+
+    [Test]
     public static void SeaAndLakesHaveAWaterLevel()
     {
         var field = WetField.Value;

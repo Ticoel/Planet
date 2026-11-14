@@ -283,6 +283,11 @@ public partial class Main
         Field("Vent", c => Climate() ? $"{French(_climate.Winds.Wind[c].Length())} m/s, {_climate.Winds.Pressure[c]:0} hPa" : null);
         Field("Milieu", c => Climate() && Land(c) ? Biomes.Name(_climate.Biomes[c]) : null);
         Field("Neige", c => Climate() && Land(c) && _climate.Snow[c] > 1f ? $"{_climate.Snow[c]:N0} mm d'eau" : null);
+        Field("Littoral", c =>
+        {
+            double delta = _terrain.Field?.DeltaDischarge(c) ?? 0;
+            return delta > 0 ? $"delta d'un fleuve de {delta:N0} m³/s : plaine de vase, chenaux et mares (marais quand la vie viendra)" : null;
+        });
         Field("Eau douce", c =>
         {
             var hydrology = _climate.Hydrology;

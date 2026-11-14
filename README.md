@@ -159,7 +159,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, éruptions fissurales, interface du jeu, 159 tests).
+Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, éruptions fissurales, deltas et vasières, interface du jeu, 160 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -216,6 +216,17 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   rien gelé ; il pleut par averses, ~4 fois l'intensité moyenne), l'eau stagne en flaques sur le
   plat et dans les creux, avec des ronds de pluie, puis s'infiltre et s'évapore en quelques heures
   après l'averse.
+- **Deltas et vasières** : à l'embouchure de chaque fleuve de plus de 300 m³/s, un delta dont la
+  taille suit le débit (~1 km² par m³/s : le Rhône, 1 700 m³/s, ~1 700 km² ; jusqu'à 60 km de
+  rayon), et des vasières sur une partie des côtes basses et plates. Le fleuve y bâtit une plaine
+  de vase juste au-dessus des pleines mers ordinaires, qui avance sur la mer et nivelle les terres
+  basses, sans falaise ; elle est découpée de grands chenaux toujours en eau, de petits chenaux de
+  marée ramifiés qui se vident à marée basse, et de mares : la mer y entre, c'est de la vraie
+  eau, avec la marée. La vase est sombre et luisante au ras de l'eau, avec des flaques dans ses
+  creux, plus claire et sèche un peu plus haut, où elle se fend en polygones. Les deltas et
+  vasières suivent le niveau de la mer du moment (plus bas pendant une glaciation). Sans vie, ce
+  sont des vasières nues ; les roseaux et la végétation des marais viendront avec la vie. Sonde :
+  ligne « Littoral ».
 - **Sol qui craquelle** (fentes de dessiccation) : là où l'eau a stagné, elle laisse une boue
   fine ; en séchant au chaud, l'argile se rétracte et se fend en polygones d'une vingtaine de cm,
   en un jour ou deux ; la pluie suivante les referme. Les fonds plats des déserts chauds (playas)
@@ -483,6 +494,11 @@ de ces mêmes ouvrages.
   biomes et seuil d'aridité.
 
 ## Eau douce
+- Syvitski J. P. M., Saito Y. (2007). *Morphodynamics of deltas under the influence of humans.*
+  Global and Planetary Change 57, 261-282. — surface des deltas selon le débit et les sédiments.
+- Allen J. R. L. (2000). *Morphodynamics of Holocene salt marshes: a review sketch from the
+  Atlantic and Southern North Sea coasts of Europe.* Quaternary Science Reviews 19, 1155-1231. —
+  vasières et marais littoraux : altitude par rapport aux marées, chenaux de marée, mares.
 - Barnes R., Lehman C., Mulla D. (2014). *Priority-flood: an optimal depression-filling and
   watershed-labeling algorithm for digital elevation models.* Computers & Geosciences 62,
   117-127. — remplissage des cuvettes, lacs.

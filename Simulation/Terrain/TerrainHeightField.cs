@@ -24,7 +24,8 @@ public readonly record struct TerrainBench(Double3 Direction, double RadiusM, do
 /// <param name="Debris">Sol remanié par la croûte modulaire (étape 16a) : −1 arraché (sol frais),
 /// +1 éboulis ; 0 : sol naturel.</param>
 /// <param name="DebrisDay">Jour (horloge climatique) où le sol a été remanié.</param>
-public readonly record struct TerrainSample(double Height, double WaterLevel, double River, float Debris = 0, float DebrisDay = 0)
+/// <param name="Wetland">Delta ou vasière côtière (0 à 1) : plaine de boue au ras de l'eau.</param>
+public readonly record struct TerrainSample(double Height, double WaterLevel, double River, float Debris = 0, float DebrisDay = 0, float Wetland = 0)
 {
     /// <summary>Altitude de la surface visible (le sol, ou l'eau qui le recouvre).</summary>
     public double Surface => Math.Max(Height, WaterLevel);
@@ -196,9 +197,12 @@ public sealed class TerrainHeightField
     /// <param name="runoffMm">Ruissellement annuel de chaque cellule (mm/an), pour les vallées
     /// et les lacs ; null : ni vallées ni lacs.</param>
     /// <param name="landforms">Volcans et cratères (étape 13), copies figées ; null : aucun.</param>
+    /// <param name="seaLevelM">Niveau moyen de la mer du moment (m ; plus bas pendant une
+    /// glaciation) : les deltas et les vasières se calent sur lui.</param>
     public TerrainHeightField(PlanetGrid grid, float[] elevationKm, int seed, float[] runoffMm = null, Landform[] landforms = null,
-                              TerrainBench[] benches = null)
+                              TerrainBench[] benches = null, double seaLevelM = 0)
     {
+        SeaLevelM = seaLevelM;
         Grid = grid;
         Seed = seed;
         int count = grid.CellCount;
@@ -242,6 +246,7 @@ public sealed class TerrainHeightField
             }
         }
         _riverCurve = BuildRiverCurves(count);
+        BuildDeltas(elevationKm);
         BuildLandformIndex(landforms);
         BuildBenches(benches);
     }
@@ -762,7 +767,12 @@ public sealed class TerrainHeightField
         // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
         height = Math.Max(height - valley.depth, Math.Min(height, 1.0));
-        height = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
+        // Deltas et vasières : plaine de vase au ras de la mer, sans falaise
+        var wetShare = WetlandShare(direction, position, near[0], baseHeight, baseSlope);
+        var (wetHeight, wetland) = ApplyWetland(position, height, wetShare, minWavelength);
+        double cliffHeight = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
+        double noCliff = Math.Min(1, 2 * Math.Max(wetShare.delta, wetShare.coastal));
+        height = wetHeight + (cliffHeight - height) * (1 - noCliff);
         height += LandformHeight(direction, near[0], minWavelength);
 
         // Lacs : au cœur de leur zone, l'eau est au niveau du lac ; vers le bord de la zone, ce
@@ -788,7 +798,7 @@ public sealed class TerrainHeightField
             double riverWater = height - 3.0 + (3.0 * bed + 2.6) * SmoothStep(0.0, 0.1, bed);
             water = Math.Max(water, riverWater);
         }
-        return new TerrainSample(height, water, river);
+        return new TerrainSample(height, water, river, Wetland: (float)wetland);
     }
 
     /// <summary>
@@ -996,6 +1006,159 @@ public sealed class TerrainHeightField
             }
         }
         return ((bestDepth, bestFloor), bestRiver, bestBed);
+    }
+
+    // --- Deltas et vasières (étape 16) ------------------------------------------------------------
+
+    /// <summary>Niveau moyen de la mer pour lequel les deltas et vasières sont bâtis (m).</summary>
+    public double SeaLevelM { get; }
+
+    /// <summary>Débit minimal (m³/s) d'un fleuve pour bâtir un delta à son embouchure.</summary>
+    public const double DeltaMinDischarge = 300;
+    private readonly record struct Delta(Double3 Direction, double RadiusM, double Discharge);
+    private Delta[] _deltas = Array.Empty<Delta>();
+    private int[][] _cellDeltas;
+
+    /// <summary>
+    /// Deltas : à l'embouchure de chaque fleuve assez puissant, le fleuve dépose ses sédiments en
+    /// une plaine basse qui avance sur la mer. Surface d'après le débit, au premier ordre (le
+    /// Rhône, 1 700 m³/s, ~1 700 km² ; le Mississippi, 18 000 m³/s, ~30 000 km² ; Syvitski et
+    /// Saito 2007) : ~1 km² par m³/s, en demi-disque, soit un rayon √(2Q/π) km, de 4 à 60 km.
+    /// </summary>
+    private void BuildDeltas(float[] elevationKm)
+    {
+        int count = Grid.CellCount;
+        _cellDeltas = new int[count][];
+        if (Hydrology == null)
+            return;
+        var deltas = new System.Collections.Generic.List<Delta>();
+        for (int c = 0; c < count; c++)
+        {
+            if (elevationKm[c] <= 0 || _lake[c] || _discharge[c] < DeltaMinDischarge)
+                continue;
+            int down = _downstream[c];
+            // Embouchure : la cellule aval est en mer (ou il n'y en a pas, la mer est à côté)
+            int sea = down >= 0 && elevationKm[down] <= 0 ? down : -1;
+            if (down < 0 || sea >= 0)
+            {
+                if (sea < 0)
+                    foreach (int n in Grid.Neighbors[c])
+                        if (elevationKm[n] <= 0 && (sea < 0 || elevationKm[n] > elevationKm[sea]))
+                            sea = n;
+                if (sea < 0)
+                    continue;
+                // Apex sur la côte : là où le relief passe sous la mer, entre l'embouchure et la mer
+                double lo = 0, hi = 1;
+                int hint = c;
+                for (int it = 0; it < 24; it++)
+                {
+                    double mid = 0.5 * (lo + hi);
+                    if (BaseHeight((_positions[c] * (1 - mid) + _positions[sea] * mid).Normalized(), ref hint) > SeaLevelM) lo = mid; else hi = mid;
+                }
+                Double3 apex = (_positions[c] * (1 - lo) + _positions[sea] * lo).Normalized();
+                double radius = Math.Clamp(Math.Sqrt(2 * _discharge[c] / Math.PI), 4, 60) * 1000;
+                deltas.Add(new Delta(apex, radius, _discharge[c]));
+            }
+        }
+        _deltas = deltas.ToArray();
+        var lists = new System.Collections.Generic.List<int>[count];
+        double spacing = Grid.MeanEdgeAngle * RadiusMeters;
+        for (int k = 0; k < _deltas.Length; k++)
+            for (int c = 0; c < count; c++)
+                if (_positions[c].DistanceTo(_deltas[k].Direction) * RadiusMeters < _deltas[k].RadiusM + 1.6 * spacing)
+                    (lists[c] ??= new()).Add(k);
+        for (int c = 0; c < count; c++)
+            _cellDeltas[c] = lists[c]?.ToArray();
+    }
+
+    /// <summary>Nombre de deltas de ce relief.</summary>
+    public int DeltaCount => _deltas.Length;
+
+    /// <summary>Deltas : sommet sur la côte (direction), rayon (m), débit du fleuve (m³/s).</summary>
+    public System.Collections.Generic.IEnumerable<(Double3 apex, double radiusM, double discharge)> Deltas
+    {
+        get
+        {
+            foreach (var d in _deltas)
+                yield return (d.Direction, d.RadiusM, d.Discharge);
+        }
+    }
+
+    /// <summary>Débit (m³/s) du fleuve dont le delta touche la cellule, ou 0.</summary>
+    public double DeltaDischarge(int cell)
+    {
+        double best = 0;
+        if (_cellDeltas?[cell] is { } list)
+            foreach (int k in list)
+                best = Math.Max(best, _deltas[k].Discharge);
+        return best;
+    }
+
+    /// <summary>
+    /// Part du point dans un delta ou une vasière côtière (0 à 1). Vasières : sur ~35 % des
+    /// côtes basses et plates (mers peu profondes, côtes à marée), là où il n'y a ni falaise ni
+    /// relief : la mer y dépose ses vases fines.
+    /// </summary>
+    private (double delta, double coastal) WetlandShare(Double3 direction, Double3 position, int cell, double baseHeight, double baseSlope)
+    {
+        double share = 0, coastal = 0;
+        if (_cellDeltas?[cell] is { } list)
+        {
+            double edge = double.NaN;
+            foreach (int k in list)
+            {
+                double d = direction.DistanceTo(_deltas[k].Direction) * RadiusMeters / _deltas[k].RadiusM;
+                if (d >= 1.25)
+                    continue;
+                // (bord du delta un peu irrégulier ; bruit calculé une seule fois)
+                if (double.IsNaN(edge))
+                    edge = 1 + 0.2 * GradientNoise.Sample(position.X / 9000.0, position.Y / 9000.0, position.Z / 9000.0, Seed + 701);
+                share = Math.Max(share, 1 - SmoothStep(0.55, 1.0, d * edge));
+            }
+        }
+        double b = baseHeight - SeaLevelM;
+        if (b > -25 && b < 40 && baseSlope < 0.003)
+        {
+            double flat = 1 - SmoothStep(0.0008, 0.003, baseSlope);
+            double low = SmoothStep(-25, -5, b) * (1 - SmoothStep(8, 40, b));
+            double where = SmoothStep(0.25, 0.45, GradientNoise.Sample(position.X / 60000.0, position.Y / 60000.0, position.Z / 60000.0, Seed + 702));
+            coastal = flat * low * where;
+        }
+        return (share, coastal);
+    }
+
+    /// <summary>
+    /// Plaine de vase d'un delta ou d'une vasière : le relief s'aplatit au ras de la mer (~1 à
+    /// 2,3 m, juste au-dessus des pleines mers ordinaires), découpé de chenaux ramifiés et de mares qui descendent sous le niveau de la mer
+    /// (la mer y entre : vraie eau, avec la marée) ; la plaine avance sur les hauts-fonds. Rend la
+    /// hauteur et la part de « vasière » du point (pour la couleur de la boue).
+    /// </summary>
+    private (double height, double wetland) ApplyWetland(Double3 position, double height, (double delta, double coastal) share, double minWavelength)
+    {
+        // Un delta bâtit sa propre plaine : il comble la mer devant l'embouchure (jusqu'à ~500 m
+        // de fond : son front avance sur le talus) et nivelle les terres basses (jusqu'à ~200 m) ; une vasière côtière ne touche que le ras de l'eau
+        double above = height - SeaLevelM;
+        double weight = Math.Max(share.delta * (1 - SmoothStep(80, 200, above)) * SmoothStep(-600, -300, above),
+                                 share.coastal * (1 - SmoothStep(10, 60, above)) * SmoothStep(-40, -6, above));
+        if (weight < 0.001)
+            return (height, 0);
+        double Fine(double scale) => 1 - SmoothStep(0.5 * scale, scale, minWavelength);
+        double N(double scale, int salt) => GradientNoise.Sample(position.X / scale, position.Y / scale, position.Z / scale, Seed + salt);
+        // Plaine juste au-dessus des pleines mers ordinaires (~+1,2 m pour un marnage de vives-eaux
+        // de ~2,3 m) : émergée la plupart du temps, ses creux inondés aux grandes marées
+        double plain = 1.6 + 0.5 * N(900, 711) + 0.25 * N(250, 712) * Fine(250);
+        // Chenaux : lignes où un bruit déformé s'annule (réseau qui se ramifie et serpente)
+        double warp = 0.35 * N(5000, 713);
+        double line = Math.Abs(GradientNoise.Sample(position.X / 2200.0 + warp, position.Y / 2200.0, position.Z / 2200.0 - warp, Seed + 714));
+        double channel = (1 - SmoothStep(0.02, 0.07, line)) * Fine(150);
+        // Petits chenaux de marée (quelques mètres à quelques dizaines de mètres, tous les ~300 m)
+        // qui se ramifient dans la vase, et mares nombreuses
+        double creekLine = Math.Abs(GradientNoise.Sample(position.X / 380.0 + 3 * warp, position.Y / 380.0, position.Z / 380.0 - 3 * warp, Seed + 716));
+        double creek = (1 - SmoothStep(0.03, 0.08, creekLine)) * Fine(25) * SmoothStep(-0.3, 0.2, N(1500, 717));
+        double pond = Math.Max(SmoothStep(0.32, 0.42, N(450, 715)) * Fine(200), 0.7 * SmoothStep(0.45, 0.55, N(120, 718)) * Fine(50));
+        // (grands chenaux toujours en eau, petits chenaux vidés à marée basse, mares)
+        double target = SeaLevelM + plain - 4.0 * channel - 2.5 * creek - 2.2 * pond;
+        return (height + (target - height) * weight, weight);
     }
 
     /// <summary>
