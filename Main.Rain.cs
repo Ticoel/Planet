@@ -24,6 +24,7 @@ public partial class Main
             _terrain.SetShaderParameter("puddle_mm", 0f);
             _terrain.SetShaderParameter("ground_wet", 0f);
             _terrain.SetShaderParameter("rain_now", 0f);
+            _terrain.SetShaderParameter("mud_cracks", 0f);
             return;
         }
         LocalWeather weather = frame.Weather.Value;
@@ -35,12 +36,14 @@ public partial class Main
         _ponding.Step(hours, weather.PrecipitationMmPerDay, saturation, weather.TemperatureC);
         _terrain.SetShaderParameter("puddle_mm", (float)_ponding.DepthMm);
         _terrain.SetShaderParameter("ground_wet", (float)_ponding.Wetness);
+        _terrain.SetShaderParameter("mud_cracks", (float)_ponding.Cracks);
         float showers = weather.TemperatureC > 0.5f ? (float)Math.Min(1.0, SurfacePonding.ShowerIntensity(weather.PrecipitationMmPerDay) / 5.0) : 0f;
         _terrain.SetShaderParameter("rain_now", showers);
     }
 
     /// <summary>Ligne des détails : la pluie au sol.</summary>
-    private string RainLine() => _clock != ClockMode.Climate || _ponding.Wetness < 0.01 ? null
+    private string RainLine() => _clock != ClockMode.Climate || (_ponding.Wetness < 0.01 && _ponding.Cracks < 0.05) ? null
         : $"Sol : mouillé à {_ponding.Wetness * 100:0} %, eau en surface {French(_ponding.DepthMm)} mm" +
-          (_ponding.DepthMm > 0.05 ? " (flaques : il pleut plus vite que le sol n'absorbe)" : "");
+          (_ponding.DepthMm > 0.05 ? " (flaques : il pleut plus vite que le sol n'absorbe)" : "") +
+          (_ponding.Cracks > 0.05 ? $", boue séchée fendue à {_ponding.Cracks * 100:0} %" : "");
 }

@@ -33,7 +33,7 @@ public partial class Main
 
     /// <summary>Débit de lave (m³/s) : fort pour les volcans boucliers (type hawaïen), faible pour les explosifs.</summary>
     private static double EffusionRate(Eruption eruption, double day) =>
-        eruption == null ? 0 : (eruption.Vei <= 1 ? 80.0 : 10.0) * eruption.IntensityAt(day);
+        eruption == null ? 0 : (eruption.Fissure ? 250.0 : eruption.Vei <= 1 ? 80.0 : 10.0) * eruption.IntensityAt(day);
 
     /// <param name="nearest">Éruption terrestre la plus proche (null s'il n'y en a pas).</param>
     private void UpdateLava(Eruption nearest, bool climate)
@@ -66,7 +66,16 @@ public partial class Main
             var vent = Double3.From(nearest.Position).Normalized();
             _lavaVent = nearest.Position;
             _lavaBuildField = field;
-            _lavaBuild = Task.Run(() => new LavaFlow(field, vent));
+            // (fissure : la lave sort tout le long, pas seulement au milieu)
+            var (fa, fb) = nearest.Ends();
+            bool fissure = nearest.Fissure;
+            _lavaBuild = Task.Run(() =>
+            {
+                var flow = new LavaFlow(field, vent);
+                if (fissure)
+                    flow.SetFissure(Double3.From(fa), Double3.From(fb));
+                return flow;
+            });
         }
         if (_lavaBuild is { IsCompleted: true })
         {
@@ -122,6 +131,41 @@ public partial class Main
             else
                 _lavaStep = null;
         }
+    }
+
+    private readonly Vector4[] _fissureA = new Vector4[4], _fissureB = new Vector4[4];
+
+    /// <summary>
+    /// Fissures en éruption proches de la caméra (moins de 400 km) : leur ligne incandescente est
+    /// dessinée par le shader du terrain (extrémités relatives à la caméra, intensité en w).
+    /// </summary>
+    private void UpdateFissureGlow(bool climate)
+    {
+        int count = 0;
+        if (climate && _terrain.Field != null)
+        {
+            Double3 camera = _terrain.Explorer.Position;
+            Vector3 cameraDirection = camera.Normalized().ToVector3();
+            double day = _climate.TimeDays;
+            foreach (var eruption in _activity.Eruptions)
+            {
+                if (!eruption.Fissure || count >= _fissureA.Length || eruption.Position.AngleTo(cameraDirection) * PlanetConstants.RadiusKm > 400)
+                    continue;
+                float intensity = eruption.IntensityAt(day);
+                var (a, b) = eruption.Ends();
+                float height = VentHeight(eruption.Position);
+                if (intensity <= 0 || height < 0)
+                    continue;
+                Double3 pa = Double3.From(a).Normalized() * (TerrainHeightField.RadiusMeters + height) - camera;
+                Double3 pb = Double3.From(b).Normalized() * (TerrainHeightField.RadiusMeters + height) - camera;
+                _fissureA[count] = new Vector4((float)pa.X, (float)pa.Y, (float)pa.Z, intensity);
+                _fissureB[count] = new Vector4((float)pb.X, (float)pb.Y, (float)pb.Z, 0f);
+                count++;
+            }
+        }
+        _terrain.SetShaderParameter("fissure_count", count);
+        _terrain.SetShaderParameter("fissure_a", _fissureA);
+        _terrain.SetShaderParameter("fissure_b", _fissureB);
     }
 
     private void UploadLavaTexture()

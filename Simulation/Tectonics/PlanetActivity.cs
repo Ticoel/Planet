@@ -15,6 +15,23 @@ public sealed class Eruption
     public double DurationDays { get; init; }
     /// <summary>Hauteur du panache (m) : ~1 km pour VEI 0-1, ~25 km pour VEI 5-6.</summary>
     public float PlumeHeightM { get; init; }
+    /// <summary>
+    /// Éruption fissurale : la lave sort tout le long d'une fissure (un « rideau de feu ») au lieu
+    /// d'une bouche ; Position en est le milieu, Strike la direction (unitaire, tangente) et
+    /// LengthM la longueur.
+    /// </summary>
+    public bool Fissure { get; init; }
+    public Vector3 Strike { get; init; }
+    public float LengthM { get; init; }
+
+    /// <summary>Extrémités de la fissure (directions unitaires) ; la bouche deux fois pour une éruption ordinaire.</summary>
+    public (Vector3 a, Vector3 b) Ends()
+    {
+        if (!Fissure)
+            return (Position, Position);
+        Vector3 half = Strike * (LengthM / 2f / (PlanetConstants.RadiusKm * 1000f));
+        return ((Position - half).Normalized(), (Position + half).Normalized());
+    }
 
     /// <summary>Intensité (0 à 1) à un instant : montée rapide, puis déclin.</summary>
     public float IntensityAt(double day)
@@ -55,6 +72,12 @@ public sealed class PlanetActivity
     // chaud comme le Kīlauea est resté en éruption presque sans arrêt de 1983 à 2018 ; avec des
     // éruptions plus rares, on n'en voyait presque jamais)
     private const double ShieldIntervalYears = 1.0;
+    /// <summary>Part des éruptions de volcans boucliers qui s'ouvrent en fissure sur une zone de
+    /// rift du flanc (Kīlauea : la plupart de ses éruptions récentes, Puʻu ʻŌʻō, 2018).</summary>
+    private const double FlankFissureShare = 0.35;
+    /// <summary>Intervalle moyen (ans) entre deux éruptions fissurales d'une cellule de rift émergé
+    /// (l'Islande : une grande éruption fissurale tous les quelques siècles par système volcanique).</summary>
+    private const double RiftFissureIntervalYears = 400.0;
     private const double StratoIntervalYears = 8.0;
     // Forçage des aérosols volcaniques (W/m²) pour un VEI 6, divisé par ~5 par degré en dessous
     public const float Vei6ForcingWm2 = 3f;
@@ -68,6 +91,10 @@ public sealed class PlanetActivity
     private float _totalFaultWeight;
     private PlanetGrid _grid;
     private TectonicPlates _tectonics;
+    // Rifts émergés : cellules de terre sur une frontière divergente, et direction de la fissure
+    // (perpendiculaire à l'écartement des plaques)
+    private int[] _riftCells = Array.Empty<int>();
+    private Vector3[] _riftStrikes = Array.Empty<Vector3>();
 
     public PlanetActivity(int seed) => _random = new Random(seed * 31 + 7);
 
@@ -114,8 +141,95 @@ public sealed class PlanetActivity
         }
         _faultCells = cells.ToArray();
         _faultWeights = weights.ToArray();
+
+        var rifts = new List<int>();
+        var strikes = new List<Vector3>();
+        for (int cell = 0; cell < _grid.CellCount; cell++)
+        {
+            if (tectonics.CellBoundary[cell] != BoundaryType.Divergent || tectonics.CellElevation[cell] <= 0f)
+                continue;
+            // Écartement : vitesse relative avec une voisine de l'autre plaque
+            Vector3 up = _grid.Positions[cell].Normalized();
+            Vector3 opening = Vector3.Zero;
+            foreach (int n in _grid.Neighbors[cell])
+                if (tectonics.CellPlate[n] != tectonics.CellPlate[cell])
+                    opening += tectonics.VelocityAt(cell) - tectonics.VelocityAt(n);
+            opening -= up * opening.Dot(up);
+            Vector3 strike = opening.LengthSquared() > 1e-12f ? up.Cross(opening).Normalized() : up.Cross(Vector3.Up).Normalized();
+            if (strike.LengthSquared() < 0.5f)
+                strike = up.Cross(Vector3.Right).Normalized();
+            rifts.Add(cell);
+            strikes.Add(strike);
+        }
+        _riftCells = rifts.ToArray();
+        _riftStrikes = strikes.ToArray();
         _eruptions.Clear();
         AerosolForcing = 0f;
+    }
+
+    /// <summary>
+    /// Fissure sur une zone de rift du flanc d'un volcan bouclier : à quelques km du sommet, le
+    /// long d'un des deux ou trois rifts du volcan (directions propres à chaque volcan), longue
+    /// de quelques centaines de mètres à quelques km.
+    /// </summary>
+    private Eruption FlankFissure(Landform volcano, double start)
+    {
+        Vector3 up = volcano.Position.Normalized();
+        Vector3 east = up.Cross(Vector3.Up);
+        east = east.LengthSquared() < 1e-6f ? Vector3.Right : east.Normalized();
+        Vector3 north = up.Cross(east);
+        // Rifts du volcan : 2 ou 3 directions fixées par sa position
+        float seed = MathF.Abs(MathF.Sin(up.X * 127.1f + up.Y * 311.7f + up.Z * 74.7f)) * 6.2832f;
+        float azimuth = seed + _random.Next(3) * 2.094f + (float)(_random.NextDouble() - 0.5) * 0.3f;
+        Vector3 rift = east * MathF.Cos(azimuth) + north * MathF.Sin(azimuth);
+        float radiusM = PlanetConstants.RadiusKm * 1000f;
+        float distanceM = MathF.Max(1500f, volcano.RadiusM * (0.15f + 0.45f * _random.NextSingle()));
+        Vector3 position = (up + rift * (distanceM / radiusM)).Normalized();
+        rift = (rift - position * rift.Dot(position)).Normalized();   // (tangente au point de la fissure)
+        return new Eruption
+        {
+            Position = position, Vei = 0, Kind = LandformKind.ShieldVolcano, StartDay = start,
+            DurationDays = 10 + 150 * _random.NextDouble(), PlumeHeightM = PlumeHeight(0),
+            Fissure = true, Strike = rift, LengthM = 500f + 4500f * _random.NextSingle(),
+        };
+    }
+
+    /// <summary>
+    /// Fissure d'un rift émergé, là où les plaques s'écartent à l'air libre (l'Islande, l'Afar) :
+    /// perpendiculaire à l'écartement, longue de 2 à 12 km, qui crache des coulées de basalte
+    /// pendant des semaines ou des mois (Holuhraun 2014-2015 : 6 mois, 1,5 km³ ; Laki 1783 : 8 mois).
+    /// </summary>
+    private Eruption RiftFissure(int index, double start)
+    {
+        int cell = _riftCells[index];
+        Vector3 up = _grid.Positions[cell].Normalized();
+        Vector3 strike = _riftStrikes[index];
+        Vector3 across = up.Cross(strike);
+        float radiusM = PlanetConstants.RadiusKm * 1000f;
+        float cellM = _grid.MeanEdgeAngle * radiusM;
+        Vector3 position = (up + (strike * (_random.NextSingle() - 0.5f) + across * (_random.NextSingle() - 0.5f) * 0.5f) * (cellM / radiusM)).Normalized();
+        strike = (strike - position * strike.Dot(position)).Normalized();   // (tangente au point de la fissure)
+        return new Eruption
+        {
+            Position = position, Vei = _random.NextDouble() < 0.85 ? 0 : 1, Kind = LandformKind.ShieldVolcano, StartDay = start,
+            DurationDays = 20 + 220 * _random.NextDouble(), PlumeHeightM = PlumeHeight(0) * 1.5f,
+            Fissure = true, Strike = strike, LengthM = 2000f + 10000f * _random.NextSingle(),
+        };
+    }
+
+    /// <summary>
+    /// Essaim de séismes : le magma qui monte ouvre la fissure en cassant la roche (Holuhraun :
+    /// des milliers de petits séismes en deux semaines) ; quelques-uns de magnitude 4 à 5,5.
+    /// </summary>
+    private void AddDikeQuakes(Eruption fissure, double day)
+    {
+        var (a, b) = fissure.Ends();
+        for (int k = 0; k < 4; k++)
+        {
+            float t = _random.NextSingle();
+            Vector3 at = (a * (1 - t) + b * t).Normalized();
+            RecentEarthquakes.Add(new Earthquake(at, 4f + 1.5f * _random.NextSingle(), day, BoundaryType.Divergent));
+        }
     }
 
     /// <summary>Avance de dtDays (jusqu'à l'instant day) : nouvelles éruptions et séismes.</summary>
@@ -144,6 +258,12 @@ public sealed class PlanetActivity
                 continue;
             int vei = volcano.Kind == LandformKind.ShieldVolcano ? (_random.NextDouble() < 0.7 ? 0 : 1) : StratoVei();
             double start = day - _random.NextDouble() * dtDays;
+            if (volcano.Kind == LandformKind.ShieldVolcano && _random.NextDouble() < FlankFissureShare)
+            {
+                _eruptions.Add(FlankFissure(volcano, start));
+                AddDikeQuakes(_eruptions[^1], day);
+                continue;
+            }
             var eruption = new Eruption
             {
                 Position = volcano.Position, Vei = vei, Kind = volcano.Kind, StartDay = start,
@@ -157,6 +277,16 @@ public sealed class PlanetActivity
             };
             _eruptions.Add(eruption);
             AerosolForcing += AerosolInjection(vei);
+        }
+        // Éruptions fissurales des rifts émergés
+        for (int k = 0; k < _riftCells.Length; k++)
+        {
+            double interval = RiftFissureIntervalYears / Math.Max(ActivityFactor, 1e-3);
+            if (_random.NextDouble() > 1 - Math.Exp(-years / interval) || _eruptions.Count > 40)
+                continue;
+            var fissure = RiftFissure(k, day - _random.NextDouble() * dtDays);
+            _eruptions.Add(fissure);
+            AddDikeQuakes(fissure, day);
         }
         AerosolForcing *= (float)Math.Exp(-dtDays / AerosolLifetimeDays);
 

@@ -899,6 +899,12 @@ uniform float crust_day = 0.0;
 // Pluie sur le sol autour de la caméra (SurfacePonding) : eau en surface (mm), sol mouillé
 // (0 à 1), averse en cours (0 à 1, pour les ronds de pluie dans les flaques)
 uniform float puddle_mm = 0.0;
+// Fentes de dessiccation de la boue séchée autour de la caméra (0 à 1)
+uniform float mud_cracks = 0.0;
+// Éruptions fissurales proches : extrémités (relatives à la caméra, m) et intensité (a.w)
+uniform int fissure_count = 0;
+uniform vec4 fissure_a[4];
+uniform vec4 fissure_b[4];
 uniform float ground_wet = 0.0;
 uniform float rain_now = 0.0;
 uniform float crust_regrow_days = 9000.0;
@@ -1206,6 +1212,27 @@ render_mode cull_back;
 // Sol remanié par la croûte modulaire : x (−1 arraché, +1 éboulis), y : jour de l'événement
 varying vec2 v_debris;
 
+vec3 crack_hash(vec3 c) {
+    c = vec3(dot(c, vec3(127.1, 311.7, 74.7)), dot(c, vec3(269.5, 183.3, 246.1)), dot(c, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(c) * 43758.5453);
+}
+
+// Fentes en polygones (cellules de Voronoï) : 0 sur une fente, croissant vers le milieu des
+// plaques ; x : distance au bord de la plaque (en tailles de plaque)
+float crack_edge(vec3 q) {
+    vec3 i = floor(q), f = fract(q);
+    float d1 = 8.0, d2 = 8.0;
+    for (int z = -1; z <= 1; z++)
+        for (int y = -1; y <= 1; y++)
+            for (int x = -1; x <= 1; x++) {
+                vec3 g = vec3(float(x), float(y), float(z));
+                vec3 r = g + crack_hash(i + g) - f;
+                float d = dot(r, r);
+                if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+            }
+    return sqrt(d2) - sqrt(d1);
+}
+
 void vertex() {
     float m = morph_factor(VERTEX, MODEL_MATRIX, vec3(0.0));
     VERTEX += CUSTOM0.xyz * m;
@@ -1372,6 +1399,22 @@ void fragment() {
                 normal = normalize(mix(normal, normalize(up - (ripples - up * dot(ripples, up)) * 0.25), puddle));
             }
         }
+        // Fentes de dessiccation : boue séchée là où des flaques ont stagné (autour de la caméra),
+        // et fonds plats des déserts chauds (playas : la boue des rares pluies sèche et se fend)
+        float playa = desertSand * (1.0 - smoothstep(0.01, 0.04, slope0)) * smoothstep(0.15, 0.35, -n512.x);
+        float mudFlat = mud_cracks * (1.0 - smoothstep(3000.0, 10000.0, length(v_world))) * (1.0 - smoothstep(0.03, 0.11, slope0))
+                        * smoothstep(-0.2, 0.3, -(n32.x * 0.6 + n8.x * 0.4));
+        float crackAmount = max(playa, mudFlat) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0);
+        if (crackAmount > 0.01 && footprint < 2.0) {
+            // Polygones de ~20 cm dans la boue, de ~1,5 m sur les playas
+            float scale = mix(0.22, 1.5, step(mudFlat, playa));
+            float e = crack_edge(p / scale);
+            float fissure = (1.0 - smoothstep(0.02, 0.07 + 0.05 * crackAmount, e)) * crackAmount * detail_weight(scale, footprint);
+            vec3 dried = mix(vec3(0.62, 0.55, 0.45), color * 1.15, 0.4);   // croûte claire, desséchée
+            color = mix(color, dried, crackAmount * 0.7);
+            color = mix(color, color * 0.35, fissure);
+            roughness = mix(roughness, 1.0, crackAmount);
+        }
         float snow = snow_on_slope(snowBase, slope);
         // La neige s'accroche d'abord dans les creux du micro-relief
         snow = clamp(snow + (snow * (1.0 - snow)) * 1.5 * n32.x, 0.0, 1.0);
@@ -1491,6 +1534,23 @@ void fragment() {
             }
         }
     }
+    // Éruptions fissurales : un « rideau de feu » le long de la fissure (fontaines de lave,
+    // incandescentes, visibles de loin), bordé de remparts de scories noires
+    if (fissure_count > 0 && depth <= 0.0 && coloring != 1 && coloring != 3) {
+        for (int k = 0; k < fissure_count; k++) {
+            vec3 a = fissure_a[k].xyz, ab = fissure_b[k].xyz - a;
+            float t = clamp(dot(v_world - a, ab) / max(dot(ab, ab), 1.0), 0.0, 1.0);
+            vec3 r = v_world - (a + ab * t);
+            float d = length(r - up * dot(r, up));
+            // (de loin, la ligne s'élargit pour rester visible : au moins ~2 pixels)
+            float width = max(10.0, 2.0 * footprint);
+            float glow = fissure_a[k].w * exp(-(d * d) / (width * width)) * (0.75 + 0.25 * sin(TIME * 7.0 + t * 60.0 + n8.x * 4.0));
+            float rampart = fissure_a[k].w * (1.0 - smoothstep(25.0, 160.0, d));
+            color = mix(color, vec3(0.05, 0.04, 0.035), rampart * 0.85);
+            EMISSION += vec3(1.0, 0.42, 0.08) * glow * 4.0;
+            roughness = mix(roughness, 0.8, rampart);
+        }
+    }
     // Éruptions : basalte noir sous la lave, lave incandescente qui éclaire d'elle-même
     if ((eruption_count > 0 || lava_active > 0.5) && depth <= 0.0) {
         vec2 lava = lava_state(up, h, n128);
@@ -1499,7 +1559,7 @@ void fragment() {
             float cracks = smoothstep(0.45, 0.6, n32.x * 0.6 + n128.z * 0.4 + lava.x * 0.35);
             float heat = lava.x * mix(0.12, 1.0, cracks);
             color = mix(color, vec3(0.05, 0.04, 0.035), lava.y);
-            EMISSION = vec3(1.0, 0.32, 0.05) * heat * 3.0;
+            EMISSION += vec3(1.0, 0.32, 0.05) * heat * 3.0;
             roughness = mix(roughness, 0.7, lava.y);
         }
     }

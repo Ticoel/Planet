@@ -16,6 +16,10 @@ namespace Planet.Simulation.Climate;
 /// au-delà l'eau ruisselle vers les fleuves) ; quand la pluie faiblit, l'eau s'infiltre à la
 /// même capacité et s'évapore (~0,2 mm/h) : les flaques restent quelques heures après l'averse.</item>
 /// <item><b>Sol mouillé</b> : il fonce et luit dès qu'il pleut, et sèche en quelques heures.</item>
+/// <item><b>Fentes de dessiccation</b> : là où l'eau a stagné, elle laisse une boue fine ; en
+/// séchant au chaud, l'argile se rétracte et se fend en polygones de 5 à 30 cm (comme au fond
+/// d'une mare asséchée) ; elles se forment en un jour ou deux de sécheresse, se referment à la
+/// pluie suivante, et la boue est remaniée en quelques semaines.</item>
 /// </list>
 /// Unités : mm, heures. Gel : la pluie tombe en neige, et une flaque gèle (on la garde).
 /// </summary>
@@ -29,6 +33,11 @@ public sealed class SurfacePonding
     public double DepthMm { get; private set; }
     /// <summary>Sol mouillé (0 : sec, 1 : trempé).</summary>
     public double Wetness { get; private set; }
+    /// <summary>Boue laissée par les flaques (0 à 1), qui peut se fendre en séchant.</summary>
+    public double Mud { get; private set; }
+    /// <summary>Fentes de dessiccation (0 : aucune, 1 : réseau de polygones bien ouvert).</summary>
+    public double Cracks { get; private set; }
+    private const double CrackingHours = 30, MudReworkHours = 600;
 
     /// <summary>Capacité d'infiltration du sol (mm/h).</summary>
     public static double Infiltration(double soilSaturation, double temperatureC) =>
@@ -59,6 +68,16 @@ public sealed class SurfacePonding
             double target = Math.Max(Math.Min(1, rain / 0.5), Math.Min(1, DepthMm / 2));
             double rate = target > Wetness ? 4 : 1 / DryingHours;
             Wetness += (target - Wetness) * (1 - Math.Exp(-rate * dt));
+            // Boue des flaques ; fentes quand elle sèche au chaud ; refermées par l'eau
+            if (DepthMm > 0.5)
+                Mud = 1;
+            else
+                Mud *= Math.Exp(-dt / MudReworkHours);
+            double dry = Math.Clamp((0.35 - Wetness) / 0.3, 0, 1) * Math.Clamp((temperatureC - 5) / 15, 0, 1);
+            if (Wetness > 0.5)
+                Cracks *= Math.Exp(-2 * dt);
+            else
+                Cracks += (Mud * dry - Cracks) * (1 - Math.Exp(-dt / CrackingHours)) * (Mud * dry > Cracks ? 1 : 0.2);
         }
     }
 
@@ -66,5 +85,7 @@ public sealed class SurfacePonding
     {
         DepthMm = 0;
         Wetness = 0;
+        Mud = 0;
+        Cracks = 0;
     }
 }

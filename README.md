@@ -159,7 +159,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, interface du jeu, 156 tests).
+Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, éruptions fissurales, interface du jeu, 159 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -216,6 +216,11 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   rien gelé ; il pleut par averses, ~4 fois l'intensité moyenne), l'eau stagne en flaques sur le
   plat et dans les creux, avec des ronds de pluie, puis s'infiltre et s'évapore en quelques heures
   après l'averse.
+- **Sol qui craquelle** (fentes de dessiccation) : là où l'eau a stagné, elle laisse une boue
+  fine ; en séchant au chaud, l'argile se rétracte et se fend en polygones d'une vingtaine de cm,
+  en un jour ou deux ; la pluie suivante les referme. Les fonds plats des déserts chauds (playas)
+  restent couverts de grands polygones de ~1,5 m. (Ce n'est pas la chaleur seule qui fend le sol,
+  mais le séchage d'un sol argileux mouillé.)
 - **Ombres portées du relief** (qualité moyenne et haute) : quatre cartes d'ombre en cascade,
   dont la portée suit l'altitude (fines au sol, larges vues d'avion, estompées depuis l'orbite) ;
   les montagnes hors du champ de vision projettent aussi leur ombre dans le champ.
@@ -256,6 +261,15 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     Terre (lave incandescente, panaches de cendres, voile d'aérosols qui refroidit la planète après
     les plus fortes) et séismes aux frontières de plaques
     (loi de Gutenberg-Richter, secousse de la caméra quand ils sont ressentis) ;
+  - **éruptions fissurales** : le magma monte du manteau (quelques dizaines de km de profondeur,
+    pas du centre de la Terre) et s'ouvre une fissure de quelques centaines de mètres à 12 km, d'où
+    la lave jaillit tout du long en « rideau de feu », sans cône. Sur les zones de rift des volcans
+    boucliers (un tiers de leurs éruptions, comme Kīlauea) et sur les rifts émergés, là où les
+    plaques s'écartent à l'air libre (comme l'Islande : Laki 1783, Holuhraun 2014). Chaque fissure
+    s'ouvre avec un essaim de séismes ; ligne incandescente visible de loin, remparts de scories,
+    voile de gaz bas, coulée simulée qui sort de tout son long, puis un champ de lave large et
+    épais (100 à 400 millions de m³) inscrit dans la croûte, qui s'épaissit quand une fissure se
+    rouvre au même endroit ;
   - **milieux hydrothermaux** (étape 14a), là où la chaleur du sous-sol rencontre l'eau : sur les
     volcans émergés, fumerolles près du sommet (gaz à 100-450 °C, pH 1 à 2,5), puis, là où l'eau
     de pluie ressort réchauffée, sources chaudes (40 °C à l'ébullition, qui baisse de 1 °C tous
@@ -358,6 +372,13 @@ Faites :
     s'adaptent ; leur action sur le milieu (voir plus bas).
 16. **Confort** : sauvegarde et chargement d'une planète ; vue sous-marine ; arbres et herbes en
     objets au sol.
+17. **Une Terre encore plus vivante** (pistes, sans vie nécessaire) : crues des fleuves qui
+    débordent après les fortes pluies et changent de lit ; érosion des côtes et recul des
+    falaises ; dunes qui avancent avec le vent et tempêtes de sable ; glaciers qui avancent,
+    vêlent et reculent ; avalanches de neige ; lahars (coulées de boue volcaniques) ; tsunamis
+    après les grands séismes sous-marins ; effondrements karstiques ; geysers de boue et lacs
+    acides de cratère ; sols gelés en polygones (pergélisol) ; aurores polaires, pluies d'étoiles
+    filantes, brouillards et arcs-en-ciel.
 
 ### Pistes pour la vie et son action sur le milieu
 
@@ -497,6 +518,14 @@ de ces mêmes ouvrages.
   938-948. — jaunissement des feuilles quand il fait plus froid.
 
 ## Planète active
+- Thordarson T., Self S. (1993). *The Laki (Skaftár Fires) and Grímsvötn eruptions in
+  1783-1785.* Bulletin of Volcanology 55, 233-263 ; Pedersen G. B. M. et al. (2017). *Lava field
+  evolution and emplacement dynamics of the 2014-2015 basaltic fissure eruption at Holuhraun,
+  Iceland.* Journal of Volcanology and Geothermal Research 340, 155-169 ; Neal C. A. et al.
+  (2019). *The 2018 rift eruption and summit collapse of Kīlauea Volcano.* Science 363, 367-374.
+  — éruptions fissurales : longueur, durée, débit, volume, essaims de séismes.
+- Weinberger R. (1999). *Initiation and growth of cracks during desiccation of stratified muddy
+  sediments.* Journal of Structural Geology 21, 379-386. — fentes de dessiccation.
 - Wilson J. T. (1963). *A possible origin of the Hawaiian Islands.* Canadian Journal of Physics
   41(6), 863-870 ; Morgan W. J. (1971). *Convection plumes in the lower mantle.* Nature 230,
   42-43. — points chauds fixes et chaînes d'îles.

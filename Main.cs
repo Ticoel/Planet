@@ -557,7 +557,9 @@ public partial class Main : Node3D
             if (!_announcedEruptions.Add(eruption))
                 continue;
             double distanceKm = eruption.Position.AngleTo(camera) * PlanetConstants.RadiusKm;
-            if (eruption.Vei >= 4 || distanceKm < 500)
+            if (eruption.Fissure && distanceKm < 1500)
+                ShowNotice($"Éruption fissurale : une fissure de {eruption.LengthM / 1000:0.0} km s'ouvre et crache de la lave, à {distanceKm:N0} km".Replace('.', ','));
+            else if (eruption.Vei >= 4 || distanceKm < 500)
                 ShowNotice($"Éruption (indice d'explosivité {eruption.Vei}) à {distanceKm:N0} km");
         }
         _announcedEruptions.RemoveWhere(e => !_activity.Eruptions.Contains(e));
@@ -633,6 +635,12 @@ public partial class Main : Node3D
                 float radius = volcano?.RadiusM ?? 15000f, peak = volcano?.PeakHeightM ?? 2000f;
                 if (ventHeight < 0)
                     _eruptionShapes[count] = new Vector4(0f, Math.Min(eruption.PlumeHeightM, 4000f), -1f, 0f);
+                else if (eruption.Fissure)
+                {
+                    // Fissure : un voile de gaz bas, étalé sur toute sa longueur (pas de cône)
+                    nearestOnLand ??= eruption;
+                    _eruptionShapes[count] = new Vector4(Math.Max(1500f, eruption.LengthM), eruption.PlumeHeightM, eruption.Vei, ventHeight);
+                }
                 else
                 {
                     nearestOnLand ??= eruption;
@@ -687,6 +695,7 @@ public partial class Main : Node3D
         _terrain.SetShaderParameter("eruption_shapes", _eruptionShapes);
         _terrain.SetShaderParameter("eruption_winds", _eruptionWinds);
         _sky.SetEruptions(count, _eruptionVents, _eruptionShapes, _eruptionWinds);
+        UpdateFissureGlow(climate);
         UpdateLava(nearestOnLand, climate);
     }
 

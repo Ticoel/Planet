@@ -147,6 +147,7 @@ public partial class Main
         _depositJobs.Clear();
         _trackedEruptions.Clear();
         _ventPatches.Clear();
+        _fissurePatches.Clear();
         _depositCount = 0;
         _lavaDepositM3 = _ashDepositM3 = 0;
         _shakingIntensity = 0;
@@ -453,12 +454,13 @@ public partial class Main
     // --- Dépôts des éruptions ----------------------------------------------------------------------
 
     private sealed record DepositJob(Vector3 Vent, int Vei, int Seed, Double3 Downwind, double Wind, float Day, bool WithLava,
-                                     CrustPatch LavaPatch, CrustPatch AshPatch);
+                                     CrustPatch LavaPatch, CrustPatch AshPatch, (Double3 a, Double3 b)? Fissure = null);
     private sealed record DepositResult(DepositJob Job, float[] Lava, float[] Ash, double LavaM3, double AshM3);
 
     private const int MaxDepositQueue = 400;
     private readonly HashSet<Eruption> _trackedEruptions = new();
     private readonly Dictionary<Vector3, (CrustPatch lava, CrustPatch ash)> _ventPatches = new();
+    private readonly Dictionary<(int, int, int), CrustPatch> _fissurePatches = new();
     private readonly Queue<DepositJob> _depositJobs = new();
     private Task<DepositResult> _depositTask;
     private int _depositCount;
@@ -504,8 +506,8 @@ public partial class Main
             _depositTask = Task.Run(() =>
             {
                 double lavaM3 = 0, ashM3 = 0;
-                float[] lava = job.WithLava ? VolcanicDeposits.Lava(job.LavaPatch, height, job.Vei, job.Seed, out lavaM3) : null;
-                float[] ash = VolcanicDeposits.TephraVolume(job.Vei) > 0
+                float[] lava = job.WithLava ? VolcanicDeposits.Lava(job.LavaPatch, height, job.Vei, job.Seed, out lavaM3, job.Fissure) : null;
+                float[] ash = job.AshPatch != null && VolcanicDeposits.TephraVolume(job.Vei) > 0
                     ? VolcanicDeposits.Tephra(job.AshPatch, job.Vei, job.Downwind, job.Wind, out ashM3) : null;
                 return new DepositResult(job, lava, ash, lavaM3, ashM3);
             });
@@ -517,6 +519,29 @@ public partial class Main
         if (_depositJobs.Count >= MaxDepositQueue)
             _depositJobs.Dequeue();   // (horloge très rapide : les plus anciennes sont abandonnées)
         Double3 vent = Double3.From(eruption.Position).Normalized();
+        if (eruption.Fissure)
+        {
+            // Fissure : calque de coulées partagé par les fissures voisines (à ~6 km près : les
+            // fissures se rouvrent dans les mêmes zones de rift, le champ de lave s'y épaissit ;
+            // la mémoire reste bornée même après des siècles d'éruptions). Pas de cendres
+            var (fa, fb) = eruption.Ends();
+            double bucket = 6000 / TerrainHeightField.RadiusMeters;
+            var key = ((int)Math.Round(vent.X / bucket), (int)Math.Round(vent.Y / bucket), (int)Math.Round(vent.Z / bucket));
+            if (!_fissurePatches.TryGetValue(key, out var lavaPatch))
+            {
+                var center = new Double3(key.Item1 * bucket, key.Item2 * bucket, key.Item3 * bucket).Normalized();
+                lavaPatch = VolcanicDeposits.NewPatch(center, false, (float)_climate.TimeDays);
+                _crust.Add(lavaPatch);
+                _fissurePatches[key] = lavaPatch;
+                _ventPatches[eruption.Position] = (lavaPatch, null);
+            }
+            else
+                _ventPatches.TryAdd(eruption.Position, (lavaPatch, null));
+            bool simulatedFissure = _lava != null && _lavaVent == eruption.Position;
+            _depositJobs.Enqueue(new DepositJob(eruption.Position, eruption.Vei, _slideSeed++, default, 0, (float)_climate.TimeDays,
+                !simulatedFissure, lavaPatch, null, (Double3.From(fa), Double3.From(fb))));
+            return;
+        }
         if (!_ventPatches.TryGetValue(eruption.Position, out var patches))
         {
             float day = (float)_climate.TimeDays;

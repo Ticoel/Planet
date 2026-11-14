@@ -105,6 +105,47 @@ public sealed class LavaFlow
     }
 
     private readonly int _ventCell;
+    private int[] _sources;
+
+    /// <summary>
+    /// Éruption fissurale : la lave sort tout le long du segment [a, b] (directions unitaires),
+    /// coupé au bord de la grille, au lieu des quatre cellules de la bouche.
+    /// </summary>
+    public void SetFissure(Double3 a, Double3 b)
+    {
+        var cells = new System.Collections.Generic.List<int>();
+        (double x, double y) Local(Double3 d)
+        {
+            double r = TerrainHeightField.RadiusMeters / d.Dot(Vent);
+            return (d.Dot(AxisX) * r, d.Dot(AxisY) * r);
+        }
+        var (ax, ay) = Local(a.Normalized());
+        var (bx, by) = Local(b.Normalized());
+        double length = Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+        int samples = Math.Max(2, (int)(length / (CellM * 0.5)));
+        for (int k = 0; k <= samples; k++)
+        {
+            double t = k / (double)samples;
+            int i = (int)((ax + (bx - ax) * t + HalfExtentM) / CellM), j = (int)((ay + (by - ay) * t + HalfExtentM) / CellM);
+            if (i < 2 || j < 2 || i >= Size - 2 || j >= Size - 2)
+                continue;
+            int c = j * Size + i;
+            if (!cells.Contains(c))
+                cells.Add(c);
+        }
+        if (cells.Count == 0)
+            return;
+        _sources = cells.ToArray();
+        // (le rectangle des cellules calculées doit contenir toute la fissure)
+        foreach (int c in _sources)
+        {
+            _minX = Math.Min(_minX, c % Size); _maxX = Math.Max(_maxX, c % Size);
+            _minY = Math.Min(_minY, c / Size); _maxY = Math.Max(_maxY, c / Size);
+        }
+    }
+
+    /// <summary>Nombre de cellules d'où sort la lave (4 pour une bouche).</summary>
+    public int SourceCellCount => _sources?.Length ?? 4;
 
     /// <summary>Cellule de la bouche (où sort la lave).</summary>
     public (int i, int j) VentCell => (_ventCell % Size, _ventCell / Size);
@@ -168,13 +209,15 @@ public sealed class LavaFlow
     public void Step(int iterations, double effusionRate)
     {
         int vent = _ventCell;
+        int[] sources = _sources ?? new[] { vent, vent - 1, vent - Size, vent - Size - 1 };
         for (int it = 0; it < iterations; it++)
         {
             if (effusionRate > 0)
             {
-                // Sortie de lave sur les 4 cellules centrales, à la température de sortie
-                double added = effusionRate * StepSeconds / (CellM * CellM) / 4;
-                foreach (int c in new[] { vent, vent - 1, vent - Size, vent - Size - 1 })
+                // Sortie de lave sur les cellules de la bouche (ou tout le long de la fissure), à
+                // la température de sortie
+                double added = effusionRate * StepSeconds / (CellM * CellM) / sources.Length;
+                foreach (int c in sources)
                 {
                     _heat[c] = (_heat[c] * _thickness[c] + added) / (_thickness[c] + added);
                     _thickness[c] += added;

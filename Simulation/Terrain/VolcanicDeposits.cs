@@ -43,6 +43,12 @@ public static class VolcanicDeposits
         _ => 0,
     };
 
+    /// <summary>
+    /// Volume de lave d'une éruption fissurale (m³) : 100 à 400 millions, comme les éruptions des
+    /// rifts islandais (Holuhraun : 1,5 milliard ; Fagradalsfjall 2021 : 150 millions).
+    /// </summary>
+    public static double FissureLavaVolume(Random random) => 1e8 + 3e8 * random.NextDouble();
+
     /// <summary>Calque vide d'un volcan, centré sur sa bouche.</summary>
     public static CrustPatch NewPatch(Double3 vent, bool tephra, float day) => tephra
         ? new CrustPatch(vent, TephraSize, 2 * TephraHalfExtentM / TephraSize, day, "Ash")
@@ -102,16 +108,25 @@ public static class VolcanicDeposits
     /// coulées qui descendent la pente du relief actuel.
     /// </summary>
     /// <param name="height">Relief (m), calques de la croûte compris.</param>
-    public static float[] Lava(CrustPatch patch, Func<Double3, double> height, int vei, int seed, out double placedM3)
+    /// <param name="fissure">Éruption fissurale : extrémités de la fissure (directions unitaires) ;
+    /// les coulées partent de tout son long, avec le volume d'une grande éruption fissurale.</param>
+    public static float[] Lava(CrustPatch patch, Func<Double3, double> height, int vei, int seed, out double placedM3,
+                               (Double3 a, Double3 b)? fissure = null)
     {
         int n = patch.Size;
         var total = new float[n * n];
         placedM3 = 0;
-        double volume = LavaVolume(vei);
+        var random = new Random(seed);
+        double volume = fissure != null ? FissureLavaVolume(random) : LavaVolume(vei);
         if (volume <= 0)
             return total;
-        var random = new Random(seed);
-        int flows = 2 + random.Next(3);
+        int flows = fissure != null ? 4 + random.Next(4) : 2 + random.Next(3);
+        (double x, double y) fa = (0, 0), fb = (0, 0);
+        if (fissure is { } segment)
+        {
+            fa = patch.Project(segment.a);
+            fb = patch.Project(segment.b);
+        }
         double cell = patch.CellM;
         double half = patch.HalfExtentM;
         double limit = half - (Margin + Taper) * cell;
@@ -120,11 +135,24 @@ public static class VolcanicDeposits
         for (int f = 0; f < flows; f++)
         {
             Array.Clear(flow);
-            double length = volume / flows / (FlowWidthM * FlowThicknessM * 0.9);
-            // Départ près de la bouche (fissures de flanc), dans une direction au hasard
+            // (champs de lave des fissures : larges et épais, Holuhraun ~10 m sur 85 km²)
+            double flowWidth = fissure != null ? 800 : FlowWidthM, flowThickness = fissure != null ? 10 : FlowThicknessM;
+            double length = volume / flows / (flowWidth * flowThickness * 0.9);
+            // Départ près de la bouche (fissures de flanc), dans une direction au hasard ; ou en un
+            // point de la fissure, de part ou d'autre
             double angle = random.NextDouble() * 2 * Math.PI;
             double x = 60 * Math.Cos(angle), y = 60 * Math.Sin(angle);
             double dx = Math.Cos(angle), dy = Math.Sin(angle);
+            if (fissure != null)
+            {
+                double t = (f + 0.5) / flows + (random.NextDouble() - 0.5) * 0.5 / flows;
+                x = fa.x + (fb.x - fa.x) * t;
+                y = fa.y + (fb.y - fa.y) * t;
+                double sx = fb.x - fa.x, sy = fb.y - fa.y, sn = Math.Max(1e-9, Math.Sqrt(sx * sx + sy * sy));
+                double side = random.NextDouble() < 0.5 ? -1 : 1;
+                dx = -sy / sn * side;
+                dy = sx / sn * side;
+            }
             double step = Math.Max(20, cell * 0.5);
             double travelled = 0;
             int flat = 0;
@@ -143,8 +171,8 @@ public static class VolcanicDeposits
                 dy /= norm;
                 // Sur le plat, la lave s'étale en lac au lieu d'avancer
                 flat = slope < 0.01 ? flat + 1 : 0;
-                double width = FlowWidthM * (1 + 0.25 * Math.Min(flat, 8));
-                double thickness = FlowThicknessM * (1 + 0.15 * Math.Min(flat, 8));
+                double width = flowWidth * (1 + 0.25 * Math.Min(flat, 8));
+                double thickness = flowThickness * (1 + 0.15 * Math.Min(flat, 8));
                 Paint(flow, patch, x, y, width, thickness);
                 if (H(x, y) < -5 || flat > 12)
                     break;   // dans la mer, ou en lac : la coulée s'arrête
