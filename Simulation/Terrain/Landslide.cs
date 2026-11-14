@@ -61,6 +61,9 @@ public sealed class Landslide
     private readonly double _mu, _xi;
 
     public SlideKind Kind { get; }
+    /// <summary>Code du sol remanié pour le dépôt (shader du terrain) : 4 boue de lahar, 5 neige ;
+    /// 0 : éboulis (selon l'épaisseur).</summary>
+    public float DepositCode => Kind switch { SlideKind.Lahar => 4f, SlideKind.SnowAvalanche => 5f, _ => 0f };
     public CrustPatch Patch { get; }
     public int Size => Patch.Size;
     public double CellM => Patch.CellM;
@@ -88,6 +91,10 @@ public sealed class Landslide
         {
             SlideKind.Rockfall => (5.0 * scale, 38.0, 1.5, 0.60, 400.0),
             SlideKind.RockAvalanche => (90.0 * scale, 24.0, 8.0, 0.12, 600.0),
+            // Lahar : boue très fluide (μ ~0,05, comme les modèles de lahars, Pierson 1995)
+            SlideKind.Lahar => (110.0 * scale, 8.0, 6.0, 0.05, 900.0),
+            // Avalanche de neige dense (Voellmy : μ ~0,2, ξ ~1 500 m/s², Salm 1993)
+            SlideKind.SnowAvalanche => (40.0 * scale, 28.0, 3.0, 0.2, 1500.0),
             _ => (28.0 * scale, 20.0, 2.5, 0.22, 250.0),
         };
         _mu = mu;
@@ -97,9 +104,22 @@ public sealed class Landslide
         var (_, downhill, h0) = SlopeStability.LocalSlope(height, Source, Math.Max(3, releaseRadius / 3));
         double length = releaseRadius * 1.7, width = releaseRadius;
         double area = Math.PI * length * width;
-        double meanDepth = kind == SlideKind.Rockfall ? 1.6 * Math.Sqrt(scale) : SlopeStability.MeanDepth(area) * (kind == SlideKind.RockAvalanche ? 1.6 : 1.0);
+        double meanDepth = kind switch
+        {
+            SlideKind.Rockfall => 1.6 * Math.Sqrt(scale),
+            SlideKind.Lahar => 1.2,          // cendres fraîches détrempées, arrachées en surface
+            SlideKind.SnowAvalanche => 0.6,  // épaisseur d'une plaque de neige
+            SlideKind.RockAvalanche => SlopeStability.MeanDepth(area) * 1.6,
+            _ => SlopeStability.MeanDepth(area),
+        };
         double estimatedVolume = area * meanDepth;
-        double ratio = SlopeStability.TravelAngleRatio(estimatedVolume);
+        // (lahars et avalanches de neige vont bien plus loin que les glissements de même volume)
+        double ratio = kind switch
+        {
+            SlideKind.Lahar => 0.08,
+            SlideKind.SnowAvalanche => 0.4,
+            _ => SlopeStability.TravelAngleRatio(estimatedVolume),
+        };
         double r = TerrainHeightField.RadiusMeters;
         Double3 Along(double s) => (Source + downhill * (s / r)).Normalized();
         double runout = releaseRadius * 3;
@@ -394,10 +414,10 @@ public sealed class Landslide
             delta[k] = (float)d;
             double removed = _initial[k] - _ground[k];
             if (_deposit[k] + _flow[k] > 0.05)
-                debris[k] = (float)Math.Min(1, (_deposit[k] + _flow[k]) / 0.4);
-            else if (removed > 0.05)
+                debris[k] = DepositCode > 0 ? DepositCode : (float)Math.Min(1, (_deposit[k] + _flow[k]) / 0.4);
+            else if (removed > 0.05 && Kind != SlideKind.SnowAvalanche)
                 debris[k] = -(float)Math.Min(1, removed / 0.5);
-            else if (_scour[k] > 2)
+            else if (_scour[k] > 2 && Kind != SlideKind.SnowAvalanche)
                 debris[k] = -(float)Math.Min(0.6, _scour[k] / 15);   // couloir : végétation arrachée
         }
         // Bords : rien (raccord sans marche)

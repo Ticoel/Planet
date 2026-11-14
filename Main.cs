@@ -274,6 +274,7 @@ public partial class Main : Node3D
         ApplyQuality();
         SetupOverlays();
         SetupCrust();
+        SetupEvents();
         SetupHud();
         SetupUi();
         GeneratePlanet();
@@ -327,6 +328,7 @@ public partial class Main : Node3D
         // (les morceaux hors champ qui peuvent projeter une ombre dans le champ sont gardés)
         _terrain.Quadtree.ShadowCasterRange = Math.Min(_sky.ShadowRange, 150000);
         UpdateCrust(delta);
+        UpdateEvents(delta);
         UpdateChemistry(delta);
         _terrain.Tick(delta, ReadInput());
         ApplyShake(delta);
@@ -887,6 +889,7 @@ public partial class Main : Node3D
         // Nouvelle planète : la croûte modulaire repart de zéro, la géologie avance de nouveau
         ResetCrust();
         ResetChemistry();
+        ResetEvents();
         if (_clock == ClockMode.Climate)
             SetClock(ClockMode.Geological);
         RebuildTerrainNow(progressive: false);
@@ -1024,9 +1027,17 @@ public partial class Main : Node3D
             var rain = (float[])_climate.Statistics.RecentPrecipitation.Clone();
             var convergence = (float[])_climate.Winds.Convergence.Clone();
             var sky = _sky;
+            float[] cyclones = CycloneCloudCover();
             _cloudTask = Task.Run(() =>
             {
                 var (cover, showers) = SkyRenderer.ComputeCloudCover(grid, humidity, rain, convergence);
+                // Cyclones : spirale de nuages épais autour de l'œil, averses dans les bandes
+                if (cyclones != null)
+                    for (int c = 0; c < cover.Length; c++)
+                    {
+                        cover[c] = Math.Max(cover[c], cyclones[c]);
+                        showers[c] = Math.Max(showers[c], cyclones[c] * 0.8f);
+                    }
                 return sky.BuildCloudPixels(cover, showers);
             });
             _cloudTimer = 0.5;
@@ -1351,12 +1362,14 @@ public partial class Main : Node3D
         double sunLongitude = Math.Atan2(-sun.Z, sun.X);
         double hour = 12 + (cameraLongitude - sunLongitude) / (2 * Math.PI) * 24;
         hour = ((hour % 24) + 24) % 24;
+        // (plus les cyclones et les tornades : vent et pluie à l'échelle de quelques km)
+        var (cycloneWind, cycloneRain) = _cyclones.At(position);
         return new LocalWeather
         {
-            PrecipitationMmPerDay = _climate.Statistics.RecentPrecipitation[cell],
+            PrecipitationMmPerDay = _climate.Statistics.RecentPrecipitation[cell] + (float)cycloneRain,
             TemperatureC = _climate.SurfaceTemperature[cell],
-            RelativeHumidity = _climate.RelativeHumidity[cell],
-            Wind = _climate.Winds.Wind[cell],
+            RelativeHumidity = cycloneRain > 20 ? 1f : _climate.RelativeHumidity[cell],
+            Wind = _climate.Winds.Wind[cell] + cycloneWind + TornadoWindAt(position),
             Aridity = aridity,
             SolarHour = (float)hour,
         };
@@ -1528,6 +1541,8 @@ public partial class Main : Node3D
         lines.Add(CrustLine());
         if (RainLine() is { } rain)
             lines.Add(rain);
+        if (EventsLine() is { } events)
+            lines.Add(events);
         if (ChemistryLine() is { } chemistry)
             lines.Add(chemistry);
         lines.Add($"Légende : {DisplayModeLabel()}");

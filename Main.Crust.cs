@@ -147,6 +147,8 @@ public partial class Main
         _depositJobs.Clear();
         _trackedEruptions.Clear();
         _ventPatches.Clear();
+        _snowDeposits.Clear();
+        _snowMeltDay = double.NaN;
         _fissurePatches.Clear();
         _depositCount = 0;
         _lavaDepositM3 = _ashDepositM3 = 0;
@@ -329,6 +331,8 @@ public partial class Main
         }
 
         UpdateVolcanicDeposits(climate);
+        if (climate)
+            MeltSnowDeposits();
 
         // Blocs et poussière
         int cell = _grid.NearestCell(cameraDirection, Math.Max(_weatherHint, 0));
@@ -364,11 +368,34 @@ public partial class Main
         double rockfallChance = 0.004 * instability;
         bool strong = conditions.SeismicK > 0.1;
         double scale = SlideScale(strong);
+        // Falaises de bord de mer : sapées par les vagues, d'autant plus que la houle est forte
+        int cell = _grid.NearestCell(center.ToVector3(), Math.Max(_weatherHint, 0));
+        double coastalBoost = 3 + 5 * Math.Clamp(_climate.Winds.Wind[cell].Length() / 15.0, 0, 1);
+        // Lahar : forte pluie sur les cendres fraîches d'un volcan proche
+        CrustPatch ash = conditions.Saturation > 0.65 ? FreshAshNear(center) : null;
+        // Avalanche : neige épaisse (plus d'~1 m) ; plus probable juste après une chute de neige
+        // ou au redoux
+        double snowMm = _climate.Snow[cell];
+        double snowRisk = snowMm < 150 ? 0 : Math.Min(1, (snowMm - 150) / 400)
+                          * (0.3 + Math.Clamp(_climate.Statistics.RecentPrecipitation[cell] / 10.0, 0, 1)
+                             + (_climate.SurfaceTemperature[cell] > -2 ? 0.5 : 0));
         _slideBuild = Task.Run(() =>
         {
             var random = new Random(seed);
+            if (ash != null && random.NextDouble() < 0.4 * instability)
+            {
+                var lahar = LaharSource(ash, height, random);
+                if (lahar is { } source)
+                    return new Landslide(height, source, SlideKind.Lahar, 0.7 + 0.8 * random.NextDouble(), seed, day);
+            }
+            if (snowRisk > 0 && random.NextDouble() < 0.25 * snowRisk * instability)
+            {
+                var slab = SteepSlope(height, center, random, 28, 50);
+                if (slab is { } source)
+                    return new Landslide(height, source, SlideKind.SnowAvalanche, 0.6 + 1.2 * random.NextDouble(), seed, day);
+            }
             var candidate = SlopeStability.FindWeakest(height, center, CrustScanRadiusM, 140, conditions, random, rockfallChance,
-                                                       heterogeneity: 1.0);
+                                                       heterogeneity: 1.0, coastalBoost: coastalBoost);
             if (candidate is not { } c)
                 return null;
             // Une pente fragilisée ne cède pas forcément tout de suite : d'autant plus vite qu'elle
@@ -378,6 +405,78 @@ public partial class Main
                 return null;
             return new Landslide(height, c.Direction, c.Kind, c.Kind == SlideKind.Rockfall ? scale * 1.3 : scale, seed, day);
         });
+    }
+
+    /// <summary>Calque de cendres d'un volcan proche (moins de 40 km), tombées depuis moins de 5 ans.</summary>
+    private CrustPatch FreshAshNear(Double3 center)
+    {
+        double day = _climate.TimeDays;
+        foreach (var (_, patches) in _ventPatches)
+            if (patches.ash != null && day - patches.ash.Day < 5 * 365
+                && patches.ash.Center.DistanceTo(center) * TerrainHeightField.RadiusMeters < 40000)
+                return patches.ash;
+        return null;
+    }
+
+    /// <summary>Point de départ d'un lahar : une pente d'au moins 8° couverte de plus de 30 cm de cendres.</summary>
+    private static Double3? LaharSource(CrustPatch ash, Func<Double3, double> height, Random random)
+    {
+        var layer = ash.Data;
+        for (int k = 0; k < 200; k++)
+        {
+            int i = random.Next(ash.Size), j = random.Next(ash.Size);
+            if (layer.Delta[j * ash.Size + i] < 0.3f)
+                continue;
+            Double3 d = ash.DirectionOf(i, j);
+            var (slope, _, h) = SlopeStability.LocalSlope(height, d, 20);
+            if (h > 1 && slope > 8 * Math.PI / 180)
+                return d;
+        }
+        return null;
+    }
+
+    /// <summary>Une pente entre deux angles (degrés) autour du point regardé, ou null.</summary>
+    private static Double3? SteepSlope(Func<Double3, double> height, Double3 center, Random random, double minDeg, double maxDeg)
+    {
+        var (ax, ay) = LavaFlow.TangentFrame(center);
+        double r = TerrainHeightField.RadiusMeters;
+        for (int k = 0; k < 120; k++)
+        {
+            double rho = CrustScanRadiusM * Math.Sqrt(random.NextDouble()), phi = random.NextDouble() * 2 * Math.PI;
+            Double3 d = (center + ax * (rho * Math.Cos(phi) / r) + ay * (rho * Math.Sin(phi) / r)).Normalized();
+            var (slope, _, h) = SlopeStability.LocalSlope(height, d, 8);
+            double deg = slope * 180 / Math.PI;
+            if (h > 1 && deg >= minDeg && deg <= maxDeg)
+                return d;
+        }
+        return null;
+    }
+
+    // Dépôts d'avalanche : ils fondent (degrés-jours au-dessus de 0 °C), puis disparaissent
+    private readonly List<(CrustPatch patch, double meltDegreeDays)> _snowDeposits = new();
+    private double _snowMeltDay = double.NaN;
+
+    /// <summary>Fonte des dépôts d'avalanche : ~4 mm d'eau par degré et par jour (méthode des degrés-jours).</summary>
+    private void MeltSnowDeposits()
+    {
+        double day = _climate.TimeDays;
+        double days = double.IsNaN(_snowMeltDay) ? 0 : Math.Max(0, day - _snowMeltDay);
+        _snowMeltDay = day;
+        for (int k = _snowDeposits.Count - 1; k >= 0; k--)
+        {
+            var (patch, dd) = _snowDeposits[k];
+            int cell = _grid.NearestCell(patch.Center.ToVector3(), 0);
+            dd += Math.Max(0, _climate.SurfaceTemperature[cell]) * days;
+            // (~150 degrés-jours : ~60 cm d'eau, le dépôt compact d'une avalanche)
+            if (dd > 150)
+            {
+                _crust.Remove(patch);
+                _terrain.InvalidateRegion(patch.Center, patch.ReachM);
+                _snowDeposits.RemoveAt(k);
+            }
+            else
+                _snowDeposits[k] = (patch, dd);
+        }
     }
 
     private void CollectSlideBuild()
@@ -401,6 +500,8 @@ public partial class Main
             return;
         _crust.Add(slide.Patch);
         _slides.Add(new ActiveSlide(slide));
+        if (slide.Kind == SlideKind.SnowAvalanche)
+            _snowDeposits.Add((slide.Patch, 0));
         _slideCount++;
         if (slide.Kind == SlideKind.Rockfall)
             _rockfallCount++;
@@ -411,6 +512,8 @@ public partial class Main
         {
             SlideKind.Rockfall => "Éboulement",
             SlideKind.RockAvalanche => "Avalanche rocheuse",
+            SlideKind.Lahar => "Lahar (coulée de boue volcanique)",
+            SlideKind.SnowAvalanche => "Avalanche de neige",
             _ => "Glissement de terrain",
         };
         _lastSlide = $"{what} de {VolumeLabel(slide.ReleasedVolume)} à {Distance(km * 1000)}" +

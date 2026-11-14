@@ -68,6 +68,8 @@ public sealed partial class SkyRenderer : Node3D
     private const float AerialPerspectiveIntensity = 10f;
 
     public DirectionalLight3D Sun { get; private set; }
+    /// <summary>Tempête de sable autour de la caméra (0 à 1).</summary>
+    public float Sandstorm { get; private set; }
     public Environment Environment { get; private set; }
     /// <summary>Couverture nuageuse par face du cube (r : couverture, g : averses).</summary>
     public Texture2DArray CloudCover { get; private set; }
@@ -322,6 +324,41 @@ public sealed partial class SkyRenderer : Node3D
         Sun.ShadowOpacity = fade;
     }
 
+    // --- Phénomènes du ciel (étape 17) -----------------------------------------------------------
+
+    /// <summary>
+    /// Aurores polaires : les particules du vent solaire, guidées par le champ magnétique, font
+    /// briller la haute atmosphère dans un anneau autour des pôles magnétiques (ovale auroral, vers
+    /// 65-72° de latitude magnétique ; visible depuis ~55° quand l'activité est forte). Pôle
+    /// magnétique confondu ici avec le pôle de rotation. L'activité varie d'une nuit à l'autre.
+    /// Étoiles filantes : ~5 par heure en temps ordinaire, jusqu'à ~60 pendant une pluie
+    /// d'étoiles filantes (quelques nuits par an, quand la planète croise la traînée d'une comète).
+    /// Arc-en-ciel : lumière du Soleil réfléchie dans les gouttes, à 42° du point opposé au
+    /// Soleil ; il faut de la pluie et un Soleil bas (moins de 42° de hauteur), derrière soi.
+    /// </summary>
+    private void UpdateSkyPhenomena(in SkyFrame frame, Vector3 up, Vector3 sun)
+    {
+        float latitude = Mathf.RadToDeg(Mathf.Asin(Mathf.Clamp(up.Y, -1f, 1f)));
+        double day = frame.CloudTime / 86400.0;
+        float activity = 0.35f + 0.65f * Mathf.Clamp(0.5f + 0.5f * (float)(Math.Sin(day * 0.9) * Math.Sin(day * 0.37 + 1.3)), 0f, 1f);
+        float oval = Mathf.SmoothStep(50f, 63f, Math.Abs(latitude)) * (1f - Mathf.SmoothStep(80f, 88f, Math.Abs(latitude)));
+        bool climate = frame.Weather.HasValue;
+        _skyMaterial.SetShaderParameter("aurora_strength", climate ? oval * activity : 0f);
+        _skyMaterial.SetShaderParameter("aurora_pole", latitude >= 0 ? 1f : -1f);
+        double yearDay = day % 365.25;
+        float shower = (float)(Math.Exp(-Math.Pow((yearDay - 224) / 2.0, 2)) + Math.Exp(-Math.Pow((yearDay - 347) / 2.0, 2)));
+        _skyMaterial.SetShaderParameter("meteor_rate", climate ? 5f + 60f * shower : 0f);
+        float rainbow = 0f;
+        if (climate && frame.AltitudeAboveGround < 3000)
+        {
+            LocalWeather w = frame.Weather.Value;
+            float sunHeight = up.Dot(sun);
+            float showers = Mathf.SmoothStep(0.5f, 4f, w.PrecipitationMmPerDay) * (1f - Mathf.SmoothStep(15f, 40f, w.PrecipitationMmPerDay));
+            rainbow = showers * Mathf.SmoothStep(0.02f, 0.1f, sunHeight) * (1f - Mathf.SmoothStep(0.6f, 0.67f, sunHeight)) * (w.TemperatureC > 1f ? 1f : 0f);
+        }
+        _skyMaterial.SetShaderParameter("rainbow_strength", rainbow);
+    }
+
     // --- Image ------------------------------------------------------------------------------------
 
     public void Update(in SkyFrame frame, double delta)
@@ -361,6 +398,7 @@ public sealed partial class SkyRenderer : Node3D
         _skyMaterial.SetShaderParameter("moon_angle", moonAngle);
         _skyMaterial.SetShaderParameter("moon_boost", MoonVisibilityBoost);
         _skyMaterial.SetShaderParameter("star_angle", (float)(frame.StarAngle % (2 * Math.PI)));
+        UpdateSkyPhenomena(frame, up, sun);
         _postMaterial.SetShaderParameter("camera_planet", camera.ToVector3());
         float viewportHeight = Math.Max(GetViewport().GetVisibleRect().Size.Y, 1f);
         _postMaterial.SetShaderParameter("pixel_angle", 2f * Mathf.Tan(Mathf.DegToRad(_camera.Fov) / 2f) / viewportHeight);
@@ -459,7 +497,7 @@ public sealed partial class SkyRenderer : Node3D
         Vector3 north = up.Cross(east);
         _weatherAnchor.Basis = new Basis(east, up, -north);
 
-        float rain = 0, snow = 0, dust = 0, mist = 0;
+        float rain = 0, snow = 0, dust = 0, mist = 0, sandstorm = 0;
         Vector3 localWind = Vector3.Zero;
         if (frame.Weather.HasValue && frame.AltitudeAboveGround < 2500)
         {
@@ -470,23 +508,28 @@ public sealed partial class SkyRenderer : Node3D
             snow = intensity * snowShare;
             float windSpeed = w.Wind.Length();
             dust = w.Aridity * SmoothStep(7f, 15f, windSpeed) * (1 - intensity);
-            // Brouillard matinal : air saturé, vent faible, de la nuit au milieu de matinée
-            float morning = SmoothStep(2f, 4f, w.SolarHour) * (1 - SmoothStep(8f, 11f, w.SolarHour));
+            // Tempête de sable : vent fort sur un désert, mur de poussière (visibilité ~200 m)
+            sandstorm = w.Aridity * SmoothStep(13f, 20f, windSpeed) * (1 - intensity);
+            // Brouillard de rayonnement : air saturé, vent faible, la nuit (le sol se refroidit)
+            // jusqu'au milieu de matinée
+            float morning = Math.Max(SmoothStep(2f, 4f, w.SolarHour) * (1 - SmoothStep(8f, 11f, w.SolarHour)),
+                                     0.7f * (SmoothStep(20f, 23f, w.SolarHour) + (1 - SmoothStep(1f, 3f, w.SolarHour))));
             mist = SmoothStep(0.88f, 0.98f, w.RelativeHumidity) * (1 - SmoothStep(2f, 5f, windSpeed)) * morning;
             localWind = new Vector3(w.Wind.Dot(east), 0, -w.Wind.Dot(north));
         }
         SetParticles(_rain, rain, localWind + new Vector3(0, -9f, 0));
         SetParticles(_snow, snow, localWind * 0.6f + new Vector3(0, -1.2f, 0));
-        SetParticles(_dust, dust, localWind * 0.8f + new Vector3(0, -0.2f, 0));
+        SetParticles(_dust, Math.Min(1f, dust + sandstorm), localWind * 0.8f + new Vector3(0, -0.2f, 0));
+        Sandstorm = sandstorm;
 
         // Brume près du sol (passe plein écran) : averses, poussière, brouillard
         float daylight = Mathf.SmoothStep(-0.1f, 0.2f, up.Dot(sun));
         LightParticles(up.Dot(sun), daylight, rain + snow, frame.Moon);
-        float density = 0.00025f * rain + 0.0002f * snow + 0.0006f * dust + 0.003f * mist;
+        float density = 0.00025f * rain + 0.0002f * snow + 0.0006f * dust + 0.003f * mist + 0.012f * sandstorm;
         var color = new Color(0.62f, 0.66f, 0.72f);
         if (density > 0)
             color = (new Color(0.62f, 0.66f, 0.72f) * (0.00025f * rain + 0.0002f * snow)
-                     + new Color(0.78f, 0.6f, 0.4f) * (0.0006f * dust)
+                     + new Color(0.78f, 0.6f, 0.4f) * (0.0006f * dust + 0.012f * sandstorm)
                      + new Color(0.85f, 0.87f, 0.9f) * (0.003f * mist)) / density;
         color *= 0.08f + 0.6f * daylight;
         _postMaterial.SetShaderParameter("fog_density", density);
@@ -584,6 +627,30 @@ uniform float star_angle = 0.0;
 // Taille apparente (rayon, radians) et teinte de l'étoile : elle enfle et rougit en géante rouge
 uniform float sun_radius = 0.00465;
 uniform vec3 sun_tint = vec3(1.0);
+// Aurores polaires (force 0 à 1 ; pôle : +1 nord, −1 sud), étoiles filantes (par heure),
+// arc-en-ciel (force 0 à 1)
+uniform float aurora_strength = 0.0;
+uniform float aurora_pole = 1.0;
+uniform float meteor_rate = 0.0;
+uniform float rainbow_strength = 0.0;
+
+vec3 sky_hash(float n) {
+    return fract(sin(vec3(n * 12.9898, n * 78.233, n * 37.719)) * 43758.5453);
+}
+
+// Couleur de l'arc-en-ciel selon l'angle au point antisolaire (degrés) : rouge à l'extérieur
+// (42°), violet à l'intérieur (40°) ; arc secondaire inversé et plus pâle vers 51°, ciel plus
+// sombre entre les deux (bande d'Alexandre)
+vec3 rainbow(float angle) {
+    vec3 c = vec3(0.0);
+    float t1 = (angle - 40.0) / 2.3;
+    if (t1 > 0.0 && t1 < 1.0)
+        c += clamp(vec3(abs(t1 * 6.0 - 3.0) - 1.0, 2.0 - abs(t1 * 6.0 - 2.0), 2.0 - abs(t1 * 6.0 - 4.0)), 0.0, 1.0).zyx * sin(t1 * 3.1416);
+    float t2 = (angle - 50.0) / 3.5;
+    if (t2 > 0.0 && t2 < 1.0)
+        c += 0.4 * clamp(vec3(abs(t2 * 6.0 - 3.0) - 1.0, 2.0 - abs(t2 * 6.0 - 2.0), 2.0 - abs(t2 * 6.0 - 4.0)), 0.0, 1.0) * sin(t2 * 3.1416);
+    return c;
+}
 
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -652,6 +719,51 @@ void sky() {
         float sky_brightness = dot(inscatter, vec3(0.3, 0.5, 0.2));
         background *= mix(1.0, 0.0, smoothstep(0.0, 0.06, sky_brightness)) * 0.85 + 0.15 * step(0.5, dot(background, vec3(1.0)));
         color += background * transmittance;
+
+        float night = 1.0 - smoothstep(0.0, 0.05, sky_brightness);
+        float elevation = dot(dir, up);
+        vec3 east = cross(vec3(0.0, 1.0, 0.0), up);
+        east = length(east) < 1e-3 ? vec3(1.0, 0.0, 0.0) : normalize(east);
+        vec3 north = cross(up, east);
+        // Aurores : rideaux verts (oxygène, ~100-150 km) frangés de rouge en haut (oxygène, plus
+        // haut), du côté du pôle, qui ondulent lentement et se plissent en rayons
+        if (aurora_strength > 0.0 && elevation > 0.0 && night > 0.0) {
+            float azimuth = atan(dot(dir, east), dot(dir, north));
+            float toward = smoothstep(-0.3, 0.5, dot(dir, north) * aurora_pole);
+            float arc = 0.22 + 0.08 * sin(azimuth * 2.0 + TIME * 0.05) + 0.04 * sin(azimuth * 5.0 - TIME * 0.09);
+            float curtain = exp(-pow((elevation - arc) / 0.13, 2.0)) + 0.5 * exp(-pow((elevation - arc - 0.18) / 0.2, 2.0));
+            float rays = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(azimuth * 55.0 + 4.0 * sin(azimuth * 6.0 + TIME * 0.25) + TIME * 0.4), 3.0);
+            vec3 tint = mix(vec3(0.15, 1.0, 0.45), vec3(0.95, 0.25, 0.4), smoothstep(arc + 0.05, arc + 0.35, elevation));
+            color += tint * aurora_strength * toward * curtain * rays * night * 0.5;
+        }
+        // Étoiles filantes : une traînée brève toutes les quelques secondes à minutes (selon le
+        // taux, plus fort pendant les pluies d'étoiles filantes)
+        if (meteor_rate > 0.0 && night > 0.2 && elevation > 0.05) {
+            float slot = floor(TIME / 1.2);
+            vec3 h = sky_hash(slot);
+            if (h.x < meteor_rate * 1.2 / 3600.0) {
+                vec3 h2 = sky_hash(slot + 17.3);
+                float az = h.y * 6.2832, el = 0.35 + 0.8 * h.z;
+                vec3 start = normalize(up * sin(el) + cos(el) * (north * cos(az) + east * sin(az)));
+                vec3 travel = normalize(cross(start, normalize(vec3(h2.x - 0.5, h2.y - 0.5, h2.z - 0.5))));
+                float t = fract(TIME / 1.2) / 0.55;
+                if (t < 1.0) {
+                    vec3 head = normalize(start + travel * 0.22 * t);
+                    vec3 seg = head - start;
+                    float u = clamp(dot(dir - start, seg) / max(dot(seg, seg), 1e-6), 0.0, 1.0);
+                    float d = length(dir - (start + seg * u));
+                    float glow = exp(-pow(d / 0.0012, 2.0)) * u * u * (1.0 - t);
+                    color += vec3(0.9, 0.95, 1.0) * glow * night * 3.0;
+                }
+            }
+        }
+        // Arc-en-ciel : à l'opposé du Soleil, quand il pleut devant et que le Soleil est bas
+        if (rainbow_strength > 0.0 && elevation > -0.02) {
+            float angle = degrees(acos(clamp(dot(dir, -sun), -1.0, 1.0)));
+            vec3 bow = rainbow(angle);
+            float alexander = smoothstep(42.3, 43.5, angle) * (1.0 - smoothstep(48.5, 50.0, angle));
+            color = color * (1.0 - 0.15 * alexander * rainbow_strength) + bow * rainbow_strength * 0.35 * dot(inscatter, vec3(0.33)) * 4.0;
+        }
     }
     COLOR = color;
 }

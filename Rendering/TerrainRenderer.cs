@@ -726,7 +726,7 @@ public partial class TerrainRenderer : Node3D
             }
         }
         // (plus la marée et les variations du niveau de la mer, qui soulèvent la surface de la mer)
-        bounds = bounds.Grow(1f + Tides.MaxHeightMeters + SeaLevel.MaxRiseMeters);
+        bounds = bounds.Grow(1f + Tides.MaxHeightMeters + SeaLevel.MaxRiseMeters + (float)Math.Max(FloodModel.MaxRiseM, TsunamiModel.MaxRunupM));
 
         Rid instance = RenderingServer.InstanceCreate2(mesh, GetWorld3D().Scenario);
         RenderingServer.InstanceSetCustomAabb(instance, bounds);
@@ -904,6 +904,8 @@ uniform float crust_day = 0.0;
 uniform float puddle_mm = 0.0;
 // Fentes de dessiccation de la boue séchée autour de la caméra (0 à 1)
 uniform float mud_cracks = 0.0;
+// Avancée des dunes (m) : elles migrent avec le vent dominant
+uniform float dune_shift = 0.0;
 // Éruptions fissurales proches : extrémités (relatives à la caméra, m) et intensité (a.w)
 uniform int fissure_count = 0;
 uniform vec4 fissure_a[4];
@@ -912,14 +914,27 @@ uniform float ground_wet = 0.0;
 uniform float rain_now = 0.0;
 uniform float crust_regrow_days = 9000.0;
 
-float sea_surface(vec3 up) {
-    float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
-    return sea_level + tide_moon.w * (m * m - 1.0 / 3.0) + tide_sun.w * (s * s - 1.0 / 3.0);
+// Crue des fleuves et des lacs (FloodModel) et tsunami (TsunamiModel) : montée de l'eau (m)
+// autour d'un point (direction), sur un rayon (m)
+uniform float flood_rise = 0.0;
+uniform float tsunami_rise = 0.0;
+uniform vec3 event_up = vec3(0.0, 1.0, 0.0);
+uniform float event_reach = 60000.0;
+
+float event_fade(vec3 up) {
+    return 1.0 - smoothstep(0.5 * event_reach, event_reach, length(up - event_up) * planet_radius);
 }
 
-// Niveau de l'eau : celui du lac s'il y en a un (stocké dans le maillage, > 0), sinon la mer
+float sea_surface(vec3 up) {
+    float m = dot(up, tide_moon.xyz), s = dot(up, tide_sun.xyz);
+    return sea_level + tide_moon.w * (m * m - 1.0 / 3.0) + tide_sun.w * (s * s - 1.0 / 3.0)
+           + tsunami_rise * event_fade(up);
+}
+
+// Niveau de l'eau : celui du lac ou du fleuve s'il y en a un (stocké dans le maillage, > 0 ;
+// une crue le fait monter), sinon la mer
 float water_surface(vec3 up, float stored) {
-    return stored > 0.01 ? stored : sea_surface(up);
+    return stored > 0.01 ? stored + flood_rise * event_fade(up) : sea_surface(up);
 }
 // Lumière du Soleil arrivée jusqu'au point (atmosphère traversée), ombre des nuages
 varying vec3 v_sun;
@@ -1289,8 +1304,9 @@ void fragment() {
     // La végétation reprend en partie, mais la trace reste : un cône d'éboulis reste pierreux,
     // une coulée reste sombre, une niche se voit encore des siècles plus tard
     float crustKind = v_debris.x;
-    float crustSlow = crustKind > 2.5 ? 2.0 : crustKind > 1.2 ? 30.0 : 4.0;
-    float crustFloor = crustKind > 2.5 ? 0.15 : crustKind > 1.2 ? 0.7 : crustKind > 0.0 ? 0.5 : 0.35;
+    // (4 : boue d'un lahar ; 5 : neige d'une avalanche, qui fond et disparaît)
+    float crustSlow = crustKind > 4.5 ? 1000.0 : crustKind > 3.5 ? 3.0 : crustKind > 2.5 ? 2.0 : crustKind > 1.2 ? 30.0 : 4.0;
+    float crustFloor = crustKind > 4.5 ? 1.0 : crustKind > 3.5 ? 0.4 : crustKind > 2.5 ? 0.15 : crustKind > 1.2 ? 0.7 : crustKind > 0.0 ? 0.5 : 0.35;
     float crustFresh = abs(crustKind) > 0.02
         ? clamp(abs(crustKind), 0.0, 1.0)
           * max(crustFloor, 1.0 - smoothstep(0.0, crust_regrow_days * crustSlow, crust_day - v_debris.y)) : 0.0;
@@ -1304,7 +1320,7 @@ void fragment() {
                       (1.0 - smoothstep(1.0, 6.0, h)) * (1.0 - smoothstep(0.1, 0.25, slope0)) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0));
     sandy *= depth > 0.0 ? 0.0 : 1.0 - snowEstimate;
     vec3 ridge_axis = vec3(1.0, 0.0, 1.0) - up * dot(vec3(1.0, 0.0, 1.0), up);
-    float dune_phase = 6.2832 * (p.x + p.z + 14.0 * n128.x + 45.0 * n512.x) / 32.0;
+    float dune_phase = 6.2832 * (p.x + p.z - dune_shift + 14.0 * n128.x + 45.0 * n512.x) / 32.0;
     float ripple_phase = 6.2832 * (p.x + p.z + 0.25 * n2.x + 1.5 * n8.x) / 0.5;
     // Profil dissymétrique des dunes : pente douce au vent, raide sous le vent
     float dune_slope = cos(dune_phase) + 0.35 * cos(2.0 * dune_phase);
@@ -1381,7 +1397,10 @@ void fragment() {
             rubble = mix(rubble, vec3(0.34, 0.28, 0.21), 0.3);
             vec3 basalt = vec3(0.075, 0.07, 0.068) * (1.0 + 0.35 * n2.x + 0.2 * n8.x);
             vec3 ash = vec3(0.20, 0.19, 0.18) * (1.0 + 0.12 * n8.x + 0.08 * n32.x);
-            color = mix(color, crustKind < 0.0 ? soil : crustKind > 2.5 ? ash : crustKind > 1.2 ? basalt : rubble, crustFresh);
+            vec3 laharMud = vec3(0.30, 0.27, 0.22) * (1.0 + 0.1 * n8.x + 0.06 * n32.x);
+            vec3 avalancheSnow = vec3(0.88, 0.9, 0.94) * (1.0 + 0.04 * n2.x - 0.06 * max(n8.x, 0.0));
+            color = mix(color, crustKind < 0.0 ? soil : crustKind > 4.5 ? avalancheSnow : crustKind > 3.5 ? laharMud
+                               : crustKind > 2.5 ? ash : crustKind > 1.2 ? basalt : rubble, crustFresh);
         }
         // Pluie : le sol mouillé fonce et luit ; quand il pleut plus vite que le sol ne boit, l'eau
         // stagne en flaques sur le plat et dans les creux du micro-relief, avant de s'infiltrer.

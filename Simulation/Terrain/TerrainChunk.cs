@@ -121,8 +121,10 @@ public static class TerrainChunkBuilder
                 debris[index * 2] = sample.Debris;
                 debris[index * 2 + 1] = sample.DebrisDay;
                 // (côtes basses comprises : la marée haute et la remontée de la mer peuvent les couvrir)
+                // (et fonds de vallée qu'une crue peut inonder ; côtes qu'un tsunami peut submerger)
                 hasWater |= sample.WaterLevel > sample.Height
-                            || sample.Height < Climate.Tides.MaxHeightMeters + Climate.SeaLevel.MaxRiseMeters;
+                            || (sample.WaterLevel > 0.01 && sample.WaterLevel > sample.Height - Climate.FloodModel.MaxRiseM)
+                            || sample.Height < Climate.Tides.MaxHeightMeters + Climate.SeaLevel.MaxRiseMeters + Climate.TsunamiModel.MaxRunupM;
                 surface[index] = direction * (radius + sample.Height);
             }
 

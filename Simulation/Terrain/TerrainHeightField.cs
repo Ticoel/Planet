@@ -756,7 +756,7 @@ public sealed class TerrainHeightField
         Double3 position = direction * RadiusMeters;
 
         // Vallées des fleuves (calculées d'abord : le fond des vallées est lissé)
-        var (valley, river, bed) = Valley(direction, position, near, baseHeight, minWavelength);
+        var (valley, river, bed, valleyDepth) = Valley(direction, position, near, baseHeight, minWavelength);
 
         double folds = Folds(position, baseHeight, baseSlope, SlopeCoherence(position / RadiusMeters, near), minWavelength, out double foldShare);
         double height = baseHeight
@@ -766,6 +766,7 @@ public sealed class TerrainHeightField
         // jusqu'à la côte au lieu de transformer toute la plaine en bras de mer
         // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
+        double uncarved = height;
         height = Math.Max(height - valley.depth, Math.Min(height, 1.0));
         // Deltas et vasières : plaine de vase au ras de la mer, sans falaise
         var wetShare = WetlandShare(direction, position, near[0], baseHeight, baseSlope);
@@ -796,7 +797,11 @@ public sealed class TerrainHeightField
         if (valley.depth > 0 && height > 1.0)
         {
             double riverWater = height - 3.0 + (3.0 * bed + 2.6) * SmoothStep(0.0, 0.1, bed);
-            water = Math.Max(water, riverWater);
+            // Plaine d'inondation : le niveau du fleuve (fond de vallée moins 40 cm), caché sous le
+            // sol ; une crue le fait monter (shader de l'eau) et il apparaît, à plat, sur les
+            // parties basses de la vallée
+            double floodplain = Math.Min(height - 0.05, uncarved - valleyDepth - 0.4);
+            water = Math.Max(water, Math.Max(riverWater, floodplain));
         }
         return new TerrainSample(height, water, river, Wetland: (float)wetland);
     }
@@ -931,14 +936,14 @@ public sealed class TerrainHeightField
     /// plat, méandres (le tracé entre deux cellules est ondulé par un bruit). Renvoie la
     /// profondeur creusée, la part du point en fond de vallée, et la part dans le lit du fleuve.
     /// </summary>
-    private ((double depth, double floor) valley, double river, double bed) Valley(
+    private ((double depth, double floor) valley, double river, double bed, double full) Valley(
         Double3 direction, Double3 position, ReadOnlySpan<int> cells, double baseHeight, double minWavelength)
     {
         bool any = false;
         foreach (int cell in cells)
             if (_riverCell[cell]) { any = true; break; }
         if (!any || baseHeight <= -50)
-            return ((0, 0), 0, 0);
+            return ((0, 0), 0, 0, 0);
 
         // Méandres : on déplace le point plutôt que le tracé
         double mx = position.X / MeanderWavelength, my = position.Y / MeanderWavelength, mz = position.Z / MeanderWavelength;
@@ -950,7 +955,7 @@ public sealed class TerrainHeightField
         meander -= direction * meander.Dot(direction);
         Double3 p = (direction + meander * (MeanderAmplitude / RadiusMeters)).Normalized();
 
-        double bestDepth = 0, bestFloor = 0, bestRiver = 0, bestBed = 0;
+        double bestDepth = 0, bestFloor = 0, bestRiver = 0, bestBed = 0, bestFull = 0;
         foreach (int cell in cells)
         {
             if (!_riverCell[cell])
@@ -993,6 +998,7 @@ public sealed class TerrainHeightField
             if (carve > bestDepth)
             {
                 bestDepth = carve;
+                bestFull = depth;
                 bestFloor = 1 - SmoothStep(floorHalf * 0.5, floorHalf * 2, distance);
                 // Le lit n'est visible que si le maillage est assez fin pour lui
                 bestRiver = channel > minWavelength ? 1 - SmoothStep(channel * 0.4, channel * 0.55, distance) : 0;
@@ -1005,7 +1011,7 @@ public sealed class TerrainHeightField
                 }
             }
         }
-        return ((bestDepth, bestFloor), bestRiver, bestBed);
+        return ((bestDepth, bestFloor), bestRiver, bestBed, bestFull);
     }
 
     // --- Deltas et vasières (étape 16) ------------------------------------------------------------

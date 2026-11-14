@@ -11,6 +11,12 @@ public enum SlideKind
     Landslide,
     /// <summary>Avalanche rocheuse : effondrement d'un versant entier, très long parcours.</summary>
     RockAvalanche,
+    /// <summary>Lahar : coulée de boue volcanique (cendres fraîches gorgées de pluie), qui suit les
+    /// vallées sur de longues distances.</summary>
+    Lahar,
+    /// <summary>Avalanche de neige : une plaque de neige qui part sur une pente de 30 à 45° ; son
+    /// dépôt fond au printemps.</summary>
+    SnowAvalanche,
 }
 
 /// <summary>Conditions du moment qui fragilisent les pentes.</summary>
@@ -122,7 +128,7 @@ public static class SlopeStability
     /// </param>
     public static Candidate? FindWeakest(Func<Double3, double> height, Double3 center, double radiusM, int samples,
                                         SlopeConditions conditions, Random random, double rockfallChance, double minHeight = 0.5,
-                                        double heterogeneity = 0)
+                                        double heterogeneity = 0, double coastalBoost = 1)
     {
         center = center.Normalized();
         var (ax, ay) = LavaFlow.TangentFrame(center);
@@ -132,7 +138,7 @@ public static class SlopeStability
         {
             double rho = radiusM * Math.Sqrt(random.NextDouble()), phi = random.NextDouble() * 2 * Math.PI;
             Double3 d = (center + ax * (rho * Math.Cos(phi) / r) + ay * (rho * Math.Sin(phi) / r)).Normalized();
-            var (slope, _, h) = LocalSlope(height, d, 6.0);
+            var (slope, downhill, h) = LocalSlope(height, d, 6.0);
             if (h < minHeight)
                 continue;   // sous l'eau ou au ras de la mer : rien ici
             double fs;
@@ -143,6 +149,10 @@ public static class SlopeStability
                 // Paroi : la roche cède d'autant plus facilement qu'elle est raide, gelée puis
                 // dégelée, détrempée ou secouée ; le tirage décide si un bloc part vraiment
                 double weakening = 1 + 2.5 * conditions.FreezeThaw + 1.0 * conditions.Saturation + 6 * conditions.SeismicK;
+                // Falaise de bord de mer : les vagues sapent son pied, elle recule par éboulements
+                // successifs (quelques cm à quelques m par an selon la roche et la houle)
+                if (coastalBoost > 1 && height((d + downhill * (80.0 / r)).Normalized()) < 1.5)
+                    weakening *= coastalBoost;
                 bool falls = random.NextDouble() < rockfallChance * weakening * (slope / CliffSlope);
                 fs = falls ? 0.9 - 0.1 * random.NextDouble() : 1.5;
             }

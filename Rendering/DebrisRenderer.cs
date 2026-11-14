@@ -150,6 +150,14 @@ public partial class DebrisRenderer : Node3D
         _dustMesh.VisibleInstanceCount = _puffs.Count;
     }
 
+    /// <summary>Ajoute une bouffée de poussière (pied d'une tornade…) : position (m, repère de la planète), taille (m), vitesse (m/s).</summary>
+    public void AddPuff(Double3 position, float size, Vector3 velocity)
+    {
+        if (_puffs.Count >= MaxPuffs)
+            return;
+        _puffs.Add(new Puff { Position = position, Velocity = velocity, Size = size, Growth = size * 0.3f });
+    }
+
     /// <summary>Plus rien en mouvement : on efface tout (nouvelle planète).</summary>
     public void Clear()
     {

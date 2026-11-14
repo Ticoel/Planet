@@ -212,6 +212,27 @@ public sealed class CrustEdits
         Interlocked.Increment(ref _version);
     }
 
+    /// <summary>Retire un calque (dépôt de neige fondu…) : la liste et l'index sont refaits.</summary>
+    public void Remove(CrustPatch patch)
+    {
+        lock (_lock)
+        {
+            var kept = Array.FindAll(_patches, p => !ReferenceEquals(p, patch));
+            if (kept.Length == _patches.Length)
+                return;
+            var buckets = new Dictionary<long, CrustPatch[]>();
+            foreach (var (key, list) in _buckets)
+            {
+                var left = Array.FindAll(list, p => !ReferenceEquals(p, patch));
+                if (left.Length > 0)
+                    buckets[key] = left;
+            }
+            _buckets = buckets;
+            _patches = kept;
+            Interlocked.Increment(ref _version);
+        }
+    }
+
     public void Clear()
     {
         lock (_lock)

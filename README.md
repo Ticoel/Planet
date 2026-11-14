@@ -159,7 +159,7 @@ GNU GPL version 3 (voir le fichier `LICENSE`).
 
 # Conception
 
-Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, éruptions fissurales, deltas et vasières, interface du jeu, 160 tests).
+Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, éruptions fissurales, deltas et vasières, Terre vivante, interface du jeu, 165 tests).
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -356,6 +356,41 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   - équilibre recalculé dans l'horloge géologique, évolution au fil du temps dans l'horloge
     climatique ; couches « Chimie » (un élément par couche), fiche à la sonde (roches, sol,
     eau), courbes (gaz carbonique, fer et phosphore dissous).
+- **Une Terre vivante** (étape 17), tout se déclenche seul dans l'horloge climatique :
+  - **crues** : la pluie récente de tout le bassin descend le réseau des fleuves ; le fleuve monte
+    comme le débit à la puissance 0,4 (Leopold et Maddock), déborde de son lit (deux fois le débit
+    habituel suffit) et inonde, à plat, le fond de sa vallée ; en sécheresse il baisse. Les plus
+    fortes crues rompent parfois une berge : le fleuve s'ouvre un nouveau bras dans la plaine,
+    inscrit dans la croûte ; les lacs montent aussi ;
+  - **lahars** : forte pluie sur les cendres fraîches (moins de 5 ans) d'un volcan proche : une
+    coulée de boue très fluide dévale les pentes et s'étale loin dans les vallées ;
+  - **tsunamis** : un séisme de magnitude 7,5 et plus sous la mer soulève une vague qui traverse
+    l'océan à ~200 m/s (√(g h)) ; elle décroît en s'étalant puis grandit sur les hauts-fonds (loi
+    de Green) ; sur la côte, la mer se retire d'abord, puis trois ou quatre vagues déferlent, à
+    une quinzaine de minutes d'intervalle ; alerte au journal avec l'heure d'arrivée ;
+  - **cyclones tropicaux** : nés sur les mers à plus de 26,5 °C entre 5° et 22° de latitude
+    (~85 par an sur la Terre, au prorata de la surface), ils filent vers l'ouest puis remontent
+    vers le pôle et repartent vers l'est ; ils se renforcent sur l'eau chaude jusqu'à 200 km/h et
+    plus (intensité potentielle d'Emanuel), s'épuisent sur terre ; vents tournants autour de l'œil
+    (nuls dans l'œil, maximaux au mur de l'œil), pluies torrentielles, spirale de nuages vue de
+    l'orbite ; catégories de Saffir-Simpson dans les détails ;
+  - **tornades** : sous les orages violents de l'après-midi, sur terre aux moyennes latitudes :
+    entonnoir gris qui descend du nuage, manchon de poussière au sol, vents jusqu'à 250 km/h,
+    quelques minutes à une demi-heure ;
+  - **dunes** qui avancent (~15 m/an) et **tempêtes de sable** (vent fort sur un désert : mur de
+    poussière ocre, visibilité de quelques centaines de mètres) ;
+  - **glaciers** : recalculés chaque année d'après la neige qui ne fond plus, ils avancent ou
+    reculent (annoncé au journal) ; ceux qui atteignent la mer **vêlent des icebergs**, qui
+    dérivent avec le vent et fondent ; **avalanches de neige** sur les pentes de 28 à 50° quand
+    la neige est épaisse (surtout après une chute de neige ou au redoux) ; leur dépôt fond au
+    printemps et disparaît ;
+  - **recul des falaises** : au bord de la mer, les vagues sapent le pied des parois, qui
+    s'éboulent bien plus souvent qu'à l'intérieur des terres, d'autant plus que la houle est forte ;
+  - **ciel** : **aurores polaires** (rideaux verts frangés de rouge, du côté du pôle, au-delà de
+    ~55° de latitude, plus ou moins fortes selon les nuits), **étoiles filantes** (~5 par heure,
+    jusqu'à 60 pendant les pluies d'étoiles filantes, deux fois par an), **arcs-en-ciel** (arc
+    principal à 42° du point opposé au Soleil, secondaire inversé et plus pâle, quand il pleut et
+    que le Soleil est bas), **brouillards** de rayonnement la nuit et le matin.
 - **Sons** : vent, pluie, vagues, tonnerre, grondements des volcans et des séismes, entièrement
   synthétisés et pilotés par la simulation (extrait : `docs/sons.mp3`).
 - **Captures** : photos sans l'interface, vidéos AVI Motion JPEG à 30 images/s encodées en tâche de
@@ -376,6 +411,9 @@ Faites :
 - **16a** : croûte modulaire (géologie figée au passage au climat ; glissements de terrain,
   éboulements, avalanches rocheuses en temps réel ; lave figée).
 - **16b** : chimie (carbone, azote, phosphore, soufre, fer : roches, sols, fleuves, océan, air).
+- **17** : une Terre vivante : crues, lahars, tsunamis, cyclones, tornades, dunes et tempêtes de
+  sable, glaciers et icebergs, avalanches, recul des falaises, aurores, étoiles filantes,
+  brouillards, arcs-en-ciel ; éruptions fissurales, deltas et vasières, flaques et sols craquelés.
 
 À venir :
 
@@ -383,13 +421,9 @@ Faites :
     s'adaptent ; leur action sur le milieu (voir plus bas).
 16. **Confort** : sauvegarde et chargement d'une planète ; vue sous-marine ; arbres et herbes en
     objets au sol.
-17. **Une Terre encore plus vivante** (pistes, sans vie nécessaire) : crues des fleuves qui
-    débordent après les fortes pluies et changent de lit ; érosion des côtes et recul des
-    falaises ; dunes qui avancent avec le vent et tempêtes de sable ; glaciers qui avancent,
-    vêlent et reculent ; avalanches de neige ; lahars (coulées de boue volcaniques) ; tsunamis
-    après les grands séismes sous-marins ; effondrements karstiques ; geysers de boue et lacs
-    acides de cratère ; sols gelés en polygones (pergélisol) ; aurores polaires, pluies d'étoiles
-    filantes, brouillards et arcs-en-ciel.
+17. **Encore plus de vie sans la vie** (pistes) : effondrements karstiques ; lacs acides de
+    cratère ; sols gelés en polygones (pergélisol) ; écoulement visible des glaciers (crevasses,
+    séracs) ; houle de tempête et submersion par les cyclones.
 
 ### Pistes pour la vie et son action sur le milieu
 
@@ -669,6 +703,32 @@ de ces mêmes ouvrages.
   Kasting J. F. (1993). *Earth's early atmosphere.* Science 259, 920-926 ; Feulner G. (2012).
   *The faint young Sun problem.* Reviews of Geophysics 50, RG2006. — gaz carbonique.
 - Berner R. A. (2004). *The Phanerozoic Carbon Cycle: CO₂ and O₂.* Oxford. — modèles à réservoirs.
+
+## Une Terre vivante
+- Leopold L. B., Maddock T. (1953). *The hydraulic geometry of stream channels and some
+  physiographic implications.* USGS Professional Paper 252. — profondeur des fleuves selon le débit.
+- Slingerland R., Smith N. D. (2004). *River avulsions and their deposits.* Annual Review of Earth
+  and Planetary Sciences 32, 257-285. — fleuves qui changent de lit.
+- Pierson T. C. (1995). *Flow characteristics of large eruption-triggered debris flows at snow-clad
+  volcanoes.* Journal of Volcanology and Geothermal Research 66, 283-294. — lahars.
+- Salm B. (1993). *Flow, flow transition and runout distances of flowing avalanches.* Annals of
+  Glaciology 18, 221-226. — avalanches de neige (loi de Voellmy).
+- Satake K. (2015). *Tsunamis.* Treatise on Geophysics 4, 477-504 ; Green G. (1838). *On the motion
+  of waves in a variable canal of small depth and width.* Trans. Cambridge Phil. Soc. 6. —
+  tsunamis : vitesse, hauteur, amplification sur les hauts-fonds.
+- Gray W. M. (1968). *Global view of the origin of tropical disturbances and storms.* Monthly
+  Weather Review 96, 669-700 ; Emanuel K. A. (1986). *An air-sea interaction theory for tropical
+  cyclones.* Journal of the Atmospheric Sciences 43, 585-604 ; Holland G. J. (1980). *An analytic
+  model of the wind and pressure profiles in hurricanes.* Monthly Weather Review 108, 1212-1218. —
+  cyclones : naissance, intensité potentielle, vents.
+- Fujita T. T. (1971). *Proposed characterization of tornadoes and hurricanes by area and
+  intensity.* SMRP Research Paper 91, University of Chicago. — tornades.
+- Bagnold R. A. (1941). *The Physics of Blown Sand and Desert Dunes.* Methuen. — dunes.
+- Sunamura T. (1992). *Geomorphology of Rocky Coasts.* Wiley. — recul des falaises sous les vagues.
+- Feldstein Y. I. (1963). *Some problems concerning the morphology of auroras and magnetic
+  disturbances at high latitudes.* Geomagnetism and Aeronomy 3, 183-192. — ovale auroral.
+- Nussenzveig H. M. (1977). *The theory of the rainbow.* Scientific American 236(4), 116-127. —
+  arcs-en-ciel.
 
 ## Sons et captures
 - Farnell A. (2010). *Designing Sound.* MIT Press. — synthèse procédurale du vent, de la pluie,
