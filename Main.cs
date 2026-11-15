@@ -1080,6 +1080,7 @@ public partial class Main : Node3D
             StarAngle = climate ? 2 * Math.PI * skyTime * (1 + 1 / _orbit.YearLengthDays) : 0,
             CloudTime = _climate.TimeDays * 86400.0,
             Weather = climate ? LocalWeatherAtCamera() : null,
+            Underground = explorer.InCave && _caves.Underground(explorer.Position),
         };
         _sky.Update(frame, delta);
         UpdateSound(frame);

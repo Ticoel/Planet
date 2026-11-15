@@ -24,6 +24,8 @@ public struct SkyFrame
     public double CloudTime;
     /// <summary>Climat de la cellule sous la caméra (null : pas de climat simulé).</summary>
     public LocalWeather? Weather;
+    /// <summary>Caméra sous terre, dans une grotte : ni pluie, ni brume, ni voile d'atmosphère.</summary>
+    public bool Underground;
 }
 
 /// <summary>Climat du moment à l'endroit de la caméra (étape 10d).</summary>
@@ -517,6 +519,9 @@ public sealed partial class SkyRenderer : Node3D
             mist = SmoothStep(0.88f, 0.98f, w.RelativeHumidity) * (1 - SmoothStep(2f, 5f, windSpeed)) * morning;
             localWind = new Vector3(w.Wind.Dot(east), 0, -w.Wind.Dot(north));
         }
+        if (frame.Underground)
+            rain = snow = dust = mist = sandstorm = 0;
+        _postMaterial.SetShaderParameter("underground", frame.Underground);
         SetParticles(_rain, rain, localWind + new Vector3(0, -9f, 0));
         SetParticles(_snow, snow, localWind * 0.6f + new Vector3(0, -1.2f, 0));
         SetParticles(_dust, Math.Min(1f, dust + sandstorm), localWind * 0.8f + new Vector3(0, -0.2f, 0));
@@ -808,6 +813,8 @@ uniform float camera_altitude = 2.0;
 uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
 // Brume près du sol (averses, poussière, brouillard)
 uniform float fog_density = 0.0;
+// Caméra dans une grotte : pas de voile d'atmosphère sur les parois proches
+uniform bool underground = false;
 uniform vec3 fog_color = vec3(0.7);
 uniform float fog_height = 500.0;
 uniform float ground_altitude = 0.0;
@@ -1083,7 +1090,7 @@ void fragment() {
         alpha = 1.0 - (1.0 - plume.a) * (1.0 - alpha);
     }
     ALBEDO = color;
-    ALPHA = alpha;
+    ALPHA = underground ? 0.0 : alpha;
 }
 ";
 }
