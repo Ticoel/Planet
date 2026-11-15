@@ -433,6 +433,9 @@ public partial class TerrainRenderer : Node3D
     /// <summary>Jour du climat, pour la repousse de la végétation sur le sol remanié.</summary>
     public void SetCrustDay(float day) => _material?.SetShaderParameter("crust_day", day);
 
+    /// <summary>Ouvertures des grottes (voir <see cref="CaveRenderer"/>).</summary>
+    public void SetCaveHoles(Vector4[] holes) => _material?.SetShaderParameter("cave_holes", holes);
+
     /// <summary>Bascule sur le nouveau relief : l'ancien est jeté, le nouveau devient le relief affiché.</summary>
     private void Swap()
     {
@@ -1267,7 +1270,14 @@ void vertex() {
     v_sun = sun_transmittance(v_height, dot(normalize(v_world - planet_center), sun_direction));
 }
 
+// Ouvertures des grottes (centre relatif à la caméra, rayon ; w = 0 : aucune) : le relief n'y
+// est pas dessiné, la grotte en volume prend le relais (CaveRenderer)
+uniform vec4 cave_holes[4];
+
 void fragment() {
+    for (int i = 0; i < 4; i++)
+        if (cave_holes[i].w > 0.0 && distance(v_world, cave_holes[i].xyz) < cave_holes[i].w)
+            discard;
     vec3 up = normalize(v_world - planet_center);
     vec3 normal = normalize(v_world_normal);
     float h = v_height;

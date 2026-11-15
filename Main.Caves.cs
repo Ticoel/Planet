@@ -1,0 +1,122 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Godot;
+using Planet.Rendering;
+using Planet.Simulation.Climate;
+using Planet.Simulation.Tectonics;
+using Planet.Simulation.Terrain;
+
+namespace Planet;
+
+/// <summary>
+/// Grottes en volume (étape 18) dans le jeu : grottes karstiques en amont des résurgences des
+/// calcaires, tunnels de lave à mi-flanc des volcans. Construites quand la caméra s'en approche
+/// (<see cref="CaveRenderer"/>) ; on y marche (la caméra suit le sol des galeries) ; touche Y :
+/// aller à la grotte suivante.
+/// </summary>
+public partial class Main
+{
+    private CaveRenderer _caves;
+    private readonly HashSet<CaveSite> _visitedCaves = new();
+    private TerrainHeightField _caveField;
+    private Groundwater _caveGroundwater;
+
+    private void SetupCaves()
+    {
+        _caves = new CaveRenderer { Name = "Caves" };
+        AddChild(_caves);
+        _terrain.Explorer.CaveProbe = p => _caves.SpaceAt(p);
+    }
+
+    /// <summary>Emplacements des grottes du relief et de l'eau souterraine actuels.</summary>
+    private List<CaveSite> CaveSites(TerrainHeightField field)
+    {
+        var sites = new List<CaveSite>();
+        if (_groundwater != null)
+            foreach (var spring in _groundwater.Springs)
+                if (spring.Kind == SpringKind.Karst)
+                {
+                    int seed = HashCode.Combine(Seed, spring.Cell, 11);
+                    sites.Add(new CaveSite(CaveKind.Karst, Double3.From(spring.Position).Normalized(), seed));
+                }
+        int hint = -1;
+        foreach (var volcano in field.Landforms)
+        {
+            if (volcano.Kind is not (LandformKind.ShieldVolcano or LandformKind.Stratovolcano))
+                continue;
+            int seed = HashCode.Combine(Seed, volcano.BirthMyr, 23);
+            var random = new Random(seed);
+            Double3 summit = Double3.From(volcano.Position).Normalized();
+            var (ex, ey) = LavaFlow.TangentFrame(summit);
+            double angle = random.NextDouble() * 2 * Math.PI;
+            Double3 outward = ex * Math.Cos(angle) + ey * Math.Sin(angle);
+            Double3 site = (summit + outward * (0.45 * volcano.RadiusM / TerrainHeightField.RadiusMeters)).Normalized();
+            if (field.Sample(site, 1, ref hint).Height < 5)
+                continue;                                       // flanc sous la mer
+            sites.Add(new CaveSite(CaveKind.LavaTube, site, seed, outward));
+        }
+        return sites;
+    }
+
+    private void UpdateCaves()
+    {
+        var field = _terrain.Field;
+        if (field == null)
+        {
+            _caves.Clear();
+            _terrain.SetCaveHoles(new Vector4[CaveRenderer.MaxHoles]);
+            return;
+        }
+        if (field != _caveField || _groundwater != _caveGroundwater)
+        {
+            _caveField = field;
+            _caveGroundwater = _groundwater;
+            _caves.SetSites(CaveSites(field), field);
+        }
+        var explorer = _terrain.Explorer;
+        bool near = explorer.AltitudeAboveGround < 3000;
+        var holes = near ? _caves.Update(explorer.Position, SunDirection(), explorer.InCave || _caves.Underground(explorer.Position))
+                         : new Vector4[CaveRenderer.MaxHoles];
+        _terrain.SetCaveHoles(holes);
+    }
+
+    /// <summary>Touche Y : emmène la caméra à l'entrée de la grotte suivante (de la plus proche à la plus lointaine).</summary>
+    private void GoToNextCave()
+    {
+        if (_terrain.Field == null)
+            return;
+        if (_caveField != _terrain.Field || _caveGroundwater != _groundwater)
+            UpdateCaves();
+        var all = _caves.Sites;
+        if (all.Count == 0)
+        {
+            ShowNotice("Pas de grotte sur cette planète pour l'instant (il faut des calcaires sous la pluie, ou des volcans hors de l'eau)");
+            return;
+        }
+        if (all.All(_visitedCaves.Contains))
+            _visitedCaves.Clear();
+        Double3 camera = _terrain.Explorer.Position.Normalized();
+        var site = all.Where(s => !_visitedCaves.Contains(s)).OrderByDescending(s => s.Direction.Dot(camera)).First();
+        _visitedCaves.Add(site);
+        var explorer = _terrain.Explorer;
+        // À une trentaine de mètres de l'entrée, à hauteur d'homme (marche), regard vers l'ouverture
+        Double3 entrance = site.Direction;
+        if (site.Kind == CaveKind.Karst)
+        {
+            // (l'entrée est en amont de la résurgence : on se place sur la vasque, face au versant)
+            explorer.PlaceAbove(entrance, ExplorerCamera.EyeHeight);
+        }
+        else
+        {
+            var (ex, _) = LavaFlow.TangentFrame(entrance);
+            explorer.PlaceAbove((entrance - ex * (30 / TerrainHeightField.RadiusMeters)).Normalized(), ExplorerCamera.EyeHeight);
+        }
+        if (!explorer.Walking)
+            explorer.ToggleWalking();
+        explorer.Face(entrance - explorer.Position.Normalized(), -0.25);
+        ShowNotice(site.Kind == CaveKind.Karst
+            ? "Lieu : grotte karstique, en amont de la résurgence (marchez vers l'ouverture ; une lampe s'allume sous terre)"
+            : "Lieu : tunnel de lave, entrée par une lucarne effondrée (marchez dedans ; une lampe s'allume sous terre)");
+    }
+}

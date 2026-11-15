@@ -274,6 +274,7 @@ public partial class Main : Node3D
         ApplyQuality();
         SetupOverlays();
         SetupCrust();
+        SetupCaves();
         SetupEvents();
         SetupHud();
         SetupUi();
@@ -331,6 +332,7 @@ public partial class Main : Node3D
         UpdateEvents(delta);
         UpdateChemistry(delta);
         _terrain.Tick(delta, ReadInput());
+        UpdateCaves();
         ApplyShake(delta);
         _noticeTimer -= delta;
         UpdateSky(delta);
@@ -1486,7 +1488,7 @@ public partial class Main : Node3D
             lines.Add("[C] Figer la géologie et passer au climat (sans retour)   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
-            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant");
+            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant   [Y] Grotte suivante");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
             lines.Add("[B] Aller voir l'événement naturel suivant (Maj+B : précédent) : éruption, cyclone, tsunami, crue, tornade, tempête de sable, aurores…");
@@ -2054,6 +2056,9 @@ public partial class Main : Node3D
                 break;
             case Key.J:
                 GoToNextHabitat();
+                break;
+            case Key.Y:
+                GoToNextCave();
                 break;
             case Key.K:
                 _muted = !_muted;

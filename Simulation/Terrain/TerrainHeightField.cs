@@ -352,6 +352,8 @@ public sealed class TerrainHeightField
 
     /// <summary>Volcans et cratères pris en compte par ce relief.</summary>
     public int LandformCount => _landforms.Length;
+    /// <summary>Volcans et cratères (pour placer les tunnels de lave).</summary>
+    public System.Collections.Generic.IReadOnlyList<Landform> Landforms => _landforms;
 
     /// <summary>Range chaque relief dans les cellules dont il peut toucher la zone (son rayon
     /// d'influence + le rayon d'une cellule) : un point n'examine que ceux de sa cellule.</summary>

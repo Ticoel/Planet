@@ -147,6 +147,8 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
+  - Y : grotte suivante (grotte karstique ou tunnel de lave) ; on y entre à pied, une lampe
+    s'allume sous terre ;
   - B : aller voir l'événement naturel suivant (Maj + B : le précédent) : tsunami qui approche
     d'une côte, cyclone vu de haut, éruption ou fissure, orages à tornades, crue, tempête de sable,
     glissement, lahar ou avalanche récents, séisme, aurores, glacier qui vêle, montagne enneigée ;
@@ -405,8 +407,21 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   surface naissent des **sources** (vasques de vraie eau creusées dans le relief) ; dans les
   calcaires, l'eau circule en rivières souterraines et ressort en grosses **résurgences**. Couche
   « Eau souterraine » (groupe Planète) et fiche à la sonde (profondeur, recharge, débit des sources).
-  Les grottes elles-mêmes ne sont pas creusées : le relief est une surface (une hauteur par point),
-  qui ne peut pas contenir de cavité (voir « Relief en volume » dans la feuille de route).
+- **Grottes en volume** (étape 18) : le relief détaillé est une surface (une hauteur par point),
+  qui ne peut pas contenir de cavité ; les grottes sont donc un **champ de densité 3D** (roche ou
+  vide) calculé à la demande autour de leur entrée et maillé en *surface nets*, construit en tâche
+  de fond quand la caméra s'en approche (à moins de 1,5 km), avec le relief détaillé autour (qui
+  n'est pas dessiné dans l'ouverture). Comme le reste du relief, le volume peut être calculé
+  n'importe où sans jamais être stocké en entier (c'est le principe de No Man's Sky).
+  - **Grottes karstiques** : en amont de chaque résurgence des calcaires ; galeries de 150 à
+    250 m qui s'enfoncent dans la colline en serpentant, 10 à 30 m sous la surface, avec des salles
+    de 6 à 10 m, parois irrégulières, bancs de calcaire, parois humides ;
+  - **Tunnels de lave** : à mi-flanc des volcans, tube de 4 à 7 m de rayon, aplati, qui suit la
+    pente quelques mètres sous la surface (basalte sombre, oxydé en rouge par endroits) ; on y
+    descend par une lucarne effondrée ;
+  - on y marche : la caméra suit le sol des galeries, les parois l'arrêtent, on tombe dans
+    l'ouverture ; la lumière du jour entre par l'ouverture et s'éteint vers le fond ; sous terre,
+    une lampe éclaire devant soi.
 - **Pas encore de vie, pas de vocabulaire de la vie** : la sonde, le survol, les détails et la
   couche « Climats » donnent des climats (équatorial humide, semi-aride, subarctique…), plus des
   biomes (forêt, savane, toundra), tant que la vie n'est pas apparue ; les dépôts colorés des
@@ -435,6 +450,7 @@ Faites :
   sable, glaciers et icebergs, avalanches, recul des falaises, aurores, étoiles filantes,
   brouillards, arcs-en-ciel ; éruptions fissurales, deltas et vasières, flaques et sols craquelés ;
   eau souterraine, sources et résurgences karstiques.
+- **18 (début)** : relief en volume : grottes karstiques et tunnels de lave.
 
 À venir :
 
@@ -445,11 +461,10 @@ Faites :
 17. **Encore plus de vie sans la vie** (pistes) : effondrements karstiques ; lacs acides de
     cratère ; sols gelés en polygones (pergélisol) ; écoulement visible des glaciers (crevasses,
     séracs) ; houle de tempête et submersion par les cyclones.
-18. **Relief en volume** (piste) : grottes, arches, surplombs, tunnels de lave. Un champ de densité
-    3D calculé à la demande autour de la caméra (comme le relief actuel, mais en volume), maillé
-    par morceaux (marching cubes ou dual contouring), la surface actuelle restant utilisée de loin ;
-    seules les modifications (effondrements, glissements) sont mémorisées. Ainsi le volume existe
-    partout sur la planète sans jamais être stocké en entier.
+18. **Suite du relief en volume** (pistes) : rivières souterraines et lacs dans les grottes,
+    stalactites et stalagmites ; arches et surplombs des falaises ; effondrements (dolines) qui
+    ouvrent une grotte. Même principe : un champ de densité 3D calculé à la demande autour de la
+    caméra, la surface restant utilisée de loin, et seules les modifications mémorisées.
 
 ### Pistes pour la vie et son action sur le milieu
 
@@ -763,6 +778,19 @@ de ces mêmes ouvrages.
   disturbances at high latitudes.* Geomagnetism and Aeronomy 3, 183-192. — ovale auroral.
 - Nussenzveig H. M. (1977). *The theory of the rainbow.* Scientific American 236(4), 116-127. —
   arcs-en-ciel.
+
+## Grottes et relief en volume
+
+- Gibson S. F. F. (1998). *Constrained elastic surface nets: generating smooth surfaces from
+  binary segmented data.* MICCAI 1998, LNCS 1496, 888-898. — maillage d'un champ de densité
+  (*surface nets*), un sommet par cube traversé par la surface.
+- Palmer A. N. (1991). *Origin and morphology of limestone caves.* Geological Society of America
+  Bulletin 103, 1-21. — galeries des grottes karstiques : creusées par l'eau de la nappe vers les
+  résurgences, de quelques mètres de diamètre, avec des salles.
+- Kempe S. (2019). *Volcanic rock caves.* In White W. B., Culver D. C., Pipan T. (éd.),
+  Encyclopedia of Caves (3e éd.), Academic Press, 1118-1127. — tunnels de lave : tubes aplatis
+  sous le toit figé d'une coulée, quelques mètres sous la surface, ouverts par des lucarnes
+  effondrées.
 
 ## Sons et captures
 - Farnell A. (2010). *Designing Sound.* MIT Press. — synthèse procédurale du vent, de la pluie,

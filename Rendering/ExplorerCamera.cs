@@ -67,6 +67,15 @@ public sealed class ExplorerCamera
     public double Speed { get; private set; }
 
     private TerrainHeightField _field;
+
+    /// <summary>
+    /// Grottes (relief en volume) : espace libre à l'aplomb d'un point, ou null hors des grottes.
+    /// Dans une grotte, le sol est celui de la galerie (on y marche, on y tombe par l'ouverture) et
+    /// les parois arrêtent la caméra.
+    /// </summary>
+    public Func<Double3, CaveSpace?> CaveProbe { get; set; }
+    /// <summary>Vrai quand la caméra est dans une grotte (le sol est celui de la galerie).</summary>
+    public bool InCave { get; private set; }
     // Direction de marche, tangente au sol. Elle est transportée d'un point à l'autre quand la
     // caméra se déplace (au lieu d'un cap mesuré depuis le nord, indéfini aux pôles)
     private Double3 _heading = new(0, 1, 0);
@@ -90,6 +99,15 @@ public sealed class ExplorerCamera
         Pitch = AutoPitch(altitude);
         Walking = false;
         _verticalSpeed = 0;
+        UpdateGround();
+    }
+
+    /// <summary>Place la caméra exactement en un point (repère de la planète, m), par exemple dans une grotte.</summary>
+    public void PlaceAt(Double3 position)
+    {
+        Position = position;
+        _verticalSpeed = 0;
+        TransportHeading();
         UpdateGround();
     }
 
@@ -257,6 +275,38 @@ public sealed class ExplorerCamera
             _verticalSpeed -= Gravity * delta;
             Position += Position.Normalized() * _verticalSpeed * delta;
         }
+
+        // Dans une grotte : sol et plafond de la galerie ; les parois arrêtent
+        var cave = CaveProbe?.Invoke(Position);
+        if (cave.HasValue)
+        {
+            var space = cave.Value;
+            if (space.Solid && InCave)
+            {
+                // Contre une paroi : on reste où l'on était
+                Position = start;
+                _verticalSpeed = 0;
+                TransportHeading();
+                Speed = 0;
+                return;
+            }
+            if (!space.Solid)
+            {
+                double low = space.FloorRadius + (Walking ? EyeHeight : 0.6);
+                double high = double.IsInfinity(space.CeilingRadius) ? double.MaxValue : Math.Max(low, space.CeilingRadius - 0.3);
+                double r = Math.Clamp(Position.Length(), low, high);
+                if ((r <= low && _verticalSpeed < 0) || (r >= high && _verticalSpeed > 0))
+                    _verticalSpeed = 0;
+                Position = Position.Normalized() * r;
+                InCave = true;
+                TransportHeading();
+                Speed = Position.DistanceTo(start) / delta;
+                GroundHeight = space.FloorRadius - TerrainHeightField.RadiusMeters;
+                AltitudeAboveGround = Position.Length() - space.FloorRadius;
+                return;
+            }
+        }
+        InCave = false;
 
         // Jamais sous le sol (ni trop loin)
         Double3 direction = Position.Normalized();
