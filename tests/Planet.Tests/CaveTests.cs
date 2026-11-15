@@ -42,13 +42,54 @@ public static class CaveTests
             // Dans la roche, loin des galeries : plein
             Double3 rock = cave.ToWorld(new Double3(cave.HoleRadius + 30, cave.HoleRadius + 30, -60));
             Assert.True(cave.Density(cave.ToLocal(rock), 0) > 0, $"{kind} : roche pleine hors des galeries");
-
-            var watch = Stopwatch.StartNew();
-            var mesh = cave.BuildMesh();
-            Console.WriteLine($"     {kind} : {cave.LengthM:0} m, {cave.MaxDepthM:0} m sous la surface, {mesh.Indices.Length / 3:N0} triangles en {watch.ElapsedMilliseconds} ms");
-            Assert.True(mesh.Indices.Length > 3000, $"{kind} : des parois maillées");
-            Assert.True(mesh.Attributes.Any(a => a.A == 0) && mesh.Attributes.Any(a => a.A == 1 && a.G > 5), $"{kind} : parois profondes visibles, sol de surface caché");
-            Assert.True(watch.ElapsedMilliseconds < 3000, $"{kind} : maillage assez rapide pour la tâche de fond");
         }
+    }
+
+    [Test]
+    public static void VolumeReliefMatchesTheSurfaceAndHollowsTheCaves()
+    {
+        var grid = Fixtures.Grid(5);
+        var elevation = Fixtures.DomeContinent(grid, 20f, 30f, 35f, 3);
+        var field = new TerrainHeightField(grid, elevation, 42, elevation.Select(e => e > 0 ? 600f : 0f).ToArray());
+        int hint = -1;
+        Func<Double3, double> height = d => field.Sample(d, 0.5, ref hint).Height;
+        int cell = Enumerable.Range(0, grid.CellCount).Where(c => elevation[c] > 0.6f).OrderBy(c => c).First();
+        Double3 site = Double3.From(grid.Positions[cell]).Normalized();
+        var cave = Cave.LavaTube(site, LavaFlow.TangentFrame(site).x, 6, height);
+        var frame = new VolumeFrame(site, height(site));
+
+        // Sans grotte : la surface du volume est celle du relief détaillé (raccord invisible)
+        var watch = Stopwatch.StartNew();
+        var plain = VolumeChunkBuilder.Build(frame, 3, -2, field, null);
+        long ms = watch.ElapsedMilliseconds;
+        Assert.True(plain.Indices.Length > 300, "un bloc de sol maillé");
+        double worst = 0;
+        for (int v = 0; v < plain.Vertices.Length; v++)
+        {
+            Double3 world = plain.Center + Double3.From(plain.Vertices[v]);
+            worst = Math.Max(worst, Math.Abs(world.Length() - TerrainHeightField.RadiusMeters - height(world.Normalized())));
+        }
+        Console.WriteLine($"     bloc de sol : {plain.Indices.Length / 3} triangles en {ms} ms, écart au relief détaillé {worst:0.00} m au plus");
+        Assert.True(worst < 0.5, "sommets du volume sur le relief détaillé");
+        // Faces tournées vers l'air (sens horaire vu de devant pour Godot : produit vectoriel opposé à la normale)
+        for (int t = 0; t < plain.Indices.Length; t += 3)
+        {
+            Vector3 a = plain.Vertices[plain.Indices[t]], b = plain.Vertices[plain.Indices[t + 1]], c = plain.Vertices[plain.Indices[t + 2]];
+            Vector3 n = plain.Normals[plain.Indices[t]] + plain.Normals[plain.Indices[t + 1]] + plain.Normals[plain.Indices[t + 2]];
+            Assert.True((b - a).Cross(c - a).Dot(n) <= 1e-6f, "triangle tourné vers l'air");
+        }
+        // Blocs voisins : sommets de bord partagés (pas de fente)
+        var right = VolumeChunkBuilder.Build(frame, 4, -2, field, null);
+        var mine = plain.Vertices.Select(v => plain.Center + Double3.From(v)).ToArray();
+        int shared = right.Vertices.Select(v => right.Center + Double3.From(v)).Count(w => mine.Any(m => m.DistanceTo(w) < 1e-3));
+        Assert.True(shared >= 16, $"bord commun aux deux blocs ({shared} sommets partagés)");
+
+        // Avec la grotte : parois intérieures, plus sombres au fond ; le sol autour reste du sol
+        var near = VolumeChunkBuilder.Build(frame, 0, 0, field, new[] { cave });
+        var inside = Enumerable.Range(0, near.Colors.Length).Where(v => near.Colors[v].G > 0.25f).ToArray();
+        Assert.True(inside.Length > 50, $"parois de grotte dans le bloc de l'entrée ({inside.Length} sommets)");
+        Assert.True(inside.Any(v => near.Colors[v].A < 0.7f), "le fond est plus sombre que l'entrée");
+        Assert.True(near.Colors.Any(c => c.G == 0f && c.A == 1f), "le sol de surface autour de l'entrée");
+        Assert.True(near.Colors.All(c => c.B == 1f), "sommets marqués comme relief en volume");
     }
 }

@@ -11,21 +11,20 @@ namespace Planet;
 
 /// <summary>
 /// Grottes en volume (étape 18) dans le jeu : grottes karstiques en amont des résurgences des
-/// calcaires, tunnels de lave à mi-flanc des volcans. Construites quand la caméra s'en approche
-/// (<see cref="CaveRenderer"/>) ; on y marche (la caméra suit le sol des galeries) ; touche Y :
-/// survoler la grotte suivante.
+/// calcaires, tunnels de lave à mi-flanc des volcans. Tracées quand la caméra s'en approche
+/// (<see cref="NearbyCaves"/>) et creusées dans le relief en volume autour de la caméra
+/// (<see cref="VolumeChunkBuilder"/>) ; on y marche (la caméra suit le sol des galeries) ;
+/// touche Y : survoler la grotte suivante.
 /// </summary>
 public partial class Main
 {
-    private CaveRenderer _caves;
+    private readonly NearbyCaves _caves = new();
     private readonly HashSet<CaveSite> _visitedCaves = new();
     private TerrainHeightField _caveField;
     private Groundwater _caveGroundwater;
 
     private void SetupCaves()
     {
-        _caves = new CaveRenderer { Name = "Caves" };
-        AddChild(_caves);
         _terrain.Explorer.CaveProbe = p => _caves.SpaceAt(p);
     }
 
@@ -76,10 +75,12 @@ public partial class Main
     private void UpdateCaves()
     {
         var field = _terrain.Field;
+        bool climate = _clock == ClockMode.Climate;
+        _terrain.VolumeEnabled = climate;
         if (field == null)
         {
             _caves.Clear();
-            _terrain.SetCaveOpenings(new CaveRenderer.Openings());
+            _terrain.SetVolumeCaves(_caves.Ready, _caves.Version);
             return;
         }
         if (field != _caveField || _groundwater != _caveGroundwater)
@@ -89,10 +90,11 @@ public partial class Main
             _caves.SetSites(CaveSites(field), field);
         }
         var explorer = _terrain.Explorer;
-        bool near = explorer.AltitudeAboveGround < 3000;
-        var openings = near ? _caves.Update(explorer.Position, SunDirection(), explorer.InCave && _caves.Underground(explorer.Position))
-                            : new CaveRenderer.Openings();
-        _terrain.SetCaveOpenings(openings);
+        if (explorer.AltitudeAboveGround < 3000)
+            _caves.Update(explorer.Position);
+        _terrain.SetVolumeCaves(_caves.Ready, _caves.Version);
+        // Lampe : allumée sous terre
+        _terrain.SetShaderParameter("cave_lamp", explorer.InCave && _caves.Underground(explorer.Position) ? 1f : 0f);
     }
 
     /// <summary>Touche Y : emmène la caméra à l'entrée de la grotte suivante (de la plus proche à la plus lointaine).</summary>

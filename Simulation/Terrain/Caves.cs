@@ -19,37 +19,18 @@ public readonly record struct CaveSite(CaveKind Kind, Double3 Direction, int See
 /// <summary>Espace libre d'une grotte à l'aplomb d'un point (rayons depuis le centre de la planète, m).</summary>
 public readonly record struct CaveSpace(bool Solid, double FloorRadius, double CeilingRadius);
 
-/// <summary>Maillage d'une grotte, dans le repère de la planète, relatif à <see cref="Cave.Origin"/>.</summary>
-public sealed class CaveMesh
-{
-    public Vector3[] Vertices = Array.Empty<Vector3>();
-    public Vector3[] Normals = Array.Empty<Vector3>();
-    /// <summary>x : ouverture vers le ciel (1 à l'entrée, 0 au fond) ; y : profondeur sous la surface (m) ;
-    /// z : coordonnée locale (m) pour la texture ; w : 0 si le point est caché (sol de surface, déjà
-    /// dessiné par le relief).</summary>
-    public Color[] Attributes = Array.Empty<Color>();
-    public int[] Indices = Array.Empty<int>();
-}
-
 /// <summary>
-/// Relief en volume (étape 18) : une grotte. Le relief détaillé est une surface (une hauteur par
-/// point), qui ne peut pas contenir de cavité ; les grottes sont donc décrites par un <b>champ de
-/// densité 3D</b> (positif : roche, négatif : vide), calculé à la demande autour de l'entrée,
-/// comme le reste du relief : le volume existe partout sans jamais être stocké en entier.
-/// <list type="bullet">
-/// <item>Galeries : chapelet de segments (rayons de 2 à 10 m, salles), parois irrégulières (bruit 3D) ;</item>
-/// <item>Sol de surface autour de l'entrée : la surface du relief détaillé, si bien que le volume
-/// se raccorde au relief ; ailleurs, la roche est pleine en dehors des galeries ;</item>
-/// <item>Maillage : <i>surface nets</i> (Gibson 1998), un sommet par cube traversé par la surface,
-/// placé à la moyenne des points où la densité s'annule sur ses arêtes ; lisse et sans table.</item>
-/// </list>
+/// Une grotte (étape 18) : chapelet de galeries (rayons de 2 à 10 m, salles), parois irrégulières
+/// (bruit 3D), creusé dans le relief en volume autour de la caméra (<see cref="VolumeChunkBuilder"/>),
+/// qui en fait des parois continues avec le sol de surface : l'ouverture est simplement là où une
+/// galerie recoupe la surface. Sert aussi à la caméra (sol et parois des galeries).
 /// Repère local plat (x, y dans le plan tangent à l'entrée, z vers le haut) : sur 200 m, la
 /// courbure de la planète ne fait que quelques millimètres (corrigée tout de même).
 /// </summary>
 public sealed class Cave
 {
-    public const double VoxelM = 0.75;
-    private const double WallNoiseM = 0.7;
+    // Irrégularité des parois (m) : galeries et ouvertures jamais parfaitement rondes
+    private const double WallNoiseM = 1.1;
 
     private readonly List<(Double3 a, double ra, Double3 b, double rb)> _segments = new();
     private readonly Func<double, double, double> _groundZ;     // hauteur du sol dans le repère local
@@ -60,7 +41,7 @@ public sealed class Cave
     public Double3 Up { get; }
     public Double3 AxisX { get; }
     public Double3 AxisY { get; }
-    /// <summary>Rayon de l'ouverture (m) : le relief détaillé n'est pas dessiné en deçà.</summary>
+    /// <summary>Rayon de l'ouverture (m), à peu près.</summary>
     public double HoleRadius { get; private set; }
     /// <summary>Longueur des galeries (m).</summary>
     public double LengthM { get; private set; }
@@ -267,48 +248,37 @@ public sealed class Cave
     {
         double depth = groundZ - q.Z;
         double tunnel = TunnelDistance(q, candidates);
-        // Parois irrégulières, mais lisses près de la surface : l'ouverture découpée dans le relief
-        // détaillé (shader du terrain, galeries lisses) tombe exactement sur les parois
         if (tunnel < FarRock)
-            tunnel += WallNoiseM * WallNoise(q) * Math.Clamp((depth - 1) / 3, 0, 1);
+            tunnel += WallNoiseM * WallNoise(q);
         // Roche sous le sol, hors des galeries ; air au-dessus du sol
         ground = depth < tunnel;
         return ground ? depth : tunnel;
     }
 
     /// <summary>
-    /// Galeries qui recoupent la surface (l'ouverture), sans bruit ni aplatissement, réduites à
-    /// leur partie proche de la surface : le relief détaillé n'est pas dessiné à l'intérieur, et
-    /// de dehors on ne voit de la grotte que ce qui se voit à travers (au plus <paramref name="max"/>).
+    /// Distance signée aux parois (m, repère local de la grotte) : négative dans le vide, positive
+    /// dans la roche, parois irrégulières. <paramref name="candidates"/> : galeries proches
+    /// (<see cref="SegmentsNear"/>), ou null pour toutes.
     /// </summary>
-    public List<(Double3 a, double ra, Double3 b, double rb)> OpeningSegments(int max)
+    public double WallDistance(Double3 q, int[] candidates)
     {
-        const int Steps = 16;
-        var opening = new List<(Double3, double, Double3, double)>();
-        foreach (var (a, ra, b, rb) in _segments)
+        double tunnel = TunnelDistance(q, candidates);
+        return tunnel < FarRock ? tunnel + WallNoiseM * WallNoise(q) : tunnel;
+    }
+
+    /// <summary>Galeries assez proches d'un point (repère local) pour compter à moins de <paramref name="radiusM"/> mètres.</summary>
+    public int[] SegmentsNear(Double3 q, double radiusM)
+    {
+        var list = new List<int>();
+        for (int g = 0; g < _segments.Count; g++)
         {
-            if (opening.Count == max)
-                break;
-            // Partie du segment à moins de (rayon + 1,5 m) sous la surface
-            double t0 = double.NaN, t1 = double.NaN;
-            for (int k = 0; k <= Steps; k++)
-            {
-                double t = k / (double)Steps;
-                Double3 q = a + (b - a) * t;
-                double r = ra + (rb - ra) * t;
-                if (GroundZ(q.X, q.Y) - q.Z < r + 1.5)
-                {
-                    if (double.IsNaN(t0)) t0 = t;
-                    t1 = t;
-                }
-            }
-            if (double.IsNaN(t0))
-                continue;
-            t0 = Math.Max(0, t0 - 1.0 / Steps);
-            t1 = Math.Min(1, t1 + 1.0 / Steps);
-            opening.Add((a + (b - a) * t0, ra + (rb - ra) * t0, a + (b - a) * t1, ra + (rb - ra) * t1));
+            var (a, ra, b, rb) = _segments[g];
+            Double3 ab = b - a;
+            double t = Math.Clamp((q - a).Dot(ab) / Math.Max(ab.LengthSquared(), 1e-9), 0, 1);
+            if (q.DistanceTo(a + ab * t) < Math.Max(ra, rb) * 2.2 + WallNoiseM + radiusM + FarRock)
+                list.Add(g);
         }
-        return opening;
+        return list.ToArray();
     }
 
     /// <summary>
@@ -365,167 +335,5 @@ public sealed class Cave
             h ^= h >> 16;
             return h / (double)uint.MaxValue * 2 - 1;
         }
-    }
-
-    // --- Maillage (surface nets) -------------------------------------------------------------------
-
-    /// <summary>Maillage des parois (et du sol autour de l'entrée), calculé en tâche de fond.</summary>
-    public CaveMesh BuildMesh()
-    {
-        double s = VoxelM;
-        int nx = (int)Math.Ceiling((_max.X - _min.X) / s) + 1, ny = (int)Math.Ceiling((_max.Y - _min.Y) / s) + 1;
-        int nz = (int)Math.Ceiling((_max.Z - _min.Z) / s) + 1;
-        var ground = new double[nx * ny];
-        for (int j = 0; j < ny; j++)
-            for (int i = 0; i < nx; i++)
-                ground[j * nx + i] = GroundZ(_min.X + i * s, _min.Y + j * s);
-        int Index(int i, int j, int k) => (k * ny + j) * nx + i;
-        var density = new float[nx * ny * nz];
-        // Blocs de 8³ cubes : seules les galeries proches d'un bloc y sont examinées
-        const int B = 8;
-        int bx = (nx + B - 1) / B, by = (ny + B - 1) / B, bz = (nz + B - 1) / B;
-        var blockSegments = new int[bx * by * bz][];
-        double half = B * s * 0.5, diagonal = half * Math.Sqrt(3);
-        for (int c = 0; c < blockSegments.Length; c++)
-        {
-            int ci = c % bx, cj = c / bx % by, ck = c / (bx * by);
-            var center = new Double3(_min.X + ci * B * s + half, _min.Y + cj * B * s + half, _min.Z + ck * B * s + half);
-            var list = new List<int>();
-            for (int g = 0; g < _segments.Count; g++)
-            {
-                var (a, ra, b, rb) = _segments[g];
-                Double3 ab = b - a;
-                double t = Math.Clamp((center - a).Dot(ab) / Math.Max(ab.LengthSquared(), 1e-9), 0, 1);
-                if (center.DistanceTo(a + ab * t) < Math.Max(ra, rb) * 2.2 + WallNoiseM + diagonal + FarRock)
-                    list.Add(g);
-            }
-            blockSegments[c] = list.ToArray();
-        }
-        System.Threading.Tasks.Parallel.For(0, nz, k =>
-        {
-            for (int j = 0; j < ny; j++)
-                for (int i = 0; i < nx; i++)
-                {
-                    var q = new Double3(_min.X + i * s, _min.Y + j * s, _min.Z + k * s);
-                    var candidates = blockSegments[(k / B * by + j / B) * bx + i / B];
-                    density[Index(i, j, k)] = (float)Density(q, ground[j * nx + i], candidates);
-                }
-        });
-
-        var mesh = new CaveMesh();
-        var vertices = new List<Vector3>();
-        var normals = new List<Vector3>();
-        var attributes = new List<Color>();
-        var indices = new List<int>();
-        var cellVertex = new int[(nx - 1) * (ny - 1) * (nz - 1)];
-        int Cell(int i, int j, int k) => (k * (ny - 1) + j) * (nx - 1) + i;
-        Array.Fill(cellVertex, -1);
-        double r0 = Origin.Length();
-        Span<float> corner = stackalloc float[8];
-        for (int k = 0; k < nz - 1; k++)
-            for (int j = 0; j < ny - 1; j++)
-                for (int i = 0; i < nx - 1; i++)
-                {
-                    int mask = 0;
-                    for (int c = 0; c < 8; c++)
-                    {
-                        corner[c] = density[Index(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1))];
-                        if (corner[c] > 0) mask |= 1 << c;
-                    }
-                    if (mask == 0 || mask == 255)
-                        continue;
-                    // Sommet : moyenne des points où la densité s'annule sur les 12 arêtes
-                    double sx = 0, sy = 0, sz = 0;
-                    int crossings = 0;
-                    for (int a = 0; a < 8; a++)
-                        for (int axis = 0; axis < 3; axis++)
-                        {
-                            int b = a | (1 << axis);
-                            if (b == a || ((mask >> a) & 1) == ((mask >> b) & 1))
-                                continue;
-                            double t = corner[a] / (corner[a] - corner[b]);
-                            sx += (a & 1) + (axis == 0 ? t : 0);
-                            sy += ((a >> 1) & 1) + (axis == 1 ? t : 0);
-                            sz += ((a >> 2) & 1) + (axis == 2 ? t : 0);
-                            crossings++;
-                        }
-                    var local = new Double3(_min.X + (i + sx / crossings) * s, _min.Y + (j + sy / crossings) * s, _min.Z + (k + sz / crossings) * s);
-                    // Normale : vers le vide (la densité décroît), gradient sur le cube
-                    double gx = corner[1] + corner[3] + corner[5] + corner[7] - corner[0] - corner[2] - corner[4] - corner[6];
-                    double gy = corner[2] + corner[3] + corner[6] + corner[7] - corner[0] - corner[1] - corner[4] - corner[5];
-                    double gz = corner[4] + corner[5] + corner[6] + corner[7] - corner[0] - corner[1] - corner[2] - corner[3];
-                    Double3 n = -(AxisX * gx + AxisY * gy + Up * gz);
-                    n = n.LengthSquared() < 1e-12 ? Up : n.Normalized();
-                    double groundHere = GroundZ(local.X, local.Y);
-                    double depth = groundHere - local.Z;
-                    // Sol de surface : déjà dessiné par le relief détaillé (seules les parois le sont ici)
-                    Density(local, groundHere, null, out bool hidden);
-                    double open = Math.Exp(-Math.Max(0, local.Length() - HoleRadius) / 9.0);
-                    cellVertex[Cell(i, j, k)] = vertices.Count;
-                    vertices.Add((ToWorld(local) - Origin).ToVector3());
-                    normals.Add(n.ToVector3());
-                    attributes.Add(new Color((float)open, (float)Math.Max(0, depth), (float)(local.Z + 0.37 * local.X), hidden ? 0f : 1f));
-                }
-
-        // Faces : chaque arête de la grille traversée par la surface relie les sommets des 4 cubes qui la partagent
-        for (int k = 1; k < nz - 1; k++)
-            for (int j = 1; j < ny - 1; j++)
-                for (int i = 1; i < nx - 1; i++)
-                {
-                    bool solid = density[Index(i, j, k)] > 0;
-                    for (int axis = 0; axis < 3; axis++)
-                    {
-                        int i2 = i + (axis == 0 ? 1 : 0), j2 = j + (axis == 1 ? 1 : 0), k2 = k + (axis == 2 ? 1 : 0);
-                        if (i2 >= nx || j2 >= ny || k2 >= nz || (density[Index(i2, j2, k2)] > 0) == solid)
-                            continue;
-                        int v0, v1, v2, v3;
-                        if (axis == 0)
-                        {
-                            v0 = cellVertex[Cell(i, j - 1, k - 1)]; v1 = cellVertex[Cell(i, j, k - 1)];
-                            v2 = cellVertex[Cell(i, j, k)]; v3 = cellVertex[Cell(i, j - 1, k)];
-                        }
-                        else if (axis == 1)
-                        {
-                            v0 = cellVertex[Cell(i - 1, j, k - 1)]; v1 = cellVertex[Cell(i - 1, j, k)];
-                            v2 = cellVertex[Cell(i, j, k)]; v3 = cellVertex[Cell(i, j, k - 1)];
-                        }
-                        else
-                        {
-                            v0 = cellVertex[Cell(i - 1, j - 1, k)]; v1 = cellVertex[Cell(i, j - 1, k)];
-                            v2 = cellVertex[Cell(i, j, k)]; v3 = cellVertex[Cell(i - 1, j, k)];
-                        }
-                        if (v0 < 0 || v1 < 0 || v2 < 0 || v3 < 0)
-                            continue;
-                        if (attributes[v0].A + attributes[v1].A + attributes[v2].A + attributes[v3].A == 0)
-                            continue;                                   // entièrement caché
-                        if (solid)
-                            indices.AddRange(new[] { v0, v1, v2, v0, v2, v3 });
-                        else
-                            indices.AddRange(new[] { v0, v2, v1, v0, v3, v2 });
-                    }
-                }
-        // Seuls les sommets utilisés sont gardés (le sol de surface, caché, n'a pas de faces)
-        var remap = new int[vertices.Count];
-        Array.Fill(remap, -1);
-        var usedVertices = new List<Vector3>();
-        var usedNormals = new List<Vector3>();
-        var usedAttributes = new List<Color>();
-        for (int i = 0; i < indices.Count; i++)
-        {
-            int v = indices[i];
-            if (remap[v] < 0)
-            {
-                remap[v] = usedVertices.Count;
-                usedVertices.Add(vertices[v]);
-                usedNormals.Add(normals[v]);
-                usedAttributes.Add(attributes[v]);
-            }
-            indices[i] = remap[v];
-        }
-        mesh.Vertices = usedVertices.ToArray();
-        mesh.Normals = usedNormals.ToArray();
-        mesh.Attributes = usedAttributes.ToArray();
-        mesh.Indices = indices.ToArray();
-        return mesh;
     }
 }

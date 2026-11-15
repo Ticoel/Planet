@@ -192,6 +192,7 @@ public partial class TerrainRenderer : Node3D
         RefreshPlanetRadius();
         _waterMaterial = new ShaderMaterial { Shader = new Shader { Code = WaterShaderCode } };
         RefreshPlanetRadius();
+        SetupVolume();
 
         int workerCount = Math.Max(1, System.Environment.ProcessorCount - 2);
         _workers = new Thread[workerCount];
@@ -211,6 +212,7 @@ public partial class TerrainRenderer : Node3D
         if (_workers != null)
             foreach (var worker in _workers)
                 worker.Join(500);
+        ClearVolume();
         ClearCache();
         foreach (var entry in _pending.Values)
             FreeResources(entry);
@@ -399,6 +401,7 @@ public partial class TerrainRenderer : Node3D
                 _stale[packed] = stamp;
         // (gardé un moment : un morceau en cours de calcul arrivera peut-être avec l'état d'avant)
         _recentEdits.Enqueue((direction, radiusM, stamp));
+        InvalidateVolume(direction, radiusM);
         while (_recentEdits.Count > 256)
             _recentEdits.Dequeue();
     }
@@ -432,16 +435,6 @@ public partial class TerrainRenderer : Node3D
 
     /// <summary>Jour du climat, pour la repousse de la végétation sur le sol remanié.</summary>
     public void SetCrustDay(float day) => _material?.SetShaderParameter("crust_day", day);
-
-    /// <summary>Ouvertures des grottes, à ne pas dessiner (voir <see cref="CaveRenderer"/>).</summary>
-    public void SetCaveOpenings(CaveRenderer.Openings openings)
-    {
-        if (_material == null)
-            return;
-        _material.SetShaderParameter("cave_bounds", openings.Bounds);
-        _material.SetShaderParameter("cave_opening_a", openings.SegmentStart);
-        _material.SetShaderParameter("cave_opening_b", openings.SegmentEnd);
-    }
 
     /// <summary>Bascule sur le nouveau relief : l'ancien est jeté, le nouveau devient le relief affiché.</summary>
     private void Swap()
@@ -483,6 +476,7 @@ public partial class TerrainRenderer : Node3D
 
         UploadCompleted();
         UpdateSelection();
+        UpdateVolume();
         Evict();
         for (int i = 0; i < FreePerFrame && _toFree.Count > 0; i++)
             FreeResources(_toFree.Dequeue());
@@ -1243,9 +1237,32 @@ render_mode cull_back;
 varying vec2 v_debris;
 // Deltas et vasières : part de plaine de boue (couleur des sommets, r)
 varying float v_wetland;
-// 1 sur les jupes (sommets ajoutés après la grille)
-varying float v_skirt;
-const int GRID_VERTICES = " + (TerrainChunkBuilder.Side * TerrainChunkBuilder.Side) + @";
+// Relief en volume autour de la caméra (TerrainRenderer.Volume) : b de la couleur des sommets
+// = 1 sur les blocs de volume ; g : paroi de grotte (0,5 : calcaire, 1 : basalte) ; a :
+// ouverture vers le ciel (1 en surface, vers 0 au fond des grottes)
+varying float v_volume;
+varying float v_interior;
+varying float v_open;
+// Blocs de volume prêts (masque de 16 × 16 blocs autour de la caméra) : la surface n'y est pas dessinée
+uniform bool volume_enabled = false;
+uniform sampler2D volume_mask : filter_nearest, repeat_disable;
+uniform vec3 volume_origin;
+uniform vec3 volume_axis_x = vec3(1.0, 0.0, 0.0);
+uniform vec3 volume_axis_y = vec3(0.0, 0.0, 1.0);
+uniform vec2 volume_corner;
+uniform float volume_chunk = 16.0;
+// Lampe portée par la caméra sous terre (0 ou 1)
+uniform float cave_lamp = 0.0;
+
+bool in_volume(vec3 p) {
+    if (!volume_enabled)
+        return false;
+    vec3 r = p - volume_origin;
+    vec2 c = floor(vec2(dot(r, volume_axis_x), dot(r, volume_axis_y)) / volume_chunk) - volume_corner;
+    if (any(lessThan(c, vec2(0.0))) || any(greaterThanEqual(c, vec2(16.0))))
+        return false;
+    return texelFetch(volume_mask, ivec2(c), 0).r > 0.5;
+}
 
 vec3 crack_hash(vec3 c) {
     c = vec3(dot(c, vec3(127.1, 311.7, 74.7)), dot(c, vec3(269.5, 183.3, 246.1)), dot(c, vec3(113.5, 271.9, 124.6)));
@@ -1276,42 +1293,24 @@ void vertex() {
     v_water = UV;
     v_debris = UV2;
     v_wetland = COLOR.r;
-    v_skirt = VERTEX_ID >= GRID_VERTICES ? 1.0 : 0.0;
+    v_volume = COLOR.b;
+    v_interior = COLOR.g;
+    v_open = COLOR.a;
+    // Couronne de blocs de volume hors du masque : enfoncée de 20 cm, sous la surface qui la recouvre
+    if (COLOR.b > 0.5) {
+        vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+        if (!in_volume(world))
+            VERTEX -= normalize(world - planet_center) * 0.2;
+    }
     NORMAL = n;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
     v_sun = sun_transmittance(v_height, dot(normalize(v_world - planet_center), sun_direction));
 }
 
-// Grottes en volume (CaveRenderer) : sphère englobante de chaque grotte (centre relatif à la
-// caméra, rayon ; w = 0 : aucune) et galeries qui recoupent la surface (extrémités, rayons). Le
-// relief n'est pas dessiné dans ces galeries (l'ouverture), ni ses jupes près des grottes (vues
-// de l'intérieur, elles pendaient en murs sous la surface)
-uniform vec4 cave_bounds[4];
-uniform vec4 cave_opening_a[16];
-uniform vec4 cave_opening_b[16];
-
-bool in_cave_opening(vec3 p) {
-    for (int c = 0; c < 4; c++) {
-        if (cave_bounds[c].w <= 0.0 || distance(p, cave_bounds[c].xyz) > cave_bounds[c].w)
-            continue;
-        if (v_skirt > 0.001)
-            return true;
-        for (int k = c * 4; k < c * 4 + 4; k++) {
-            vec4 a = cave_opening_a[k], b = cave_opening_b[k];
-            if (a.w <= 0.0)
-                continue;
-            vec3 ab = b.xyz - a.xyz;
-            float t = clamp(dot(p - a.xyz, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
-            if (distance(p, a.xyz + ab * t) < mix(a.w, b.w, t))
-                return true;
-        }
-    }
-    return false;
-}
-
 void fragment() {
-    if (in_cave_opening(v_world))
+    // (près de la caméra, le relief en volume remplace la surface)
+    if (v_volume < 0.5 && in_volume(v_world))
         discard;
     vec3 up = normalize(v_world - planet_center);
     vec3 normal = normalize(v_world_normal);
@@ -1659,6 +1658,25 @@ void fragment() {
     }
     NORMAL = normalize((VIEW_MATRIX * vec4(normal, 0.0)).xyz);
     v_shade = cloud_shadow(v_world, up, h) * plume_shadow(v_world, up, h);
+    // Parois des grottes : calcaire clair en bancs, ou basalte sombre oxydé par endroits ; la
+    // lumière du jour s'éteint vers le fond ; la lampe éclaire devant soi
+    if (v_interior > 0.01) {
+        float wall = smoothstep(0.0, 0.3, v_interior);
+        float basalt = smoothstep(0.65, 0.9, v_interior);
+        vec3 rock = mix(vec3(0.62, 0.58, 0.5), vec3(0.15, 0.13, 0.12), basalt);
+        float band = 0.5 + 0.5 * sin(dot(p, up) * 1.7 + 3.0 * n32.x);
+        rock = mix(rock, mix(vec3(0.5, 0.39, 0.28), vec3(0.36, 0.17, 0.1), basalt), 0.35 * band);
+        rock *= 0.85 + 0.3 * n2.x;
+        color = mix(color, rock, wall);
+        roughness = mix(roughness, mix(0.45, 0.85, basalt), wall);
+        specular = mix(specular, 0.35, wall);
+        float d = length(v_world);
+        float lamp = cave_lamp * max(dot(normal, -v_world / max(d, 1e-3)), 0.0) * 40.0 / (d * d + 15.0);
+        EMISSION += color * lamp * wall;
+        float daylight = mix(1.0, mix(0.015, 1.0, v_open), wall);
+        color *= daylight;
+        specular *= daylight;
+    }
     ALBEDO = color;
     ROUGHNESS = roughness;
     SPECULAR = specular;

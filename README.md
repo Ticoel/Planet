@@ -149,7 +149,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
   - Y : survoler la grotte suivante (grotte karstique ou tunnel de lave) ; G pour y entrer à pied, une lampe
     s'allume sous terre ;
-  - B : aller voir l'événement naturel suivant (Maj + B : le précédent) : tsunami qui approche
+  - B : voler vers l'événement naturel suivant, au centre de l'écran (Maj + B : le précédent) : tsunami qui approche
     d'une côte, cyclone vu de haut, éruption ou fissure, orages à tornades, crue, tempête de sable,
     glissement, lahar ou avalanche récents, séisme, aurores, glacier qui vêle, montagne enneigée ;
     la couche « Événements naturels » (groupe Climat) les montre tous sur la carte ;
@@ -409,18 +409,24 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   surface naissent des **sources** (vasques de vraie eau creusées dans le relief) ; dans les
   calcaires, l'eau circule en rivières souterraines et ressort en grosses **résurgences**. Couche
   « Eau souterraine » (groupe Planète) et fiche à la sonde (profondeur, recharge, débit des sources).
-- **Grottes en volume** (étape 18) : le relief détaillé est une surface (une hauteur par point),
-  qui ne peut pas contenir de cavité ; les grottes sont donc un **champ de densité 3D** (roche ou
-  vide) calculé à la demande autour de leur entrée et maillé en *surface nets*, construit en tâche
-  de fond quand la caméra s'en approche (à moins de 1,5 km), avec le relief détaillé autour (qui
-  n'est pas dessiné dans l'ouverture). Comme le reste du relief, le volume peut être calculé
-  n'importe où sans jamais être stocké en entier (c'est le principe de No Man's Sky).
+- **Relief en volume autour de la caméra** (étape 18) : le relief détaillé est une surface (une
+  hauteur par point), qui ne peut contenir ni grotte ni surplomb. À moins d'une centaine de
+  mètres de la caméra (au sol, dans l'horloge climatique), il est remplacé par un **champ de
+  densité 3D** (roche ou air) : le sol du relief détaillé, moins les galeries des grottes (plus
+  tard : ce que la vie creusera ou bâtira). Il est maillé par blocs de 16 m (*surface nets*, voxels
+  de 1 m) en tâche de fond, et dessiné avec le même shader que le terrain (neige, sable, eau, sol
+  remanié) : sa surface tombe à quelques centimètres près sur le relief détaillé, le raccord ne se
+  voit pas. Une couronne de blocs un peu enfoncée bouche les fentes du raccord. Comme le reste du
+  relief, le volume est calculé à la demande n'importe où, sans jamais être stocké en entier (le
+  principe de No Man's Sky).
+- **Grottes** : creusées dans ce volume, elles forment avec le sol un seul relief continu ; leur
+  ouverture est simplement là où une galerie recoupe la surface, irrégulière comme les parois.
   - **Grottes karstiques** : en amont de chaque résurgence des calcaires ; galeries de 150 à
     250 m qui s'enfoncent dans la colline en serpentant, 10 à 30 m sous la surface, avec des salles
     de 6 à 10 m, parois irrégulières, bancs de calcaire, parois humides ;
   - **Tunnels de lave** : à mi-flanc des volcans, tube de 4 à 7 m de rayon, aplati, qui suit la
-    pente quelques mètres sous la surface (basalte sombre, oxydé en rouge par endroits) ; on y
-    descend par une lucarne effondrée ;
+    pente 5 à 8 m sous la surface (basalte sombre, oxydé en rouge par endroits) ; on y descend
+    par une lucarne effondrée ;
   - on y marche : la caméra suit le sol des galeries, les parois l'arrêtent, on tombe dans
     l'ouverture ; la lumière du jour entre par l'ouverture et s'éteint vers le fond ; sous terre,
     une lampe éclaire devant soi.
@@ -452,7 +458,7 @@ Faites :
   sable, glaciers et icebergs, avalanches, recul des falaises, aurores, étoiles filantes,
   brouillards, arcs-en-ciel ; éruptions fissurales, deltas et vasières, flaques et sols craquelés ;
   eau souterraine, sources et résurgences karstiques.
-- **18 (début)** : relief en volume : grottes karstiques et tunnels de lave.
+- **18 (début)** : relief en volume autour de la caméra ; grottes karstiques et tunnels de lave.
 
 À venir :
 
@@ -465,8 +471,8 @@ Faites :
     séracs) ; houle de tempête et submersion par les cyclones.
 18. **Suite du relief en volume** (pistes) : rivières souterraines et lacs dans les grottes,
     stalactites et stalagmites ; arches et surplombs des falaises ; effondrements (dolines) qui
-    ouvrent une grotte. Même principe : un champ de densité 3D calculé à la demande autour de la
-    caméra, la surface restant utilisée de loin, et seules les modifications mémorisées.
+    ouvrent une grotte ; terriers et constructions de la vie, mémorisés comme des modifications
+    du champ de densité.
 
 ### Pistes pour la vie et son action sur le milieu
 
@@ -506,12 +512,18 @@ Faites :
 2.  **Cyclones invisibles** : leur spirale et leur œil étaient calculés par cellule de la
     simulation (~140 km), plus grosse que l'œil : on ne voyait qu'une tache. Ils sont maintenant
     dessinés point par point.
-3.  **Grottes** : galeries qui se voyaient à travers le sol de loin, sol de l'entrée en roche
-    brune aux bords déchiquetés, murs gris sous terre (les « jupes » des morceaux de terrain), pluie
-    et brume dans les galeries. L'ouverture est désormais découpée exactement dans les galeries,
-    le relief garde sa neige ou son sable jusqu'au bord ; touche Y : arrivée en vol. De dehors,
-    on ne voit de la grotte que ce qui se voit par l'ouverture : de loin, le relief dessiné avec
-    moins de détails peut être jusqu'à 6 m plus bas que le vrai, plus que le toit des galeries.
+3.  **Grottes** : galeries qui se voyaient à travers le sol, entrées parfaitement rondes, sol de
+    l'entrée en roche brune aux bords déchiquetés, murs gris sous terre, paroi en cercle autour
+    de l'entrée, pluie et brume dans les galeries : refait avec le relief en volume autour de la
+    caméra (un seul relief continu, entrées irrégulières) ; sons de surface coupés sous terre ;
+    formes reproductibles d'une partie à l'autre.
+4.  **Changements de vue brutaux** : la caméra vole vers les lieux, événements, sources et
+    grottes (montée, voyage, descente, le temps que le relief se charge) au lieu de s'y
+    téléporter ; l'événement visé est au centre de l'écran (séismes et glaciers étaient sous la
+    caméra, hors de la vue). Touche Y : arrivée en vol près de la grotte.
+5.  **Fleuves et lacs qui coulaient par grand froid** : les lacs gèlent sous −2 °C, les fleuves
+    par grand froid (les rapides restent ouverts), la glace se couvre de neige.
+6.  **Aurores vues de l'espace** : elles s'effacent au-dessus de 30 à 90 km d'altitude.
 
 # Sources et références
 
