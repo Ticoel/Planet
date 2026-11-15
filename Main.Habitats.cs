@@ -258,7 +258,9 @@ public partial class Main
     }
 
     /// <summary>Touche J : emmène la caméra à la source chaude ou au geyser suivant, du plus proche au plus lointain.</summary>
-    private void GoToNextHabitat()
+    private void GoToNextHabitat() => _terrain.Explorer.Transition(PlaceAtNextHabitat);
+
+    private void PlaceAtNextHabitat()
     {
         if (_terrain.Field == null || _habitats == null)
             return;
@@ -287,7 +289,7 @@ public partial class Main
         double distance = Math.Max(90, 7.0 * habitat.RadiusM);
         var explorer = _terrain.Explorer;
         explorer.PlaceAbove((site - (east * 0.8 + north * 0.6).Normalized() * (distance / TerrainHeightField.RadiusMeters)).Normalized(), 0.22 * distance);
-        explorer.Face(site - explorer.Position.Normalized(), -0.2);
+        explorer.LookAt(GroundPoint(site, 0));
         string detail = habitat.Kind == HabitatKind.Geyser
             ? $"geyser, jet de {habitat.JetHeightM:0} m toutes les {habitat.PeriodMinutes:0} min"
             : $"source chaude, {habitat.TemperatureC:0} °C, pH {French(habitat.Ph)}";

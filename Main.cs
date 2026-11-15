@@ -1113,7 +1113,10 @@ public partial class Main : Node3D
     /// Emmène la caméra vers un lieu choisi d'après la simulation, pour tester les nouveautés :
     /// relief, eau, météo, ciel. Les lieux liés au climat passent en horloge climatique.
     /// </summary>
-    private void GoToPlace(int index)
+    /// <summary>Lieux de test (F1 à F11, L) : la caméra y vole (voir <see cref="ExplorerCamera.Transition"/>).</summary>
+    private void GoToPlace(int index) => _terrain.Explorer.Transition(() => PlaceAtPlace(index));
+
+    private void PlaceAtPlace(int index)
     {
         if (index < 0 || index >= PlaceNames.Length)
             return;
@@ -1792,6 +1795,12 @@ public partial class Main : Node3D
             if ((_tectonics.CellElevation[n] < 0) != (_tectonics.CellElevation[cell] < 0))
                 coast = true;
         input.Surf = sea ? (coast ? 1f : 0.5f) : coast ? 0.6f : 0f;
+        // Sous terre : ni vent, ni pluie, ni vagues ; le tonnerre arrive étouffé
+        if (frame.Underground)
+        {
+            input.WindSpeed = input.Rain = input.Snow = input.Surf = 0f;
+            input.ThunderRate *= 0.3f;
+        }
         // Volcans : grondement audible jusqu'à quelques dizaines de km (plus loin pour les plus violents)
         if (frame.Weather.HasValue)
         {
@@ -1995,7 +2004,7 @@ public partial class Main : Node3D
                 break;
             case Key.X:
                 // Retour en orbite au-dessus du point actuel
-                _terrain.Explorer.PlaceAbove(_terrain.Explorer.Position, OrbitView);
+                _terrain.Explorer.Transition(() => _terrain.Explorer.PlaceAbove(_terrain.Explorer.Position, OrbitView));
                 break;
             case Key.P:
                 if (_gameOver)

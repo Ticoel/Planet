@@ -345,7 +345,10 @@ public sealed partial class SkyRenderer : Node3D
         float activity = 0.35f + 0.65f * Mathf.Clamp(0.5f + 0.5f * (float)(Math.Sin(day * 0.9) * Math.Sin(day * 0.37 + 1.3)), 0f, 1f);
         float oval = Mathf.SmoothStep(50f, 63f, Math.Abs(latitude)) * (1f - Mathf.SmoothStep(80f, 88f, Math.Abs(latitude)));
         bool climate = frame.Weather.HasValue;
-        _skyMaterial.SetShaderParameter("aurora_strength", climate ? oval * activity : 0f);
+        // (les aurores brillent vers 100 km d'altitude : vues d'en dessous, comme des rideaux dans
+        // le ciel ; de l'espace, ce rideau dessiné sur le ciel n'a plus de sens)
+        float belowAurora = 1f - Mathf.SmoothStep(30000f, 90000f, (float)frame.AltitudeAboveGround);
+        _skyMaterial.SetShaderParameter("aurora_strength", climate ? oval * activity * belowAurora : 0f);
         _skyMaterial.SetShaderParameter("aurora_pole", latitude >= 0 ? 1f : -1f);
         double yearDay = day % 365.25;
         float shower = (float)(Math.Exp(-Math.Pow((yearDay - 224) / 2.0, 2)) + Math.Exp(-Math.Pow((yearDay - 347) / 2.0, 2)));
@@ -680,7 +683,8 @@ vec3 stars(vec3 dir) {
     }
     // Voie lactée : grand cercle incliné de 60° sur l'équateur céleste
     vec3 galactic = normalize(vec3(0.0, 0.5, 0.866));
-    float band = exp(-pow(dot(dir, galactic) / 0.1, 2.0));
+    float galactic_offset = dot(dir, galactic) / 0.1;
+    float band = exp(-galactic_offset * galactic_offset);
     float clouds = 0.6 + 0.4 * sin(dir.x * 13.0 + dir.z * 7.0) * sin(dir.y * 11.0 - dir.x * 5.0);
     color += vec3(0.6, 0.62, 0.7) * 0.008 * band * clouds;
     return color;
@@ -736,7 +740,9 @@ void sky() {
             float azimuth = atan(dot(dir, east), dot(dir, north));
             float toward = smoothstep(-0.3, 0.5, dot(dir, north) * aurora_pole);
             float arc = 0.22 + 0.08 * sin(azimuth * 2.0 + TIME * 0.05) + 0.04 * sin(azimuth * 5.0 - TIME * 0.09);
-            float curtain = exp(-pow((elevation - arc) / 0.13, 2.0)) + 0.5 * exp(-pow((elevation - arc - 0.18) / 0.2, 2.0));
+            // (carrés écrits à la main : pow d'un nombre négatif n'est pas défini en GLSL)
+            float low = (elevation - arc) / 0.13, high = (elevation - arc - 0.18) / 0.2;
+            float curtain = exp(-low * low) + 0.5 * exp(-high * high);
             float rays = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(azimuth * 55.0 + 4.0 * sin(azimuth * 6.0 + TIME * 0.25) + TIME * 0.4), 3.0);
             vec3 tint = mix(vec3(0.15, 1.0, 0.45), vec3(0.95, 0.25, 0.4), smoothstep(arc + 0.05, arc + 0.35, elevation));
             color += tint * aurora_strength * toward * curtain * rays * night * 0.5;

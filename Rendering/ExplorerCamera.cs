@@ -98,6 +98,7 @@ public sealed class ExplorerCamera
         _heading = north;
         Pitch = AutoPitch(altitude);
         Walking = false;
+        InCave = false;
         _verticalSpeed = 0;
         UpdateGround();
     }
@@ -110,6 +111,103 @@ public sealed class ExplorerCamera
         if (toward.LengthSquared() > 1e-12)
             _heading = toward.Normalized();
         Pitch = Math.Clamp(pitch, -MaxPitch, MaxPitch);
+    }
+
+    /// <summary>Tourne le regard pour viser exactement un point (repère de la planète, m) : il est au centre de l'écran.</summary>
+    public void LookAt(Double3 point)
+    {
+        Double3 up = Position.Normalized();
+        Double3 d = point - Position;
+        Double3 horizontal = d - up * d.Dot(up);
+        if (horizontal.LengthSquared() > 1e-6)
+            _heading = horizontal.Normalized();
+        Pitch = Math.Clamp(Math.Atan2(d.Dot(up), horizontal.Length()), -MaxPitch, MaxPitch);
+    }
+
+    // --- Transitions ----------------------------------------------------------------------------
+
+    private bool _transition;
+    private double _transitionTime, _transitionSeconds;
+    private Double3 _fromPosition, _toPosition, _fromHeading, _toHeading;
+    private double _fromPitch, _toPitch, _transitionPeak;
+    private bool _toWalking;
+
+    /// <summary>Vrai pendant un vol de transition vers une nouvelle vue.</summary>
+    public bool InTransition => _transition;
+
+    /// <summary>
+    /// Va vers une nouvelle vue en volant au lieu d'y sauter : <paramref name="place"/> place la
+    /// caméra (PlaceAbove, LookAt…), puis la caméra y vole depuis sa position actuelle en quelques
+    /// secondes (montée, voyage, descente, comme un globe virtuel), le temps que le relief se
+    /// charge. Une touche de déplacement interrompt le vol.
+    /// </summary>
+    public void Transition(Action place)
+    {
+        Double3 position = Position, heading = _heading;
+        double pitch = Pitch;
+        place();
+        _toPosition = Position;
+        _toHeading = _heading;
+        _toPitch = Pitch;
+        _toWalking = Walking;
+        double arc = Math.Acos(Math.Clamp(position.Normalized().Dot(_toPosition.Normalized()), -1, 1)) * TerrainHeightField.RadiusMeters;
+        if (arc < 30 && Math.Abs(position.Length() - _toPosition.Length()) < 30)
+            return;                                         // presque au même endroit : pas de vol
+        _fromPosition = position;
+        _fromHeading = heading;
+        _fromPitch = pitch;
+        Position = position;
+        _heading = heading;
+        Pitch = pitch;
+        Walking = false;
+        InCave = false;
+        _verticalSpeed = 0;
+        // Sommet du vol : assez haut pour voir le chemin (le tiers de la distance), durée selon la distance
+        _transitionPeak = Math.Min(arc * 0.35, 2.0e6);
+        _transitionSeconds = Math.Clamp(1.2 + 0.9 * Math.Log10(1 + arc / 1000), 1.2, 4.5);
+        _transitionTime = 0;
+        _transition = true;
+        UpdateGround();
+    }
+
+    private void UpdateTransition(double delta, ExplorerInput input)
+    {
+        if (input.Forward != 0 || input.Strafe != 0 || input.Vertical != 0)
+        {
+            _transition = false;                            // le joueur reprend la main
+            return;
+        }
+        _transitionTime += delta;
+        double t = Math.Min(1, _transitionTime / _transitionSeconds);
+        double s = t * t * (3 - 2 * t);
+        double radius = TerrainHeightField.RadiusMeters;
+        // Direction : arc de grand cercle ; altitude : de l'une à l'autre, avec une bosse au milieu
+        Double3 a = _fromPosition.Normalized(), b = _toPosition.Normalized();
+        double omega = Math.Acos(Math.Clamp(a.Dot(b), -1, 1));
+        Double3 direction = omega < 1e-9 ? b
+            : (a * Math.Sin((1 - s) * omega) + b * Math.Sin(s * omega)) / Math.Sin(omega);
+        double h0 = _fromPosition.Length() - radius, h1 = _toPosition.Length() - radius;
+        double height = h0 + (h1 - h0) * s + Math.Max(0, _transitionPeak - Math.Max(h0, h1)) * Math.Sin(Math.PI * s);
+        Position = direction.Normalized() * (radius + height);
+        // Regard : du regard de départ à celui d'arrivée (en passant par le bas : on voit le sol défiler)
+        Double3 heading = _fromHeading * (1 - s) + _toHeading * s;
+        _heading = heading.LengthSquared() < 1e-6 ? _toHeading : heading.Normalized();
+        TransportHeading();
+        double bump = Math.Max(0, _transitionPeak - Math.Max(h0, h1)) > 1000 ? Math.Sin(Math.PI * s) : 0;
+        Pitch = Math.Clamp(_fromPitch + (_toPitch - _fromPitch) * s - 0.6 * bump, -MaxPitch, MaxPitch);
+        // Jamais sous le sol
+        double minimum = radius + SampleGround(Position.Normalized()) + 2;
+        if (Position.Length() < minimum)
+            Position = Position.Normalized() * minimum;
+        if (t >= 1)
+        {
+            Position = _toPosition;
+            _heading = _toHeading;
+            Pitch = _toPitch;
+            Walking = _toWalking;
+            _transition = false;
+        }
+        UpdateGround();
     }
 
     public void ToggleWalking()
@@ -169,8 +267,10 @@ public sealed class ExplorerCamera
     /// </summary>
     public void Zoom(int direction)
     {
-        if (Walking)
+        // (dans une grotte, la molette ramenait la caméra au-dessus du relief)
+        if (Walking || InCave)
             return;
+        _transition = false;
         double height = Math.Max(AltitudeAboveGround, 2.0);
         // Distance du sol dans l'axe du regard (vers l'horizon : quelques fois l'altitude)
         double target = Pitch < -0.05 ? height / Math.Sin(-Pitch) : Math.Max(5 * height, 2000);
@@ -187,8 +287,9 @@ public sealed class ExplorerCamera
     /// <summary>Clic gauche + glisser : déplace la caméra comme si l'on faisait glisser le sol.</summary>
     public void Pan(Vector2 pixels, float viewportHeight)
     {
-        if (Walking || viewportHeight <= 0)
+        if (Walking || InCave || viewportHeight <= 0)
             return;
+        _transition = false;
         Double3 up = Position.Normalized();
         Double3 heading = _heading;
         Double3 right = heading.Cross(up);
@@ -236,6 +337,12 @@ public sealed class ExplorerCamera
     {
         if (_field == null || delta <= 0)
             return;
+        if (_transition)
+        {
+            UpdateTransition(delta, input);
+            if (_transition)
+                return;
+        }
         Turn(input.Turn * TurnRate * delta);
         Pitch = Math.Clamp(Pitch + input.Pitch * PitchRate * delta, -MaxPitch, MaxPitch);
 

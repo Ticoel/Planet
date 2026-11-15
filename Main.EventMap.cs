@@ -80,12 +80,13 @@ public partial class Main
         var explorer = _terrain.Explorer;
         Vector3 sun = _climate.Sun.Direction;
         Double3 Cell(int c) => Double3.From(_grid.Positions[c]).Normalized();
-        // Vue de côté à quelques km, regard vers le point
-        Action Side(Double3 at, double distanceM, double altitudeM, double pitch) => () =>
+        // Vue de côté, à quelques km et en hauteur, l'événement au centre de l'écran (visé à
+        // <lift> mètres au-dessus du sol : le panache d'un volcan, le pied d'un orage…)
+        Action Side(Double3 at, double distanceM, double altitudeM, double lift = 0) => () =>
         {
             var (ax, _) = LavaFlow.TangentFrame(at);
             explorer.PlaceAbove((at + ax * (distanceM / TerrainHeightField.RadiusMeters)).Normalized(), altitudeM);
-            explorer.Face(at, pitch);
+            explorer.LookAt(GroundPoint(at, lift));
         };
 
         foreach (var wave in _tsunami.Waves)
@@ -113,15 +114,22 @@ public partial class Main
             Double3 coast = Cell(best);
             events.Add(new NaturalEvent($"Tsunami (séisme de magnitude {French(wave.Magnitude)}) : la vague atteint cette côte dans ~{minutes:0} min", coast, () =>
             {
+                // Sur la côte, regard vers le large d'où arrive la vague
+                Double3 offshore = (coast * 0.7 + Cell(sea) * 0.3).Normalized();
                 explorer.PlaceAbove(coast, 120);
-                explorer.Face(Cell(sea), -0.05);
+                explorer.LookAt(GroundPoint(offshore, 0));
             }));
         }
         foreach (var cy in _cyclones.Cyclones.OrderByDescending(c => c.MaxWind))
         {
             Double3 eye = cy.Position;
             events.Add(new NaturalEvent($"Cyclone tropical : vents de {cy.MaxWind * 3.6:0} km/h (catégorie {CycloneModel.Category(cy.MaxWind)}), vu de haut", eye,
-                () => explorer.PlaceAbove(eye, 2500000 * scale)));
+                () =>
+                {
+                    // À la verticale de l'œil, regard droit vers le bas
+                    explorer.PlaceAbove(eye, 2500000 * scale);
+                    explorer.LookAt(eye * TerrainHeightField.RadiusMeters);
+                }));
         }
         foreach (var eruption in _activity.Eruptions.OrderByDescending(e => e.Fissure).ThenByDescending(e => e.Vei))
         {
@@ -129,8 +137,8 @@ public partial class Main
             if (VentHeight(eruption.Position) < -SubmarineVisibleDepthM)
                 continue;
             events.Add(eruption.Fissure
-                ? new NaturalEvent($"Éruption fissurale : fissure de {French(eruption.LengthM / 1000)} km", vent, Side(vent, 6000, 900, -0.12))
-                : new NaturalEvent($"Éruption volcanique (indice d'explosivité {eruption.Vei})", vent, Side(vent, 25000, 3000, -0.02)));
+                ? new NaturalEvent($"Éruption fissurale : fissure de {French(eruption.LengthM / 1000)} km", vent, Side(vent, 6000, 900))
+                : new NaturalEvent($"Éruption volcanique (indice d'explosivité {eruption.Vei})", vent, Side(vent, 25000, 3000, 1500)));
         }
         int storm = -1, sand = -1, snow = -1;
         double stormRain = 0, sandWind = 0, snowDepth = 0;
@@ -153,7 +161,7 @@ public partial class Main
             }
         }
         if (storm >= 0)
-            events.Add(new NaturalEvent("Orages violents : des tornades peuvent naître sous ces nuages", Cell(storm), Side(Cell(storm), 4000, 300, 0.05)));
+            events.Add(new NaturalEvent("Orages violents : des tornades peuvent naître sous ces nuages", Cell(storm), Side(Cell(storm), 4000, 300, 1200)));
         if (_flood.Ratio != null)
         {
             var hydrology = _terrain.Field?.Hydrology;
@@ -162,17 +170,17 @@ public partial class Main
                 if (hydrology != null && hydrology.River[c] && _flood.Ratio[c] > 2 && (river < 0 || _flood.Ratio[c] > _flood.Ratio[river]))
                     river = c;
             if (river >= 0)
-                events.Add(new NaturalEvent($"Crue : le fleuve roule {French(_flood.Ratio[river])} fois son débit habituel et déborde", Cell(river), Side(Cell(river), 3000, 600, -0.25)));
+                events.Add(new NaturalEvent($"Crue : le fleuve roule {French(_flood.Ratio[river])} fois son débit habituel et déborde", Cell(river), Side(Cell(river), 3000, 600)));
         }
         if (sand >= 0)
             events.Add(new NaturalEvent($"Tempête de sable : vent de {sandWind * 3.6:0} km/h sur le désert", Cell(sand), () => explorer.PlaceAbove(Cell(sand), 30)));
         foreach (var (what, where, when) in Enumerable.Reverse(_recentSlides))
             if (day - when < 30)
-                events.Add(new NaturalEvent($"{what} récent (il y a {Math.Max(0, (day - when) * 24):0} h)", where, Side(where, 900, 250, -0.2)));
+                events.Add(new NaturalEvent($"{what} récent (il y a {Math.Max(0, (day - when) * 24):0} h)", where, Side(where, 900, 250)));
         foreach (var (where, magnitude, _) in _recentQuakes.OrderByDescending(q => q.magnitude).Take(2))
         {
             Double3 epicenter = Double3.From(where).Normalized();
-            events.Add(new NaturalEvent($"Séisme récent de magnitude {French(magnitude)} (épicentre)", epicenter, () => explorer.PlaceAbove(epicenter, 3000)));
+            events.Add(new NaturalEvent($"Séisme récent de magnitude {French(magnitude)} (épicentre)", epicenter, Side(epicenter, 8000, 3000)));
         }
         // Aurores : côté nuit, vers 63° de latitude, du côté le plus sombre
         int aurora = -1;
@@ -195,11 +203,20 @@ public partial class Main
         if (_calvingCells.Length > 0)
         {
             Double3 front = Cell(_calvingCells[0]);
-            events.Add(new NaturalEvent("Front d'un glacier qui atteint la mer et vêle des icebergs", front, () => explorer.PlaceAbove(front, 800)));
+            events.Add(new NaturalEvent("Front d'un glacier qui atteint la mer et vêle des icebergs", front, Side(front, 4000, 800)));
         }
         if (snow >= 0)
-            events.Add(new NaturalEvent($"Neige épaisse en montagne ({snowDepth:N0} mm d'eau) : des avalanches peuvent partir", Cell(snow), Side(Cell(snow), 5000, 1500, -0.1)));
+            events.Add(new NaturalEvent($"Neige épaisse en montagne ({snowDepth:N0} mm d'eau) : des avalanches peuvent partir", Cell(snow), Side(Cell(snow), 5000, 1500)));
         return events;
+    }
+
+    /// <summary>Point du sol (ou de l'eau qui le couvre) dans une direction, plus <paramref name="lift"/> mètres.</summary>
+    private Double3 GroundPoint(Double3 direction, double lift)
+    {
+        direction = direction.Normalized();
+        int hint = -1;
+        double ground = _terrain.Field == null ? 0 : Math.Max(0, _terrain.Field.Sample(direction, 1, ref hint).Surface);
+        return direction * (TerrainHeightField.RadiusMeters + ground + lift);
     }
 
     /// <summary>Touche B : emmène voir l'événement naturel suivant (Maj+B : le précédent).</summary>
@@ -218,7 +235,7 @@ public partial class Main
         }
         _eventIndex = ((_eventIndex + direction) % events.Count + events.Count) % events.Count;
         var chosen = events[_eventIndex];
-        chosen.Place();
+        _terrain.Explorer.Transition(chosen.Place);
         ShowNotice($"Événement {_eventIndex + 1} sur {events.Count} : {chosen.Label}");
     }
 

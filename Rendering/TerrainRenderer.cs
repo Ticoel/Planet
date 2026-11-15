@@ -1734,6 +1734,23 @@ void fragment() {
         rapids = clamp(smoothstep(0.12, 0.32, steep) * (0.55 + 0.45 * ripples.x), 0.0, 1.0) * river;
         waves = mix(waves, ripples.yzw * (1.5 + 3.0 * rapids), river);
     }
+    // Glace des lacs et des fleuves (la banquise de la mer vient de la simulation) : un lac gèle
+    // quand l'air reste sous −2 °C, un fleuve seulement par grand froid (le courant retarde le
+    // gel), les rapides restent ouverts ; la neige tombée blanchit la glace
+    float ice = 0.0, ice_snow = 0.0;
+    if (has_climate && v_water.x > 0.01) {
+        ivec4 ice_cells;
+        vec4 ice_weights;
+        smooth_cells(up, ice_cells, ice_weights);
+        vec4 data = climate_data(ice_cells, ice_weights);
+        float t = data.x - 0.0065 * (v_water.x - max(data.z, 0.0)) + glacial_cooling;
+        float lake_ice = smoothstep(-1.0, -5.0, t);
+        float river_ice = smoothstep(-5.0, -12.0, t) * (1.0 - smoothstep(0.1, 0.4, rapids / max(river, 1e-3)));
+        ice = mix(lake_ice, river_ice, river);
+        ice_snow = ice * smoothstep(5.0, 40.0, data.y);
+        waves *= 1.0 - ice;
+        rapids *= 1.0 - ice;
+    }
     vec3 water_normal = normalize(up - (waves - up * dot(waves, up)) * 0.06);
     NORMAL = normalize((VIEW_MATRIX * vec4(water_normal, 0.0)).xyz);
     // Couleur de l'eau, plus sombre et plus saturée que le sol (avant, de loin, eau peu
@@ -1759,15 +1776,21 @@ void fragment() {
     }
     foam = max(foam, rapids);
     color = mix(color, vec3(0.92, 0.95, 0.97), foam);
+    // Glace : bleutée et lisse, fissurée de fines lignes, blanche sous la neige
+    float cracks = smoothstep(0.03, 0.0, abs(texture_noise(p, 32.0).x - 0.5)) * detail_weight(32.0, footprint);
+    vec3 ice_color = mix(vec3(0.62, 0.74, 0.82), vec3(0.8, 0.86, 0.9), 0.5 + 0.5 * texture_noise(p, 8.0).x * detail_weight(8.0, footprint));
+    ice_color = mix(ice_color, vec3(0.45, 0.55, 0.62), cracks * 0.5);
+    ice_color = mix(ice_color, vec3(0.93, 0.95, 0.97), ice_snow);
+    color = mix(color, ice_color, ice);
     v_shade = cloud_shadow(v_world, up, v_water.x) * plume_shadow(v_world, up, v_water.x);
     ALBEDO = color;
-    ROUGHNESS = mix(0.08, 0.7, foam);
+    ROUGHNESS = mix(mix(0.08, 0.7, foam), mix(0.25, 0.8, ice_snow), ice);
     SPECULAR = 0.6;
     // Plus opaque qu'avant : les fonds sableux ne transparaissent que sur les premiers mètres ;
     // les eaux de moins d'un mètre (bassins des sources, bords des lacs et des fleuves) restent
     // claires : on voit leur fond
     float clear = 1.0 - smoothstep(0.1, 1.5, v_depth);
-    ALPHA = max(mix(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), 0.28, clear), foam);
+    ALPHA = max(max(mix(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), 0.28, clear), foam), ice);
 }
 ";
 }

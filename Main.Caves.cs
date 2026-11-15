@@ -37,7 +37,7 @@ public partial class Main
             foreach (var spring in _groundwater.Springs)
                 if (spring.Kind == SpringKind.Karst)
                 {
-                    int seed = HashCode.Combine(Seed, spring.Cell, 11);
+                    int seed = StableSeed(Seed, spring.Cell, 11);
                     sites.Add(new CaveSite(CaveKind.Karst, Double3.From(spring.Position).Normalized(), seed));
                 }
         int hint = -1;
@@ -45,7 +45,7 @@ public partial class Main
         {
             if (volcano.Kind is not (LandformKind.ShieldVolcano or LandformKind.Stratovolcano))
                 continue;
-            int seed = HashCode.Combine(Seed, volcano.BirthMyr, 23);
+            int seed = StableSeed(Seed, (int)(BitConverter.DoubleToInt64Bits(volcano.BirthMyr) % int.MaxValue), 23);
             var random = new Random(seed);
             Double3 summit = Double3.From(volcano.Position).Normalized();
             var (ex, ey) = LavaFlow.TangentFrame(summit);
@@ -57,6 +57,20 @@ public partial class Main
             sites.Add(new CaveSite(CaveKind.LavaTube, site, seed, outward));
         }
         return sites;
+    }
+
+    /// <summary>Graine reproductible (HashCode.Combine change à chaque lancement du programme :
+    /// les grottes auraient changé de forme d'une partie à l'autre).</summary>
+    private static int StableSeed(int a, int b, int c)
+    {
+        unchecked
+        {
+            uint h = (uint)a * 2654435761u ^ (uint)b * 2246822519u ^ (uint)c * 3266489917u;
+            h ^= h >> 15;
+            h *= 2246822519u;
+            h ^= h >> 13;
+            return (int)(h & 0x7fffffff);
+        }
     }
 
     private void UpdateCaves()
@@ -82,7 +96,9 @@ public partial class Main
     }
 
     /// <summary>Touche Y : emmène la caméra à l'entrée de la grotte suivante (de la plus proche à la plus lointaine).</summary>
-    private void GoToNextCave()
+    private void GoToNextCave() => _terrain.Explorer.Transition(PlaceAtNextCave);
+
+    private void PlaceAtNextCave()
     {
         if (_terrain.Field == null)
             return;
@@ -107,7 +123,7 @@ public partial class Main
         Double3 entrance = site.Direction;
         var (ex, ey) = LavaFlow.TangentFrame(entrance);
         explorer.PlaceAbove((entrance - (ex * 0.8 + ey * 0.6) * (50 / TerrainHeightField.RadiusMeters)).Normalized(), 30);
-        explorer.Face(entrance - explorer.Position.Normalized(), -0.5);
+        explorer.LookAt(GroundPoint(entrance, 0));
         ShowNotice(site.Kind == CaveKind.Karst
             ? "Lieu : grotte karstique, en amont d'une résurgence (G pour marcher jusqu'à l'ouverture ; une lampe s'allume sous terre)"
             : "Lieu : tunnel de lave, entrée par une lucarne effondrée (G pour marcher jusqu'à l'ouverture ; une lampe s'allume sous terre)");
