@@ -38,12 +38,6 @@ public enum ClockMode
 public partial class Main : Node3D
 {
     [ExportGroup("Planète")]
-    [Export(PropertyHint.Range, "0,8")]
-    public int Subdivisions { get; set; } = 5;
-
-    [Export(PropertyHint.Range, "2,64")]
-    public int PlateCount { get; set; } = 14;
-
     [Export]
     public int Seed { get; set; } = 1;
 
@@ -235,7 +229,7 @@ public partial class Main : Node3D
     public override void _Ready()
     {
         var stopwatch = Stopwatch.StartNew();
-        ApplyStartSize();
+        PlanetConstants.SetRadius(PlanetRadiusKm);
         _grid = PlanetGrid.Create(Subdivisions);
         GD.Print($"Grid: {_grid.CellCount} cells (subdivisions {Subdivisions}) in {stopwatch.ElapsedMilliseconds} ms");
 
@@ -1029,17 +1023,10 @@ public partial class Main : Node3D
             var rain = (float[])_climate.Statistics.RecentPrecipitation.Clone();
             var convergence = (float[])_climate.Winds.Convergence.Clone();
             var sky = _sky;
-            float[] cyclones = CycloneCloudCover();
+            // (les cyclones, plus fins que les cellules, sont ajoutés par le shader : UpdateCycloneClouds)
             _cloudTask = Task.Run(() =>
             {
                 var (cover, showers) = SkyRenderer.ComputeCloudCover(grid, humidity, rain, convergence);
-                // Cyclones : spirale de nuages épais autour de l'œil, averses dans les bandes
-                if (cyclones != null)
-                    for (int c = 0; c < cover.Length; c++)
-                    {
-                        cover[c] = Math.Max(cover[c], cyclones[c]);
-                        showers[c] = Math.Max(showers[c], cyclones[c] * 0.8f);
-                    }
                 return sky.BuildCloudPixels(cover, showers);
             });
             _cloudTimer = 0.5;
@@ -1389,7 +1376,6 @@ public partial class Main : Node3D
         bool high = explorer.AltitudeAboveGround > OverlayMinAltitude;
         _overlayRoot.Position = (-explorer.Position).ToVector3();
         _overlayRoot.Scale = Vector3.One * (float)TerrainHeightField.RadiusMeters;
-
 
         bool geological = _clock == ClockMode.Geological;
         _arrowsMesh.Visible = high && geological && _showArrows;
@@ -1775,13 +1761,6 @@ public partial class Main : Node3D
         < 45f => "1 mois par seconde",
         _ => $"{daysPerSecond / 30f:0} mois par seconde",
     };
-
-    /// <summary>Vitesse mesurée de l'horloge climatique, en heures ou jours par seconde.</summary>
-    private static string EffectiveClimateSpeed(double daysPerSecond) => daysPerSecond < 1.0 / 24.0
-        ? $"{daysPerSecond * 1440.0:0.0} min/s".Replace('.', ',')
-        : daysPerSecond < 1.0
-        ? $"{daysPerSecond * 24.0:0.0} h/s".Replace('.', ',')
-        : $"{daysPerSecond:0.0} jours/s".Replace('.', ',');
 
     /// <summary>
     /// Ce qu'on entend (sons synthétisés) : vent et pluie du climat à la caméra, vagues près des

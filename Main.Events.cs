@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Generic;
 using Godot;
@@ -57,6 +58,8 @@ public partial class Main
         _flood.Reset();
         _tsunami.Clear();
         _cyclones.Clear();
+        if (_sky != null)
+            UpdateCycloneClouds();
         _tornado = false;
         _icebergs.Clear();
         _eventsDay = double.NaN;
@@ -93,6 +96,7 @@ public partial class Main
 
         RememberQuakes();
         UpdateCyclones(days, cameraDirection);
+        UpdateCycloneClouds();
         UpdateFlood(delta, days, cell);
         UpdateTsunamis(day, cameraDirection);
         _terrain.SetShaderParameter("flood_rise", (float)_flood.RiseM);
@@ -119,15 +123,20 @@ public partial class Main
         }
     }
 
-    /// <summary>Couverture nuageuse des cyclones de chaque cellule (pour les nuages).</summary>
-    private float[] CycloneCloudCover()
+    /// <summary>Nuages des cyclones (spirale, œil), dessinés par le shader des nuages et des ombres du sol.</summary>
+    private void UpdateCycloneClouds()
     {
-        if (_cyclones.Cyclones.Count == 0)
-            return null;
-        var cover = new float[_grid.CellCount];
-        for (int c = 0; c < cover.Length; c++)
-            cover[c] = _cyclones.CloudCover(Double3.From(_grid.Positions[c]).Normalized());
-        return cover;
+        var cyclones = new Vector4[4];
+        int k = 0;
+        foreach (var cy in _cyclones.Cyclones.OrderByDescending(c => c.MaxWind))
+        {
+            if (k == cyclones.Length)
+                break;
+            Vector3 eye = cy.Position.ToVector3();
+            cyclones[k++] = new Vector4(eye.X, eye.Y, eye.Z, (float)Math.Clamp(cy.MaxWind / 60, 0.3, 1));
+        }
+        _sky.SetCyclones(cyclones);
+        _terrain.SetShaderParameter("cyclones", cyclones);
     }
 
     // --- Crues ---------------------------------------------------------------------------------------

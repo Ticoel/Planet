@@ -169,5 +169,4 @@ public partial class DebrisRenderer : Node3D
         }
     }
 
-    public int PuffCount => _puffs.Count;
 }

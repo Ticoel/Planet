@@ -73,7 +73,6 @@ public sealed class ClimateSimulation : IDisposable
     /// <summary>Part des terres enneigées (plus de 1 cm d'équivalent eau).</summary>
     public float SnowCoveredLandFraction { get; private set; }
 
-    public bool UsesGpu => _insolationKernel != null;
     public string ComputeBackend { get; private set; } = "processeur";
     public int LastSubsteps { get; private set; }
 

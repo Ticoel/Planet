@@ -31,7 +31,6 @@ public sealed class PlanetGrid
     public int[][] CellTriangles { get; }
 
     public int CellCount => Positions.Length;
-    public int TriangleCount => Triangles.Length / 3;
 
     /// <summary>Distance angulaire moyenne entre deux cellules voisines (radians).
     /// Sert d'unité de longueur pour borner les pas de temps.</summary>
@@ -177,15 +176,6 @@ public sealed class PlanetGrid
         var (neighbors, cellTriangles) = BuildTopology(positionArray.Length, triangleArray);
 
         return new PlanetGrid(subdivisions, positionArray, triangleArray, neighbors, cellTriangles);
-    }
-
-    /// <summary>Centre (projeté sur la sphère) d'un triangle : c'est un coin des cellules
-    /// qui l'entourent, utilisé pour dessiner les hexagones.</summary>
-    public Vector3 TriangleCenter(int triangle)
-    {
-        int i = triangle * 3;
-        return (Positions[Triangles[i]] + Positions[Triangles[i + 1]] + Positions[Triangles[i + 2]])
-            .Normalized();
     }
 
     // --- Construction ------------------------------------------------------------------------

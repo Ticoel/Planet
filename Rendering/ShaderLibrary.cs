@@ -214,8 +214,43 @@ vec2 apply_weather(vec2 cover, float w) {
     return cover;
 }
 
+// Cyclones (CycloneModel) : direction de l'œil (xyz) et force (w, 0 : aucun ; 1 : ouragan
+// majeur). Calculés point par point : l'œil (~20 km) et les bandes spirales sont bien plus fins
+// que les cellules de la simulation
+uniform vec4 cyclones[4];
+
+vec2 apply_cyclones(vec3 d, vec2 cover) {
+    for (int i = 0; i < 4; i++) {
+        float strength = cyclones[i].w;
+        if (strength <= 0.0)
+            continue;
+        vec3 c = cyclones[i].xyz;
+        float km = acos(clamp(dot(d, c), -1.0, 1.0)) * PLANET_R / 1000.0;
+        if (km > 900.0)
+            continue;
+        vec3 east = cross(vec3(0.0, 1.0, 0.0), c);
+        east = dot(east, east) < 1e-8 ? vec3(1.0, 0.0, 0.0) : normalize(east);
+        vec3 north = cross(c, east);
+        // Enroulement : sens inverse des aiguilles d'une montre au nord, dans le sens au sud
+        float angle = atan(dot(d, north), dot(d, east)) * (c.y >= 0.0 ? 1.0 : -1.0);
+        // Bandes spirales logarithmiques (deux bras), qui tournent lentement
+        float spiral = 0.5 + 0.5 * sin(2.0 * angle + 3.0 * log(max(km, 1.0) / 50.0) - cloud_time * 2e-5);
+        float core = exp(-km / 160.0);
+        float bands = smoothstep(0.35, 0.8, spiral) * exp(-km / 420.0);
+        // Œil clair (~15 km) entouré du mur de l'œil, la tour d'orages la plus haute
+        float eye = smoothstep(12.0, 22.0, km);
+        float wall_offset = (km - 30.0) / 18.0;
+        float wall = exp(-wall_offset * wall_offset);
+        float storm = clamp(core + 0.9 * bands, 0.0, 1.0) * eye * mix(0.5, 1.0, strength);
+        float influence = 1.0 - smoothstep(600.0, 900.0, km);
+        cover.r = max(mix(cover.r, cover.r * eye, influence), storm);
+        cover.g = max(mix(cover.g, cover.g * eye, influence), (0.8 * bands + wall) * eye * strength);
+    }
+    return cover;
+}
+
 vec2 cloud_cover_at(vec3 direction) {
-    return apply_weather(cloud_cover_raw(direction), weather_at(direction));
+    return apply_cyclones(direction, apply_weather(cloud_cover_raw(direction), weather_at(direction)));
 }
 
 // Sommet de la couche nuageuse (m) selon la couverture et les averses

@@ -795,6 +795,9 @@ void sky() {
         _postMaterial.SetShaderParameter("plume_step", plumeStep);
     }
 
+    /// <summary>Cyclones en cours (voir ShaderLibrary.Clouds : apply_cyclones).</summary>
+    public void SetCyclones(Vector4[] cyclones) => _postMaterial.SetShaderParameter("cyclones", cyclones);
+
     public void SetEruptions(int count, Vector4[] vents, Vector4[] shapes, Vector4[] winds)
     {
         _postMaterial.SetShaderParameter("eruption_count", count);

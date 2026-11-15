@@ -13,7 +13,7 @@ namespace Planet;
 /// Grottes en volume (étape 18) dans le jeu : grottes karstiques en amont des résurgences des
 /// calcaires, tunnels de lave à mi-flanc des volcans. Construites quand la caméra s'en approche
 /// (<see cref="CaveRenderer"/>) ; on y marche (la caméra suit le sol des galeries) ; touche Y :
-/// aller à la grotte suivante.
+/// survoler la grotte suivante.
 /// </summary>
 public partial class Main
 {
@@ -65,7 +65,7 @@ public partial class Main
         if (field == null)
         {
             _caves.Clear();
-            _terrain.SetCaveHoles(new Vector4[CaveRenderer.MaxHoles]);
+            _terrain.SetCaveOpenings(new CaveRenderer.Openings());
             return;
         }
         if (field != _caveField || _groundwater != _caveGroundwater)
@@ -76,9 +76,9 @@ public partial class Main
         }
         var explorer = _terrain.Explorer;
         bool near = explorer.AltitudeAboveGround < 3000;
-        var holes = near ? _caves.Update(explorer.Position, SunDirection(), explorer.InCave || _caves.Underground(explorer.Position))
-                         : new Vector4[CaveRenderer.MaxHoles];
-        _terrain.SetCaveHoles(holes);
+        var openings = near ? _caves.Update(explorer.Position, SunDirection(), explorer.InCave && _caves.Underground(explorer.Position))
+                            : new CaveRenderer.Openings();
+        _terrain.SetCaveOpenings(openings);
     }
 
     /// <summary>Touche Y : emmène la caméra à l'entrée de la grotte suivante (de la plus proche à la plus lointaine).</summary>
@@ -99,24 +99,17 @@ public partial class Main
         Double3 camera = _terrain.Explorer.Position.Normalized();
         var site = all.Where(s => !_visitedCaves.Contains(s)).OrderByDescending(s => s.Direction.Dot(camera)).First();
         _visitedCaves.Add(site);
+        // En vol, à une cinquantaine de mètres de l'entrée et 30 m au-dessus, regard vers l'ouverture
+        // (G pour marcher, puis on y entre à pied)
         var explorer = _terrain.Explorer;
-        // À une trentaine de mètres de l'entrée, à hauteur d'homme (marche), regard vers l'ouverture
-        Double3 entrance = site.Direction;
-        if (site.Kind == CaveKind.Karst)
-        {
-            // (l'entrée est en amont de la résurgence : on se place sur la vasque, face au versant)
-            explorer.PlaceAbove(entrance, ExplorerCamera.EyeHeight);
-        }
-        else
-        {
-            var (ex, _) = LavaFlow.TangentFrame(entrance);
-            explorer.PlaceAbove((entrance - ex * (30 / TerrainHeightField.RadiusMeters)).Normalized(), ExplorerCamera.EyeHeight);
-        }
-        if (!explorer.Walking)
+        if (explorer.Walking)
             explorer.ToggleWalking();
-        explorer.Face(entrance - explorer.Position.Normalized(), -0.25);
+        Double3 entrance = site.Direction;
+        var (ex, ey) = LavaFlow.TangentFrame(entrance);
+        explorer.PlaceAbove((entrance - (ex * 0.8 + ey * 0.6) * (50 / TerrainHeightField.RadiusMeters)).Normalized(), 30);
+        explorer.Face(entrance - explorer.Position.Normalized(), -0.5);
         ShowNotice(site.Kind == CaveKind.Karst
-            ? "Lieu : grotte karstique, en amont de la résurgence (marchez vers l'ouverture ; une lampe s'allume sous terre)"
-            : "Lieu : tunnel de lave, entrée par une lucarne effondrée (marchez dedans ; une lampe s'allume sous terre)");
+            ? "Lieu : grotte karstique, en amont d'une résurgence (G pour marcher jusqu'à l'ouverture ; une lampe s'allume sous terre)"
+            : "Lieu : tunnel de lave, entrée par une lucarne effondrée (G pour marcher jusqu'à l'ouverture ; une lampe s'allume sous terre)");
     }
 }

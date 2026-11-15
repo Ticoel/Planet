@@ -56,8 +56,6 @@ public sealed class OceanCurrents
     private float[] _nextUpwelling;
     /// <summary>Dérive de surface due au vent (Ekman), désactivable pour isoler les gyres (tests).</summary>
     public bool IncludeEkman { get; set; } = true;
-    /// <summary>Fonction de courant (m²/s) sur la grille océanique, pour les tests.</summary>
-    public float[] StreamFunction => _psi;
 
     private readonly int[] _fineToOcean;
     private readonly int[] _oceanToFine;

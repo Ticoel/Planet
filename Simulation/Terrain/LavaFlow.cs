@@ -165,9 +165,7 @@ public sealed class LavaFlow
         return (Vent + AxisX * (x / TerrainHeightField.RadiusMeters) + AxisY * (y / TerrainHeightField.RadiusMeters)).Normalized();
     }
 
-    public double Ground(int i, int j) => _ground[j * Size + i];
     public double Thickness(int i, int j) => _thickness[j * Size + i];
-    public double Heat(int i, int j) => _heat[j * Size + i];
     public double Basalt(int i, int j) => _basalt[j * Size + i];
 
     /// <summary>

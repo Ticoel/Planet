@@ -102,15 +102,6 @@ public sealed class ExplorerCamera
         UpdateGround();
     }
 
-    /// <summary>Place la caméra exactement en un point (repère de la planète, m), par exemple dans une grotte.</summary>
-    public void PlaceAt(Double3 position)
-    {
-        Position = position;
-        _verticalSpeed = 0;
-        TransportHeading();
-        UpdateGround();
-    }
-
     /// <summary>Tourne le regard vers une direction (repère de la planète), avec une inclinaison donnée (radians).</summary>
     public void Face(Double3 target, double pitch)
     {

@@ -110,7 +110,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   avancer jusqu'à l'âge voulu, on la fige (C), puis la planète vit d'elle-même : saisons, pluies,
   éruptions, séismes, glissements de terrain, sources chaudes. On ne fait que régler ses
   paramètres et regarder ; l'étape suivante permettra d'y semer des souches de vie.
-- **Petite planète « éprouvette »** (la seule ; la planète comme la Terre a été retirée) : 2 000 km de rayon (à peu près la Lune), dix fois
+- **Petite planète « éprouvette »** : 2 000 km de rayon (à peu près la Lune), dix fois
   moins de surface que la Terre : 5 plaques, un point chaud, quelques dizaines de volcans et une
   poignée de sources chaudes, une ou deux chaînes de montagnes, une grille quatre fois plus
   légère. Tout y est simulé comme sur la Terre (tectonique, climat, eau, croûte modulaire,
@@ -147,7 +147,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
-  - Y : grotte suivante (grotte karstique ou tunnel de lave) ; on y entre à pied, une lampe
+  - Y : survoler la grotte suivante (grotte karstique ou tunnel de lave) ; G pour y entrer à pied, une lampe
     s'allume sous terre ;
   - B : aller voir l'événement naturel suivant (Maj + B : le précédent) : tsunami qui approche
     d'une côte, cyclone vu de haut, éruption ou fissure, orages à tornades, crue, tempête de sable,
@@ -377,8 +377,10 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     (~85 par an sur la Terre, au prorata de la surface), ils filent vers l'ouest puis remontent
     vers le pôle et repartent vers l'est ; ils se renforcent sur l'eau chaude jusqu'à 200 km/h et
     plus (intensité potentielle d'Emanuel), s'épuisent sur terre ; vents tournants autour de l'œil
-    (nuls dans l'œil, maximaux au mur de l'œil), pluies torrentielles, spirale de nuages vue de
-    l'orbite ; catégories de Saffir-Simpson dans les détails ;
+    (nuls dans l'œil, maximaux au mur de l'œil), pluies torrentielles ; vus de l'orbite, deux bras
+    de nuages en spirale qui tournent lentement autour d'un œil clair d'une quinzaine de
+    kilomètres, bordé par le mur de l'œil (calculés point par point dans le shader des nuages :
+    bien plus fins que les cellules de la simulation) ; catégories de Saffir-Simpson dans les détails ;
   - **tornades** : sous les orages violents de l'après-midi, sur terre aux moyennes latitudes :
     entonnoir gris qui descend du nuage, manchon de poussière au sol, vents jusqu'à 250 km/h,
     quelques minutes à une demi-heure ;
@@ -495,6 +497,19 @@ Faites :
     sol minéral nu selon le climat, sans forêts ni prairies. La case « Végétation imaginée »
     (Affichage) remet la végétation d'après le climat, en attendant l'étape « vie ». La couche
     « Biomes » montre les milieux que le climat permettrait.
+
+### Bugs corrigés (2026-11-15)
+
+1.  **Mer en rectangles dans les terres** : une cuvette sous le niveau de la mer, loin des côtes,
+    était noyée par la mer, mais seulement dans les morceaux de terrain qui avaient une surface
+    d'eau (d'où des rectangles d'eau sombre sur un désert). Loin des côtes, la mer ne monte plus.
+2.  **Cyclones invisibles** : leur spirale et leur œil étaient calculés par cellule de la
+    simulation (~140 km), plus grosse que l'œil : on ne voyait qu'une tache. Ils sont maintenant
+    dessinés point par point.
+3.  **Grottes** : galeries qui se voyaient à travers le sol de loin, sol de l'entrée en roche
+    brune aux bords déchiquetés, murs gris sous terre (les « jupes » des morceaux de terrain), pluie
+    et brume dans les galeries. L'ouverture est désormais découpée exactement dans les galeries,
+    le relief garde sa neige ou son sable jusqu'au bord ; touche Y : arrivée en vol.
 
 # Sources et références
 

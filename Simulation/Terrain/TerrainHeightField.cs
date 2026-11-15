@@ -350,8 +350,23 @@ public sealed class TerrainHeightField
     private VolcanoDetail[] _volcanoDetails;
     private (Double3 x, Double3 y)[] _landformFrames;
 
-    /// <summary>Volcans et cratères pris en compte par ce relief.</summary>
-    public int LandformCount => _landforms.Length;
+    /// <summary>
+    /// Niveau d'eau « pas de mer » d'un point des terres loin des côtes (ni lac ni fleuve) : la
+    /// mer ne peut pas y monter, même si le sol est sous son niveau (dépression, cuvette sèche).
+    /// </summary>
+    public const double NoSeaLevel = -12345.0;
+
+    /// <summary>La cellule ou l'une de ses voisines est-elle en mer (côte, ou mer) ?</summary>
+    public bool NearOcean(int cell)
+    {
+        if (_elevation[cell] <= 0)
+            return true;
+        foreach (int n in Grid.Neighbors[cell])
+            if (_elevation[n] <= 0)
+                return true;
+        return false;
+    }
+
     /// <summary>Volcans et cratères (pour placer les tunnels de lave).</summary>
     public System.Collections.Generic.IReadOnlyList<Landform> Landforms => _landforms;
 

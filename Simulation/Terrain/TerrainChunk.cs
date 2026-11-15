@@ -114,8 +114,11 @@ public static class TerrainChunkBuilder
                 Double3 direction = CubeSphere.Direction(key.Face, key.MinS + (i - 1) * step, key.MinT + (j - 1) * step);
                 var sample = field.Sample(direction, minWavelength, ref hint);
                 int index = j * Padded + i;
+                // (loin des côtes, la mer ne monte pas : sinon une cuvette sous le niveau de la mer
+                // était noyée, mais seulement dans les morceaux qui avaient une surface d'eau)
+                bool sea = field.NearOcean(hint);
                 height[index] = sample.Height;
-                water[index] = sample.WaterLevel;
+                water[index] = sample.WaterLevel > 0.01 || sea ? sample.WaterLevel : TerrainHeightField.NoSeaLevel;
                 river[index] = sample.River;
                 wetland[index] = sample.Wetland;
                 debris[index * 2] = sample.Debris;
@@ -124,7 +127,7 @@ public static class TerrainChunkBuilder
                 // (et fonds de vallée qu'une crue peut inonder ; côtes qu'un tsunami peut submerger)
                 hasWater |= sample.WaterLevel > sample.Height
                             || (sample.WaterLevel > 0.01 && sample.WaterLevel > sample.Height - Climate.FloodModel.MaxRiseM)
-                            || sample.Height < Climate.Tides.MaxHeightMeters + Climate.SeaLevel.MaxRiseMeters + Climate.TsunamiModel.MaxRunupM;
+                            || (sea && sample.Height < Climate.Tides.MaxHeightMeters + Climate.SeaLevel.MaxRiseMeters + Climate.TsunamiModel.MaxRunupM);
                 surface[index] = direction * (radius + sample.Height);
             }
 

@@ -155,28 +155,5 @@ public sealed class CycloneModel
         return (wind.ToVector3(), rain);
     }
 
-    /// <summary>Couverture nuageuse supplémentaire (0 à 1) des cyclones en un point : œil clair, bandes spirales.</summary>
-    public float CloudCover(Double3 position)
-    {
-        position = position.Normalized();
-        float cover = 0;
-        foreach (var cy in _cyclones)
-        {
-            double km = Math.Acos(Math.Clamp(position.Dot(cy.Position), -1, 1)) * PlanetConstants.RadiusKm;
-            if (km > 900)
-                continue;
-            Double3 up = cy.Position, east = Double3.UnitY.Cross(up);
-            east = east.Length() < 1e-6 ? new Double3(1, 0, 0) : east.Normalized();
-            Double3 north = up.Cross(east);
-            double angle = Math.Atan2(position.Dot(north), position.Dot(east)) * (cy.Position.Y >= 0 ? 1 : -1);
-            double spiral = 0.5 + 0.5 * Math.Sin(2 * angle + 3 * Math.Log(Math.Max(km, 1) / 50));
-            double core = Math.Exp(-km / 180);
-            double bands = spiral * Math.Exp(-km / 450);
-            double eye = km < 15 ? 0.2 : 1;
-            cover = Math.Max(cover, (float)(Math.Clamp(cy.MaxWind / 40, 0.3, 1) * Math.Clamp(core + 0.8 * bands, 0, 1) * eye));
-        }
-        return cover;
-    }
-
     public void Clear() => _cyclones.Clear();
 }

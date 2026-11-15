@@ -159,7 +159,7 @@ public sealed class Cave
         var cave = new Cave(CaveKind.LavaTube, site, height(site), height);
         Double3 heading = cave.Flatten(downhill);
         double r = 4 + random.NextDouble() * 3;
-        double roof = 3 + random.NextDouble() * 3;                    // épaisseur du toit
+        double roof = 5 + random.NextDouble() * 3;                    // épaisseur du toit
         cave.HoleRadius = r * 0.8 + 1.5;
         // Le tube passe sous la lucarne : 40 m en amont, 120 m en aval
         var points = new List<Double3>();
@@ -222,15 +222,17 @@ public sealed class Cave
         _max = new Double3(max.X, max.Y, Math.Max(max.Z, 4));
     }
 
+    /// <summary>Rayon de la sphère qui contient la grotte, centrée sur l'entrée (m).</summary>
+    public double BoundingRadius =>
+        new Double3(Math.Max(-_min.X, _max.X), Math.Max(-_min.Y, _max.Y), Math.Max(-_min.Z, _max.Z)).Length() + 10;
+
     /// <summary>La boîte de la grotte contient-elle ce point local ?</summary>
     public bool Contains(Double3 local) =>
         local.X >= _min.X && local.X <= _max.X && local.Y >= _min.Y && local.Y <= _max.Y && local.Z >= _min.Z && local.Z <= _max.Z;
 
     // --- Champ de densité --------------------------------------------------------------------------
 
-    /// <summary>Distance signée aux galeries (m) : négative dans le vide, positive dans la roche.</summary>
-    public double TunnelDistance(Double3 q) => TunnelDistance(q, null);
-
+    /// <summary>Distance signée aux galeries (m, parois lisses) : négative dans le vide, positive dans la roche.</summary>
     private double TunnelDistance(Double3 q, int[] candidates)
     {
         double best = double.MaxValue;
@@ -249,7 +251,7 @@ public sealed class Cave
                 d = new Double3(d.X, d.Y, d.Z * (d.Z < 0 ? 2.2 : 1.35));
             best = Math.Min(best, d.Length() - (ra + (rb - ra) * t));
         }
-        return best + WallNoiseM * WallNoise(q);
+        return best;
     }
 
     /// <summary>Densité : positive dans la roche, négative dans le vide (galeries et air au-dessus du sol).</summary>
@@ -258,12 +260,38 @@ public sealed class Cave
     // Roche « loin de toute galerie » (m)
     private const double FarRock = 12;
 
-    private double Density(Double3 q, double groundZ, int[] candidates)
+    private double Density(Double3 q, double groundZ, int[] candidates) => Density(q, groundZ, candidates, out _);
+
+    /// <param name="ground">vrai si la surface la plus proche est le sol de surface (et non une paroi)</param>
+    private double Density(Double3 q, double groundZ, int[] candidates, out bool ground)
     {
+        double depth = groundZ - q.Z;
         double tunnel = TunnelDistance(q, candidates);
+        // Parois irrégulières, mais lisses près de la surface : l'ouverture découpée dans le relief
+        // détaillé (shader du terrain, galeries lisses) tombe exactement sur les parois
+        if (tunnel < FarRock)
+            tunnel += WallNoiseM * WallNoise(q) * Math.Clamp((depth - 1) / 3, 0, 1);
         double rho = Math.Sqrt(q.X * q.X + q.Y * q.Y);
         // Autour de l'entrée, le sol de surface ; ailleurs, la roche est pleine hors des galeries
-        return rho < HoleRadius + 3 ? Math.Min(groundZ - q.Z, tunnel) : tunnel;
+        ground = rho < HoleRadius + 3 && depth < tunnel;
+        return ground ? depth : tunnel;
+    }
+
+    /// <summary>
+    /// Galeries qui recoupent la surface (l'ouverture), sans bruit ni aplatissement : le relief
+    /// détaillé n'est pas dessiné à l'intérieur (au plus <paramref name="max"/>).
+    /// </summary>
+    public List<(Double3 a, double ra, Double3 b, double rb)> OpeningSegments(int max)
+    {
+        var opening = new List<(Double3, double, Double3, double)>();
+        foreach (var segment in _segments)
+        {
+            var (a, ra, b, rb) = segment;
+            double depthA = GroundZ(a.X, a.Y) - a.Z - ra, depthB = GroundZ(b.X, b.Y) - b.Z - rb;
+            if (Math.Min(depthA, depthB) < 1 && opening.Count < max)
+                opening.Add(segment);
+        }
+        return opening;
     }
 
     /// <summary>
@@ -413,9 +441,8 @@ public sealed class Cave
                     n = n.LengthSquared() < 1e-12 ? Up : n.Normalized();
                     double groundHere = GroundZ(local.X, local.Y);
                     double depth = groundHere - local.Z;
-                    double rho = Math.Sqrt(local.X * local.X + local.Y * local.Y);
-                    // Sol de surface hors de l'ouverture : déjà dessiné par le relief détaillé
-                    bool hidden = depth < 0.4 && rho > HoleRadius;
+                    // Sol de surface : déjà dessiné par le relief détaillé (seules les parois le sont ici)
+                    Density(local, groundHere, null, out bool hidden);
                     double open = Math.Exp(-Math.Max(0, local.Length() - HoleRadius) / 9.0);
                     cellVertex[Cell(i, j, k)] = vertices.Count;
                     vertices.Add((ToWorld(local) - Origin).ToVector3());

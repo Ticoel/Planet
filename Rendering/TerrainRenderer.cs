@@ -252,7 +252,7 @@ public partial class TerrainRenderer : Node3D
         SetBoth("cell_index", indexTexture);
         // Fondu entre cellules à l'échelle des cellules de la simulation : un texel de la carte
         // des numéros vaut π/2 / 512 rad (~20 km) ; avec un fondu fixe de 2 texels, les grandes
-        // cellules (~220 km à 10 242 cellules) restaient des hexagones bien nets vus de l'orbite
+        // cellules (~140 km à 2 562 cellules) restaient des hexagones bien nets vus de l'orbite
         float texelAngle = MathF.PI / 2f / CellIndexResolutionPixels;
         int blendStep = Math.Max(2, (int)MathF.Round(0.8f * grid.MeanEdgeAngle / texelAngle));
         SetBoth("cell_blend_step", blendStep);
@@ -433,8 +433,15 @@ public partial class TerrainRenderer : Node3D
     /// <summary>Jour du climat, pour la repousse de la végétation sur le sol remanié.</summary>
     public void SetCrustDay(float day) => _material?.SetShaderParameter("crust_day", day);
 
-    /// <summary>Ouvertures des grottes (voir <see cref="CaveRenderer"/>).</summary>
-    public void SetCaveHoles(Vector4[] holes) => _material?.SetShaderParameter("cave_holes", holes);
+    /// <summary>Ouvertures des grottes, à ne pas dessiner (voir <see cref="CaveRenderer"/>).</summary>
+    public void SetCaveOpenings(CaveRenderer.Openings openings)
+    {
+        if (_material == null)
+            return;
+        _material.SetShaderParameter("cave_bounds", openings.Bounds);
+        _material.SetShaderParameter("cave_opening_a", openings.SegmentStart);
+        _material.SetShaderParameter("cave_opening_b", openings.SegmentEnd);
+    }
 
     /// <summary>Bascule sur le nouveau relief : l'ancien est jeté, le nouveau devient le relief affiché.</summary>
     private void Swap()
@@ -843,7 +850,7 @@ public partial class TerrainRenderer : Node3D
     // --- Shader -----------------------------------------------------------------------------------
 
     // Uniformes et fonctions communs au sol et à l'eau
-    private const string CommonShaderCode = @"
+    private static readonly string CommonShaderCode = @"
 // Zone de morphing du morceau (distances à la caméra, m)
 instance uniform vec2 morph_range = vec2(1e30, 2e30);
 // Centre de la planète, relatif à la caméra (m)
@@ -935,9 +942,11 @@ float sea_surface(vec3 up) {
 }
 
 // Niveau de l'eau : celui du lac ou du fleuve s'il y en a un (stocké dans le maillage, > 0 ;
-// une crue le fait monter), sinon la mer
+// une crue le fait monter), aucun loin des côtes (NoSeaLevel), sinon la mer
 float water_surface(vec3 up, float stored) {
-    return stored > 0.01 ? stored + flood_rise * event_fade(up) : sea_surface(up);
+    if (stored > 0.01)
+        return stored + flood_rise * event_fade(up);
+    return abs(stored - (" + TerrainHeightField.NoSeaLevel.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + @")) < 1.0 ? -1e6 : sea_surface(up);
 }
 // Lumière du Soleil arrivée jusqu'au point (atmosphère traversée), ombre des nuages
 varying vec3 v_sun;
@@ -1226,7 +1235,7 @@ void light() {
 }
 ";
 
-    public const string ShaderCode = @"
+    public static readonly string ShaderCode = @"
 shader_type spatial;
 render_mode cull_back;
 " + CommonShaderCode + @"
@@ -1234,6 +1243,9 @@ render_mode cull_back;
 varying vec2 v_debris;
 // Deltas et vasières : part de plaine de boue (couleur des sommets, r)
 varying float v_wetland;
+// 1 sur les jupes (sommets ajoutés après la grille)
+varying float v_skirt;
+const int GRID_VERTICES = " + (TerrainChunkBuilder.Side * TerrainChunkBuilder.Side) + @";
 
 vec3 crack_hash(vec3 c) {
     c = vec3(dot(c, vec3(127.1, 311.7, 74.7)), dot(c, vec3(269.5, 183.3, 246.1)), dot(c, vec3(113.5, 271.9, 124.6)));
@@ -1264,20 +1276,43 @@ void vertex() {
     v_water = UV;
     v_debris = UV2;
     v_wetland = COLOR.r;
+    v_skirt = VERTEX_ID >= GRID_VERTICES ? 1.0 : 0.0;
     NORMAL = n;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
     v_sun = sun_transmittance(v_height, dot(normalize(v_world - planet_center), sun_direction));
 }
 
-// Ouvertures des grottes (centre relatif à la caméra, rayon ; w = 0 : aucune) : le relief n'y
-// est pas dessiné, la grotte en volume prend le relais (CaveRenderer)
-uniform vec4 cave_holes[4];
+// Grottes en volume (CaveRenderer) : sphère englobante de chaque grotte (centre relatif à la
+// caméra, rayon ; w = 0 : aucune) et galeries qui recoupent la surface (extrémités, rayons). Le
+// relief n'est pas dessiné dans ces galeries (l'ouverture), ni ses jupes près des grottes (vues
+// de l'intérieur, elles pendaient en murs sous la surface)
+uniform vec4 cave_bounds[4];
+uniform vec4 cave_opening_a[16];
+uniform vec4 cave_opening_b[16];
+
+bool in_cave_opening(vec3 p) {
+    for (int c = 0; c < 4; c++) {
+        if (cave_bounds[c].w <= 0.0 || distance(p, cave_bounds[c].xyz) > cave_bounds[c].w)
+            continue;
+        if (v_skirt > 0.001)
+            return true;
+        for (int k = c * 4; k < c * 4 + 4; k++) {
+            vec4 a = cave_opening_a[k], b = cave_opening_b[k];
+            if (a.w <= 0.0)
+                continue;
+            vec3 ab = b.xyz - a.xyz;
+            float t = clamp(dot(p - a.xyz, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+            if (distance(p, a.xyz + ab * t) < mix(a.w, b.w, t))
+                return true;
+        }
+    }
+    return false;
+}
 
 void fragment() {
-    for (int i = 0; i < 4; i++)
-        if (cave_holes[i].w > 0.0 && distance(v_world, cave_holes[i].xyz) < cave_holes[i].w)
-            discard;
+    if (in_cave_opening(v_world))
+        discard;
     vec3 up = normalize(v_world - planet_center);
     vec3 normal = normalize(v_world_normal);
     float h = v_height;

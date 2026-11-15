@@ -16,7 +16,8 @@ namespace Planet.Rendering;
 /// </summary>
 public partial class CaveRenderer : Node3D
 {
-    public const int MaxHoles = 4;
+    /// <summary>Grottes dont l'ouverture est découpée dans le relief, et galeries d'ouverture par grotte.</summary>
+    public const int MaxHoles = 4, OpeningSegments = 4;
     private const double BuildDistanceM = 1500, DrawDistanceM = 1200;
 
     private sealed class Entry
@@ -28,7 +29,6 @@ public partial class CaveRenderer : Node3D
         public ShaderMaterial Material;
     }
 
-    private readonly List<Entry> _entries = new();
     private readonly Dictionary<CaveSite, Entry> _built = new();
     private TerrainHeightField _field;
     private Shader _shader;
@@ -57,12 +57,27 @@ public partial class CaveRenderer : Node3D
 
     public void Clear() => SetSites(Array.Empty<CaveSite>(), null);
 
-    /// <summary>Construit les grottes proches, place celles qui sont prêtes, rend les ouvertures au relief.</summary>
-    public Vector4[] Update(Double3 camera, Vector3 sunDirection, bool lamp)
+    /// <summary>
+    /// Ouvertures à découper dans le relief détaillé (shader du terrain) : par grotte, une sphère
+    /// englobante (centre relatif à la caméra, rayon ; w = 0 : aucune) et les galeries qui recoupent
+    /// la surface (extrémités relatives à la caméra et rayons).
+    /// </summary>
+    public sealed class Openings
     {
-        var holes = new Vector4[MaxHoles];
+        public readonly Vector4[] Bounds = new Vector4[MaxHoles];
+        public readonly Vector4[] SegmentStart = new Vector4[MaxHoles * OpeningSegments];
+        public readonly Vector4[] SegmentEnd = new Vector4[MaxHoles * OpeningSegments];
+    }
+
+    /// <summary>Construit les grottes proches, place celles qui sont prêtes, et donne leurs ouvertures.</summary>
+    /// <param name="underground">caméra dans une grotte : les galeries sont dessinées en entier ;
+    /// sinon, seulement près de l'entrée (plus loin, elles sont sous terre, cachées par le relief,
+    /// dont les morceaux lointains, moins détaillés, pourraient passer sous le toit des galeries)</param>
+    public Openings Update(Double3 camera, Vector3 sunDirection, bool underground)
+    {
+        var openings = new Openings();
         if (_field == null)
-            return holes;
+            return openings;
         double radius = TerrainHeightField.RadiusMeters;
         Double3 up = camera.Normalized();
         // Construction des grottes à moins de 1,5 km (deux à la fois au plus)
@@ -110,14 +125,24 @@ public partial class CaveRenderer : Node3D
             float day = Mathf.Clamp((entry.Cave.Up.ToVector3().Dot(sunDirection) + 0.05f) / 0.25f, 0f, 1f);
             entry.Material.SetShaderParameter("daylight", day);
             entry.Material.SetShaderParameter("sun_direction", sunDirection);
-            entry.Material.SetShaderParameter("lamp", lamp ? 1f : 0f);
+            entry.Material.SetShaderParameter("lamp", underground ? 1f : 0f);
+            entry.Material.SetShaderParameter("visible_radius", underground ? 1e6f : (float)entry.Cave.HoleRadius + 25f);
             if (hole < MaxHoles)
             {
                 Vector3 center = (entry.Cave.Origin - camera).ToVector3();
-                holes[hole++] = new Vector4(center.X, center.Y, center.Z, (float)entry.Cave.HoleRadius - 0.5f);
+                openings.Bounds[hole] = new Vector4(center.X, center.Y, center.Z, (float)entry.Cave.BoundingRadius);
+                int k = hole * OpeningSegments;
+                foreach (var (a, ra, b, rb) in entry.Cave.OpeningSegments(OpeningSegments))
+                {
+                    Vector3 pa = (entry.Cave.ToWorld(a) - camera).ToVector3(), pb = (entry.Cave.ToWorld(b) - camera).ToVector3();
+                    // (un peu plus étroit que la paroi : le relief recouvre la jonction)
+                    openings.SegmentStart[k] = new Vector4(pa.X, pa.Y, pa.Z, (float)ra - 0.15f);
+                    openings.SegmentEnd[k++] = new Vector4(pb.X, pb.Y, pb.Z, (float)rb - 0.15f);
+                }
+                hole++;
             }
         }
-        return holes;
+        return openings;
     }
 
     /// <summary>Espace libre de la grotte où se trouve ce point (null : hors des grottes).</summary>
@@ -184,6 +209,7 @@ uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
 uniform float daylight = 1.0;
 uniform float lamp = 1.0;
 uniform float wet = 1.0;
+uniform float visible_radius = 1e6;
 
 varying vec3 v_normal;
 varying vec3 v_world;
@@ -198,7 +224,8 @@ void vertex() {
 }
 
 void fragment() {
-    if (v_attr.a < 0.5)
+    // (MODEL_MATRIX[3] : entrée de la grotte, relative à la caméra)
+    if (v_attr.a < 0.5 || distance(v_world, MODEL_MATRIX[3].xyz) > visible_radius)
         discard;
     vec3 n = normalize(v_normal);
     vec3 to_camera = -v_world;
