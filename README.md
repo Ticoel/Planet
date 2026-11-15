@@ -509,7 +509,9 @@ Faites :
 3.  **Grottes** : galeries qui se voyaient à travers le sol de loin, sol de l'entrée en roche
     brune aux bords déchiquetés, murs gris sous terre (les « jupes » des morceaux de terrain), pluie
     et brume dans les galeries. L'ouverture est désormais découpée exactement dans les galeries,
-    le relief garde sa neige ou son sable jusqu'au bord ; touche Y : arrivée en vol.
+    le relief garde sa neige ou son sable jusqu'au bord ; touche Y : arrivée en vol. De dehors,
+    on ne voit de la grotte que ce qui se voit par l'ouverture : de loin, le relief dessiné avec
+    moins de détails peut être jusqu'à 6 m plus bas que le vrai, plus que le toit des galeries.
 
 # Sources et références
 

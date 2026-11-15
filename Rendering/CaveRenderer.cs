@@ -126,18 +126,28 @@ public partial class CaveRenderer : Node3D
             entry.Material.SetShaderParameter("daylight", day);
             entry.Material.SetShaderParameter("sun_direction", sunDirection);
             entry.Material.SetShaderParameter("lamp", underground ? 1f : 0f);
-            entry.Material.SetShaderParameter("visible_radius", underground ? 1e6f : (float)entry.Cave.HoleRadius + 25f);
+            entry.Material.SetShaderParameter("outside", !underground);
+            // Galeries qui recoupent la surface (repère relatif à la caméra) : l'ouverture
+            var starts = new Vector4[OpeningSegments];
+            var ends = new Vector4[OpeningSegments];
+            int k = 0;
+            foreach (var (a, ra, b, rb) in entry.Cave.OpeningSegments(OpeningSegments))
+            {
+                Vector3 pa = (entry.Cave.ToWorld(a) - camera).ToVector3(), pb = (entry.Cave.ToWorld(b) - camera).ToVector3();
+                starts[k] = new Vector4(pa.X, pa.Y, pa.Z, (float)ra);
+                ends[k++] = new Vector4(pb.X, pb.Y, pb.Z, (float)rb);
+            }
+            entry.Material.SetShaderParameter("opening_a", starts);
+            entry.Material.SetShaderParameter("opening_b", ends);
             if (hole < MaxHoles)
             {
                 Vector3 center = (entry.Cave.Origin - camera).ToVector3();
                 openings.Bounds[hole] = new Vector4(center.X, center.Y, center.Z, (float)entry.Cave.BoundingRadius);
-                int k = hole * OpeningSegments;
-                foreach (var (a, ra, b, rb) in entry.Cave.OpeningSegments(OpeningSegments))
+                for (int i = 0; i < k; i++)
                 {
-                    Vector3 pa = (entry.Cave.ToWorld(a) - camera).ToVector3(), pb = (entry.Cave.ToWorld(b) - camera).ToVector3();
                     // (un peu plus étroit que la paroi : le relief recouvre la jonction)
-                    openings.SegmentStart[k] = new Vector4(pa.X, pa.Y, pa.Z, (float)ra - 0.15f);
-                    openings.SegmentEnd[k++] = new Vector4(pb.X, pb.Y, pb.Z, (float)rb - 0.15f);
+                    openings.SegmentStart[hole * OpeningSegments + i] = starts[i] - new Vector4(0, 0, 0, 0.15f);
+                    openings.SegmentEnd[hole * OpeningSegments + i] = ends[i] - new Vector4(0, 0, 0, 0.15f);
                 }
                 hole++;
             }
@@ -209,7 +219,38 @@ uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
 uniform float daylight = 1.0;
 uniform float lamp = 1.0;
 uniform float wet = 1.0;
-uniform float visible_radius = 1e6;
+// Caméra hors de la grotte : on n'en voit que ce qui se voit par l'ouverture (galeries qui
+// recoupent la surface : extrémités relatives à la caméra, rayons ; w = 0 : aucune). Le reste
+// est sous terre : de loin, le relief moins détaillé passe parfois sous le toit des galeries
+uniform bool outside = true;
+uniform vec4 opening_a[4];
+uniform vec4 opening_b[4];
+
+// Distance entre les segments [p1, q1] et [p2, q2] (Ericson 2005, 5.1.9) ; t : position sur le second
+float segment_distance(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float t) {
+    vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+    float a = dot(d1, d1), e = max(dot(d2, d2), 1e-6), f = dot(d2, r);
+    float c = dot(d1, r), b = dot(d1, d2);
+    float denom = a * e - b * b;
+    float s = denom > 1e-6 ? clamp((b * f - c * e) / denom, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / max(a, 1e-6), 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / max(a, 1e-6), 0.0, 1.0); }
+    return length(p1 + d1 * s - (p2 + d2 * t));
+}
+
+// Le rayon caméra → point passe-t-il par l'ouverture ?
+bool seen_through_opening(vec3 p) {
+    for (int k = 0; k < 4; k++) {
+        if (opening_a[k].w <= 0.0)
+            continue;
+        float t;
+        float d = segment_distance(vec3(0.0), p, opening_a[k].xyz, opening_b[k].xyz, t);
+        if (d < mix(opening_a[k].w, opening_b[k].w, t) + 0.3)
+            return true;
+    }
+    return false;
+}
 
 varying vec3 v_normal;
 varying vec3 v_world;
@@ -224,8 +265,7 @@ void vertex() {
 }
 
 void fragment() {
-    // (MODEL_MATRIX[3] : entrée de la grotte, relative à la caméra)
-    if (v_attr.a < 0.5 || distance(v_world, MODEL_MATRIX[3].xyz) > visible_radius)
+    if (v_attr.a < 0.5 || (outside && !seen_through_opening(v_world)))
         discard;
     vec3 n = normalize(v_normal);
     vec3 to_camera = -v_world;

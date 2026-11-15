@@ -271,25 +271,42 @@ public sealed class Cave
         // détaillé (shader du terrain, galeries lisses) tombe exactement sur les parois
         if (tunnel < FarRock)
             tunnel += WallNoiseM * WallNoise(q) * Math.Clamp((depth - 1) / 3, 0, 1);
-        double rho = Math.Sqrt(q.X * q.X + q.Y * q.Y);
-        // Autour de l'entrée, le sol de surface ; ailleurs, la roche est pleine hors des galeries
-        ground = rho < HoleRadius + 3 && depth < tunnel;
+        // Roche sous le sol, hors des galeries ; air au-dessus du sol
+        ground = depth < tunnel;
         return ground ? depth : tunnel;
     }
 
     /// <summary>
-    /// Galeries qui recoupent la surface (l'ouverture), sans bruit ni aplatissement : le relief
-    /// détaillé n'est pas dessiné à l'intérieur (au plus <paramref name="max"/>).
+    /// Galeries qui recoupent la surface (l'ouverture), sans bruit ni aplatissement, réduites à
+    /// leur partie proche de la surface : le relief détaillé n'est pas dessiné à l'intérieur, et
+    /// de dehors on ne voit de la grotte que ce qui se voit à travers (au plus <paramref name="max"/>).
     /// </summary>
     public List<(Double3 a, double ra, Double3 b, double rb)> OpeningSegments(int max)
     {
+        const int Steps = 16;
         var opening = new List<(Double3, double, Double3, double)>();
-        foreach (var segment in _segments)
+        foreach (var (a, ra, b, rb) in _segments)
         {
-            var (a, ra, b, rb) = segment;
-            double depthA = GroundZ(a.X, a.Y) - a.Z - ra, depthB = GroundZ(b.X, b.Y) - b.Z - rb;
-            if (Math.Min(depthA, depthB) < 1 && opening.Count < max)
-                opening.Add(segment);
+            if (opening.Count == max)
+                break;
+            // Partie du segment à moins de (rayon + 1,5 m) sous la surface
+            double t0 = double.NaN, t1 = double.NaN;
+            for (int k = 0; k <= Steps; k++)
+            {
+                double t = k / (double)Steps;
+                Double3 q = a + (b - a) * t;
+                double r = ra + (rb - ra) * t;
+                if (GroundZ(q.X, q.Y) - q.Z < r + 1.5)
+                {
+                    if (double.IsNaN(t0)) t0 = t;
+                    t1 = t;
+                }
+            }
+            if (double.IsNaN(t0))
+                continue;
+            t0 = Math.Max(0, t0 - 1.0 / Steps);
+            t1 = Math.Min(1, t1 + 1.0 / Steps);
+            opening.Add((a + (b - a) * t0, ra + (rb - ra) * t0, a + (b - a) * t1, ra + (rb - ra) * t1));
         }
         return opening;
     }
@@ -487,9 +504,27 @@ public sealed class Cave
                             indices.AddRange(new[] { v0, v2, v1, v0, v3, v2 });
                     }
                 }
-        mesh.Vertices = vertices.ToArray();
-        mesh.Normals = normals.ToArray();
-        mesh.Attributes = attributes.ToArray();
+        // Seuls les sommets utilisés sont gardés (le sol de surface, caché, n'a pas de faces)
+        var remap = new int[vertices.Count];
+        Array.Fill(remap, -1);
+        var usedVertices = new List<Vector3>();
+        var usedNormals = new List<Vector3>();
+        var usedAttributes = new List<Color>();
+        for (int i = 0; i < indices.Count; i++)
+        {
+            int v = indices[i];
+            if (remap[v] < 0)
+            {
+                remap[v] = usedVertices.Count;
+                usedVertices.Add(vertices[v]);
+                usedNormals.Add(normals[v]);
+                usedAttributes.Add(attributes[v]);
+            }
+            indices[i] = remap[v];
+        }
+        mesh.Vertices = usedVertices.ToArray();
+        mesh.Normals = usedNormals.ToArray();
+        mesh.Attributes = usedAttributes.ToArray();
         mesh.Indices = indices.ToArray();
         return mesh;
     }
