@@ -65,7 +65,6 @@ public partial class Main
         RegisterHabitats();
         RegisterCrust();
         RegisterChemistry();
-        RegisterPlanetSize();
         RegisterEventMap();
         RegisterGroundwater();
     }

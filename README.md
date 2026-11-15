@@ -27,7 +27,7 @@ taille (un demi-degré).*
 
 ```mermaid
 flowchart LR
-    A[Tectonique des plaques<br/>icosphère de 10 242 cellules] --> B[Relief simulé]
+    A[Tectonique des plaques<br/>icosphère de 2 562 cellules] --> B[Relief simulé]
     B --> C[Climat<br/>ensoleillement, températures,<br/>vents, cycle de l'eau]
     C --> D[Fleuves, lacs, glaciers]
     C --> O[Océans<br/>courants, marées, banquise]
@@ -110,13 +110,11 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   avancer jusqu'à l'âge voulu, on la fige (C), puis la planète vit d'elle-même : saisons, pluies,
   éruptions, séismes, glissements de terrain, sources chaudes. On ne fait que régler ses
   paramètres et regarder ; l'étape suivante permettra d'y semer des souches de vie.
-- **Petite planète « éprouvette » par défaut** : 2 000 km de rayon (à peu près la Lune), dix fois
+- **Petite planète « éprouvette »** (la seule ; la planète comme la Terre a été retirée) : 2 000 km de rayon (à peu près la Lune), dix fois
   moins de surface que la Terre : 5 plaques, un point chaud, quelques dizaines de volcans et une
   poignée de sources chaudes, une ou deux chaînes de montagnes, une grille quatre fois plus
   légère. Tout y est simulé comme sur la Terre (tectonique, climat, eau, croûte modulaire,
-  chimie). Décocher « Petite planète » (groupe « Planète ») passe à une planète comme la Terre
-  (nouvelle planète) ; propriété `StartSmall` de la scène `Main.tscn` pour démarrer sur l'une ou
-  l'autre.
+  chimie).
 - **Interface** (Tab pour la masquer) : le jeu est une boîte de Petri à l'échelle d'une planète ;
   on règle les paramètres, on laisse tourner, on observe.
   - barre du haut : pause, vitesse, horloge, date, qualité graphique ;
@@ -171,14 +169,15 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
 - Godot 4.7.2 .NET : C# pour la logique, compute shaders GLSL pour le climat (vérifiés contre le
   calcul processeur au démarrage, repli automatique). Simulation (`Simulation/`, sans moteur hors
   types de base) séparée du rendu (`Rendering/`, `Main.cs`).
-- **Taille de la planète** réglable : la Terre (6 371 km) ou une petite planète de 2 000 km
-  (2 562 cellules de ~140 km, 5 plaques). Les taux planétaires (points chauds, impacts, séismes)
+- **Taille de la planète** : une petite planète de 2 000 km (2 562 cellules de ~140 km,
+  5 plaques) ; la simulation reste valable pour tout rayon (les tests la vérifient aussi à
+  l'échelle de la Terre). Les taux planétaires (points chauds, impacts, séismes)
   suivent la surface ; la petite planète garde la gravité, l'atmosphère, la rotation et l'orbite
   de la Terre, et sa circulation atmosphérique est celle de la Terre ramenée à sa taille (sinon
   les mêmes écarts de pression sur des distances trois fois plus courtes donnaient des vents trois
   fois plus forts et cinq mètres de pluie par an).
-- **Deux grilles** : simulation sur une **icosphère** (10 242 cellules hexagonales de ~220 km par
-  défaut, sans singularité aux pôles) ; affichage sur une **sphère cubique** en quadtree (morceaux
+- **Deux grilles** : simulation sur une **icosphère** (2 562 cellules hexagonales de ~140 km,
+  sans singularité aux pôles) ; affichage sur une **sphère cubique** en quadtree (morceaux
   de ~2 500 km à 38 m). Le relief détaillé interpole les cellules et ajoute les détails ; les
   couleurs sont lues dans les cellules et fondues entre voisines (~0,8 cellule).
 - **Deux horloges** (touche C) : géologique (0,2 à 1 Ma par pas, avance rapide jusqu'à 4,54 Ga)
