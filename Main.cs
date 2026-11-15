@@ -1545,6 +1545,9 @@ public partial class Main : Node3D
         lines.Add($"Terrain : {_terrain.VisibleChunkCount} morceaux (niveau max {_terrain.DeepestVisibleLevel}{stale}), " +
                   $"{_terrain.CachedChunkCount} en mémoire, {_terrain.PendingChunkCount} en calcul   " +
                   $"Vitesse de la caméra : {SpeedLabel(_terrain.Explorer.Speed)}   Qualité : {QualityLevels[_quality].Label}");
+        lines.Add(_volumeRelief
+            ? $"Relief en volume : {_terrain.VolumeChunkCount} blocs dessinés, {_terrain.VolumeMaskedCount} remplacent la surface (Maj + G : désactiver)"
+            : "Relief en volume désactivé (Maj + G : réactiver)");
     }
 
     private string LayerName() => _displayMode switch
@@ -2000,7 +2003,14 @@ public partial class Main : Node3D
                 }
                 break;
             case Key.G:
-                _terrain.Explorer.ToggleWalking();
+                if (key.ShiftPressed)
+                {
+                    // Relief en volume autour de la caméra (grottes) : marche / arrêt, pour comparer
+                    _volumeRelief = !_volumeRelief;
+                    ShowNotice(_volumeRelief ? "Relief en volume autour de la caméra activé" : "Relief en volume désactivé : surface seule, sans grottes");
+                }
+                else
+                    _terrain.Explorer.ToggleWalking();
                 break;
             case Key.X:
                 // Retour en orbite au-dessus du point actuel

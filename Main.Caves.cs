@@ -19,6 +19,8 @@ namespace Planet;
 public partial class Main
 {
     private readonly NearbyCaves _caves = new();
+    // Maj + G : relief en volume autour de la caméra (pour comparer avec la surface seule)
+    private bool _volumeRelief = true;
     private readonly HashSet<CaveSite> _visitedCaves = new();
     private TerrainHeightField _caveField;
     private Groundwater _caveGroundwater;
@@ -76,7 +78,7 @@ public partial class Main
     {
         var field = _terrain.Field;
         bool climate = _clock == ClockMode.Climate;
-        _terrain.VolumeEnabled = climate;
+        _terrain.VolumeEnabled = climate && _volumeRelief;
         if (field == null)
         {
             _caves.Clear();

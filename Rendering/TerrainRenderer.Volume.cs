@@ -55,6 +55,8 @@ public partial class TerrainRenderer
 
     /// <summary>Blocs de volume affichés.</summary>
     public int VolumeChunkCount => _volume.Values.Count(e => e.Instance.IsValid);
+    /// <summary>Blocs qui remplacent la surface (masque du shader).</summary>
+    public int VolumeMaskedCount => _volumeMaskBytes.Count(b => b != 0);
 
     private void SetupVolume()
     {

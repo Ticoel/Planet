@@ -324,6 +324,13 @@ public sealed class TerrainHeightField
         {
             double radius = _benches[i].RadiusM, basin = _benches[i].Basin;
             double d = direction.DistanceTo(_benches[i].Direction) * RadiusMeters;
+            if (d >= 1.3 * BenchReach * radius)
+                continue;
+            // Contour irrégulier (lobes), propre à chaque bassin : pas de disque parfait
+            var (ax, ay) = LavaFlow.TangentFrame(_benches[i].Direction);
+            Double3 offset = direction - _benches[i].Direction;
+            double angle = Math.Atan2(offset.Dot(ay), offset.Dot(ax)), phase = i * 2.399;
+            d /= 1 + 0.16 * Math.Sin(3 * angle + phase) + 0.08 * Math.Sin(5 * angle + 2.1 * phase);
             if (d >= BenchReach * radius)
                 continue;
             // Terrasse horizontale, cuvette au centre (bord en pente douce sur 15 % du rayon)

@@ -1707,7 +1707,13 @@ void vertex() {
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
     v_water = UV;
     vec3 up = normalize((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz - planet_center);
-    v_depth = water_surface(up, v_water.x) - v_height;
+    float level = water_surface(up, v_water.x);
+    // Point sans eau à lui (ni lac ni fleuve) : surface posée juste sous le sol plutôt qu'au niveau
+    // de la mer, des centaines de mètres plus bas (sinon, entre un point inondé par une crue et
+    // son voisin sec, le triangle d'eau se dressait en mur vertical de la hauteur de la crue)
+    if (v_water.x <= 0.01)
+        level = max(level, v_height - 1.0);
+    v_depth = level - v_height;
     VERTEX += up * v_depth;
     NORMAL = up;
     v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;

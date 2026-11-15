@@ -147,6 +147,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
+  - Maj + G : relief en volume autour de la caméra marche / arrêt (pour comparer) ;
   - Y : survoler la grotte suivante (grotte karstique ou tunnel de lave) ; G pour y entrer à pied, une lampe
     s'allume sous terre ;
   - B : voler vers l'événement naturel suivant, au centre de l'écran (Maj + B : le précédent) : tsunami qui approche
@@ -524,6 +525,10 @@ Faites :
 5.  **Fleuves et lacs qui coulaient par grand froid** : les lacs gèlent sous −2 °C, les fleuves
     par grand froid (les rapides restent ouverts), la glace se couvre de neige.
 6.  **Aurores vues de l'espace** : elles s'effacent au-dessus de 30 à 90 km d'altitude.
+7.  **Rubans d'eau surélevés pendant les crues** : entre un point inondé et son voisin sec, la
+    surface de l'eau plongeait jusqu'au niveau de la mer et se dressait en mur vertical de la
+    hauteur de la crue ; elle s'arrête désormais juste sous le sol.
+8.  **Bassins en disques parfaits** (sources, geysers) : contour irrégulier, en lobes.
 
 # Sources et références
 
