@@ -1577,6 +1577,7 @@ public partial class Main : Node3D
         DisplayMode.Humidity => "humidité de l'air",
         DisplayMode.Biomes => PlanetColorizer.Vegetation ? "biomes" : "climats (Köppen)",
         DisplayMode.NaturalEvents => "événements naturels en cours",
+        DisplayMode.Groundwater => "eau souterraine",
         DisplayMode.Realistic => "vue réaliste",
         _ => "",
     };
@@ -1624,6 +1625,8 @@ public partial class Main : Node3D
         DisplayMode.RecentPrecipitation => "Précipitations des derniers jours, en rythme annuel (beige : sec, vert, bleu, violet : plus de 4 m/an)",
         DisplayMode.AnnualPrecipitation => "Précipitations annuelles (beige : désert, < 250 mm ; vert : 1 m ; bleu : 2 m et plus)",
         DisplayMode.Humidity => "Humidité relative de l'air (brun : sec, blanc : 60 %, bleu : saturé)",
+        DisplayMode.Groundwater => "Eau souterraine : profondeur de la nappe (bleu : affleure, quelques mètres ; vert, jaune ; brun : plus de 100 m) ; " +
+            "points cyan : sources ; blanc : résurgences karstiques ; hachures claires : calcaires karstiques",
         DisplayMode.NaturalEvents => "Événements naturels : rouge, éruptions ; orange, fissures ; violet, cyclones (plus clair : plus fort) ; " +
             "anneau bleu clair, front d'un tsunami ; cyan, fleuves en crue ; ocre, tempêtes de sable ; mauve, orages à tornades ; " +
             "vert, aurores (côté nuit) ; blanc, glaciers qui vêlent ; bleu pâle, neige épaisse (avalanches) ; jaune, séismes récents ; brun, glissements récents",

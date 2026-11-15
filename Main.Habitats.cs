@@ -78,8 +78,16 @@ public partial class Main
     /// Replats des bassins à creuser dans le relief détaillé (l'eau ne tient pas sur une pente) :
     /// un par milieu émergé. Les emplacements ne dépendent que des volcans et de l'abondance.
     /// </summary>
-    private TerrainBench[] HabitatBenches() =>
-        new VolcanicHabitats(_tectonics, _tectonics.AnnualPrecipitation, HydrothermalAbundance).Benches();
+    private TerrainBench[] HabitatBenches()
+    {
+        var habitats = new VolcanicHabitats(_tectonics, _tectonics.AnnualPrecipitation, HydrothermalAbundance).Benches();
+        // (plus les vasques des sources d'eau douce : Main.Groundwater)
+        var springs = UpdateGroundwater().Benches();
+        var all = new TerrainBench[habitats.Length + springs.Length];
+        habitats.CopyTo(all, 0);
+        springs.CopyTo(all, habitats.Length);
+        return all;
+    }
 
     /// <summary>Point du sol où se trouve un milieu : le fond de son bassin, sur le relief détaillé.</summary>
     private Double3 Anchor(Habitat habitat)
@@ -196,6 +204,8 @@ public partial class Main
             return ChemistryColors(element);
         if (mode == DisplayMode.NaturalEvents)
             return EventColors();
+        if (mode == DisplayMode.Groundwater)
+            return GroundwaterColors();
         if (mode != DisplayMode.VolcanicHabitats)
             return PlanetColorizer.Compute(_tectonics, _climate, mode);
         // Relief en gris, les cellules qui abritent des milieux en couleur (celle du plus chaud)

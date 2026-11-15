@@ -38,6 +38,8 @@ public enum DisplayMode
     ChemIron,
     /// <summary>Événements naturels en cours (étape 17) : couleurs calculées par le jeu (Main.EventMap).</summary>
     NaturalEvents,
+    /// <summary>Eau souterraine : profondeur de la nappe et sources (Main.Groundwater).</summary>
+    Groundwater,
 }
 
 /// <summary>Calcule la couleur de chaque cellule selon le mode d'affichage.</summary>

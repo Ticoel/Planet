@@ -67,6 +67,7 @@ public partial class Main
         RegisterChemistry();
         RegisterPlanetSize();
         RegisterEventMap();
+        RegisterGroundwater();
     }
 
     private void TogglePause()

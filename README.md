@@ -399,6 +399,15 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   cyclones, front des tsunamis, fleuves en crue, tempêtes de sable, orages à tornades, aurores
   côté nuit, glaciers qui vêlent, neige épaisse, séismes et glissements récents) et touche B pour
   aller les observer un à un.
+- **Eau souterraine et sources** : une part de la pluie s'infiltre jusqu'à la nappe (un quart en
+  climat tempéré, la moitié dans les calcaires karstiques, presque rien en désert ou sur sol gelé) ;
+  la nappe est à quelques mètres dans les plaines humides et près des fleuves et des côtes, à des
+  dizaines ou des centaines de mètres sous les reliefs et les déserts. Là où elle recoupe la
+  surface naissent des **sources** (vasques de vraie eau creusées dans le relief) ; dans les
+  calcaires, l'eau circule en rivières souterraines et ressort en grosses **résurgences**. Couche
+  « Eau souterraine » (groupe Planète) et fiche à la sonde (profondeur, recharge, débit des sources).
+  Les grottes elles-mêmes ne sont pas creusées : le relief est une surface (une hauteur par point),
+  qui ne peut pas contenir de cavité (voir « Relief en volume » dans la feuille de route).
 - **Pas encore de vie, pas de vocabulaire de la vie** : la sonde, le survol, les détails et la
   couche « Climats » donnent des climats (équatorial humide, semi-aride, subarctique…), plus des
   biomes (forêt, savane, toundra), tant que la vie n'est pas apparue ; les dépôts colorés des
@@ -425,7 +434,8 @@ Faites :
 - **16b** : chimie (carbone, azote, phosphore, soufre, fer : roches, sols, fleuves, océan, air).
 - **17** : une Terre vivante : crues, lahars, tsunamis, cyclones, tornades, dunes et tempêtes de
   sable, glaciers et icebergs, avalanches, recul des falaises, aurores, étoiles filantes,
-  brouillards, arcs-en-ciel ; éruptions fissurales, deltas et vasières, flaques et sols craquelés.
+  brouillards, arcs-en-ciel ; éruptions fissurales, deltas et vasières, flaques et sols craquelés ;
+  eau souterraine, sources et résurgences karstiques.
 
 À venir :
 
@@ -436,6 +446,11 @@ Faites :
 17. **Encore plus de vie sans la vie** (pistes) : effondrements karstiques ; lacs acides de
     cratère ; sols gelés en polygones (pergélisol) ; écoulement visible des glaciers (crevasses,
     séracs) ; houle de tempête et submersion par les cyclones.
+18. **Relief en volume** (piste) : grottes, arches, surplombs, tunnels de lave. Un champ de densité
+    3D calculé à la demande autour de la caméra (comme le relief actuel, mais en volume), maillé
+    par morceaux (marching cubes ou dual contouring), la surface actuelle restant utilisée de loin ;
+    seules les modifications (effondrements, glissements) sont mémorisées. Ainsi le volume existe
+    partout sur la planète sans jamais être stocké en entier.
 
 ### Pistes pour la vie et son action sur le milieu
 
@@ -551,6 +566,14 @@ de ces mêmes ouvrages.
 - O'Callaghan J. F., Mark D. M. (1984). *The extraction of drainage networks from digital
   elevation data.* Computer Vision, Graphics, and Image Processing 28(3), 323-344. — écoulement
   vers la voisine la plus basse, débits cumulés vers l'aval.
+
+- Fan Y., Li H., Miguez-Macho G. (2013). *Global patterns of groundwater table depth.* Science
+  339, 940-943. — profondeur de la nappe : quelques mètres dans les plaines humides, des dizaines
+  à des centaines de mètres sous les reliefs et en zone aride.
+- Scanlon B. R. et al. (2006). *Global synthesis of groundwater recharge in semiarid and arid
+  regions.* Hydrological Processes 20, 3335-3370. — recharge presque nulle en zone aride.
+- Ford D., Williams P. (2007). *Karst Hydrogeology and Geomorphology.* Wiley. — infiltration
+  rapide et rivières souterraines des calcaires, résurgences (Fontaine de Vaucluse).
 
 ## Océans
 - Stommel H. (1948). *The westward intensification of wind-driven ocean currents.* Transactions
