@@ -1524,8 +1524,8 @@ void fragment() {
             color = mix(color, ash, volcanic * 0.8 * (1.0 - snowEstimate));
         }
     }
-    // Milieux hydrothermaux : bassins, dépôts minéraux et tapis microbiens (le fond des bassins,
-    // sous leur eau peu profonde, garde ses couleurs : turquoise, tapis orange et jaunes)
+    // Milieux hydrothermaux : bassins et dépôts minéraux (le fond des bassins, sous leur eau peu
+    // profonde, garde ses couleurs : turquoise, soufre jaune, oxydes de fer orangés)
     if (habitat_count > 0 && depth <= 1.0 && coloring != 1 && coloring != 3) {
         for (int k = 0; k < habitat_count; k++) {
             vec3 r = v_world - habitat_sites[k].xyz;
@@ -1545,14 +1545,14 @@ void fragment() {
                 color = mix(color, vec3(0.74, 0.71, 0.64), field * 0.6);
                 color = mix(color, vec3(0.86, 0.74, 0.16), sulfur * 0.85);
             } else if (kind < 1.5) {
-                // Source chaude : terrasse de dépôts clairs, puis anneaux de tapis microbiens (bruns,
-                // orange, jaunes : chaque couleur vit à sa température), puis l'eau, turquoise au
-                // bord et bleu profond au centre, là où elle est trop chaude pour la vie
+                // Source chaude : terrasse de dépôts clairs, puis anneaux minéraux (sans vie : soufre
+                // jaune près de l'eau, oxydes de fer orangés puis bruns en s'éloignant, comme à
+                // Dallol), puis l'eau, turquoise au bord et bleu profond au centre
                 float terrace = (1.0 - smoothstep(1.2, 3.2, q)) * 0.75;
                 color = mix(color, ph < 5.0 ? vec3(0.72, 0.7, 0.6) : vec3(0.84, 0.8, 0.72), terrace);
                 if (ph >= 5.0) {
                     float mats = smoothstep(0.72, 0.84, q) * (1.0 - smoothstep(1.15, 1.45, q)) * mix(0.5, 1.0, heat);
-                    vec3 mat = mix(vec3(0.93, 0.78, 0.2), mix(vec3(0.9, 0.45, 0.08), vec3(0.42, 0.2, 0.08), smoothstep(1.0, 1.35, q)),
+                    vec3 mat = mix(vec3(0.85, 0.76, 0.3), mix(vec3(0.72, 0.42, 0.16), vec3(0.4, 0.24, 0.12), smoothstep(1.0, 1.35, q)),
                                    smoothstep(0.8, 0.98, q));
                     color = mix(color, mat * (0.85 + 0.3 * n8.z), mats);
                 }

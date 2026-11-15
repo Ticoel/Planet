@@ -36,6 +36,8 @@ public enum DisplayMode
     ChemPhosphorus,
     ChemSulfur,
     ChemIron,
+    /// <summary>Événements naturels en cours (étape 17) : couleurs calculées par le jeu (Main.EventMap).</summary>
+    NaturalEvents,
 }
 
 /// <summary>Calcule la couleur de chaque cellule selon le mode d'affichage.</summary>

@@ -149,6 +149,10 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
+  - B : aller voir l'événement naturel suivant (Maj + B : le précédent) : tsunami qui approche
+    d'une côte, cyclone vu de haut, éruption ou fissure, orages à tornades, crue, tempête de sable,
+    glissement, lahar ou avalanche récents, séisme, aurores, glacier qui vêle, montagne enneigée ;
+    la couche « Événements naturels » (groupe Climat) les montre tous sur la carte ;
   - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, averse, neige, puis
     nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ;
     Maj + F4 : la plus haute falaise de la côte, vue du large ; L : volcan.
@@ -292,7 +296,7 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     pas sur une pente : sur un versant, une source bâtit de telles terrasses de dépôts) ; les
     sources chaudes remplissent leur cuvette et les geysers une petite vasque autour de leur
     bouche : de la vraie eau, comme la mer, les lacs et les fleuves (les mares de boue restent de
-    la boue) ; fond des bassins turquoise, bordé de tapis microbiens jaunes et orange, terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
+    la boue) ; fond des bassins turquoise, bordé de dépôts minéraux (soufre jaune, oxydes de fer orangés : pas encore de tapis microbiens, il n'y a pas de vie), terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
     « Milieux hydrothermaux », fiche à la sonde (nombre, température, pH), réglage de leur
     abondance ; touche J : source chaude ou geyser suivant. Ce sont les berceaux possibles de
     la vie de l'étape suivante ;
@@ -391,6 +395,14 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     jusqu'à 60 pendant les pluies d'étoiles filantes, deux fois par an), **arcs-en-ciel** (arc
     principal à 42° du point opposé au Soleil, secondaire inversé et plus pâle, quand il pleut et
     que le Soleil est bas), **brouillards** de rayonnement la nuit et le matin.
+- **Recensement des événements** : couche « Événements naturels » (éruptions, fissures,
+  cyclones, front des tsunamis, fleuves en crue, tempêtes de sable, orages à tornades, aurores
+  côté nuit, glaciers qui vêlent, neige épaisse, séismes et glissements récents) et touche B pour
+  aller les observer un à un.
+- **Pas encore de vie, pas de vocabulaire de la vie** : la sonde, le survol, les détails et la
+  couche « Climats » donnent des climats (équatorial humide, semi-aride, subarctique…), plus des
+  biomes (forêt, savane, toundra), tant que la vie n'est pas apparue ; les dépôts colorés des
+  sources chaudes sont minéraux (soufre, oxydes de fer), pas des tapis microbiens.
 - **Sons** : vent, pluie, vagues, tonnerre, grondements des volcans et des séismes, entièrement
   synthétisés et pilotés par la simulation (extrait : `docs/sons.mp3`).
 - **Captures** : photos sans l'interface, vidéos AVI Motion JPEG à 30 images/s encodées en tâche de

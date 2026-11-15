@@ -59,6 +59,26 @@ public static class Biomes
     };
 
     public static string Name(Biome biome) => Table[(int)biome].Name;
+
+    /// <summary>
+    /// Nom du climat seul (classes de Köppen), sans la végétation qu'il permettrait : avant la
+    /// vie, il n'y a ni forêt, ni savane, ni toundra, seulement des climats.
+    /// </summary>
+    public static string ClimateName(Biome biome) => biome switch
+    {
+        Biome.Ocean => "océan",
+        Biome.IceSheet => "calotte glaciaire",
+        Biome.Tundra => "polaire (gel presque toute l'année)",
+        Biome.Taiga => "subarctique (hiver long et glacial)",
+        Biome.ColdDesert => "désert froid",
+        Biome.Steppe => "semi-aride",
+        Biome.TemperateForest => "tempéré",
+        Biome.TemperateRainforest => "tempéré très humide",
+        Biome.HotDesert => "désert chaud",
+        Biome.Savanna => "tropical à saison sèche",
+        Biome.TropicalSeasonalForest => "tropical humide à saisons",
+        _ => "équatorial humide",
+    };
     public static Color ColorOf(Biome biome) => Table[(int)biome].Color;
     public static int Count => Table.Length;
 

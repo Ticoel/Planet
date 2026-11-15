@@ -12,8 +12,8 @@ namespace Planet;
 
 /// <summary>
 /// Milieux hydrothermaux (étape 14a) dans le jeu : la liste suit la planète (volcans, dorsales,
-/// pluie), les plus proches de la caméra sont peints sur le sol (bassins, dépôts, tapis
-/// microbiens) et fument (vapeur, jets des geysers), et l'interface les montre : couche, sonde,
+/// pluie), les plus proches de la caméra sont peints sur le sol (bassins, dépôts
+/// minéraux colorés) et fument (vapeur, jets des geysers), et l'interface les montre : couche, sonde,
 /// courbe, réglage de leur abondance.
 /// </summary>
 public partial class Main
@@ -194,6 +194,8 @@ public partial class Main
     {
         if (ChemistryElement(mode) is { } element)
             return ChemistryColors(element);
+        if (mode == DisplayMode.NaturalEvents)
+            return EventColors();
         if (mode != DisplayMode.VolcanicHabitats)
             return PlanetColorizer.Compute(_tectonics, _climate, mode);
         // Relief en gris, les cellules qui abritent des milieux en couleur (celle du plus chaud)

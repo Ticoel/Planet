@@ -519,6 +519,7 @@ public partial class Main
         _lastSlide = $"{what} de {VolumeLabel(slide.ReleasedVolume)} à {Distance(km * 1000)}" +
                      (cause.Length > 0 ? $" ({cause})" : "");
         ShowNotice(_lastSlide);
+        RememberSlide(what, slide.Source);
     }
 
     private static string VolumeLabel(double m3) => m3 switch

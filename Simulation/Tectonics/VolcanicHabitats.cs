@@ -10,7 +10,7 @@ public enum HabitatKind
 {
     /// <summary>Fumerolles : évents de gaz brûlants (vapeur, soufre), sol acide tapissé de soufre.</summary>
     Fumarole,
-    /// <summary>Source chaude : bassin d'eau chaude riche en minéraux, bordé de tapis microbiens.</summary>
+    /// <summary>Source chaude : bassin d'eau chaude riche en minéraux, bordé de dépôts colorés (soufre, oxydes de fer).</summary>
     HotSpring,
     /// <summary>Mare de boue : peu d'eau, très acide, l'argile bouillonne.</summary>
     MudPot,

@@ -62,6 +62,9 @@ public partial class Main
         _eventsDay = double.NaN;
         _calvingVersion = -1;
         _glacierCells = 0;
+        _recentSlides.Clear();
+        _recentQuakes.Clear();
+        _eventIndex = -1;
         _avulsionCount = _tsunamiCount = _cycloneCount = _tornadoCount = _calvedCount = 0;
         _tornadoRenderer?.HideTornado();
     }
@@ -88,6 +91,7 @@ public partial class Main
         // Temps des événements locaux : le temps réel, un peu accéléré si l'horloge va vite
         double rate = !_running ? 0 : Math.Clamp(ClimateSpeeds[_climateSpeed] * 86400.0, 1.0, 3.0);
 
+        RememberQuakes();
         UpdateCyclones(days, cameraDirection);
         UpdateFlood(delta, days, cell);
         UpdateTsunamis(day, cameraDirection);

@@ -66,6 +66,7 @@ public partial class Main
         RegisterCrust();
         RegisterChemistry();
         RegisterPlanetSize();
+        RegisterEventMap();
     }
 
     private void TogglePause()
@@ -219,7 +220,7 @@ public partial class Main
             IsActive = () => _displayMode == mode,
             Activate = () => SetDisplayMode(mode),
         });
-        Layer("Planète", "Vue réaliste", DisplayMode.Realistic, "Sol, végétation, neige et eau comme on les verrait");
+        Layer("Planète", "Vue réaliste", DisplayMode.Realistic, "Sol, neige et eau comme on les verrait (pas encore de vie : sols nus)");
         Layer("Planète", "Géologie", DisplayMode.Geology, "Roches et relief, sans végétation");
         Layer("Planète", "Altitude", DisplayMode.Elevation);
         Layer("Planète", "Plaques", DisplayMode.Plates);
@@ -234,7 +235,7 @@ public partial class Main
         Layer("Climat", "Pluie récente", DisplayMode.RecentPrecipitation, climate);
         Layer("Climat", "Pluie annuelle", DisplayMode.AnnualPrecipitation, climate);
         Layer("Climat", "Humidité", DisplayMode.Humidity, climate);
-        Layer("Climat", "Biomes", DisplayMode.Biomes, "Milieux que le climat permettrait (Köppen) ; " + climate);
+        Layer("Climat", "Climats", DisplayMode.Biomes, "Classes de climat de Köppen (polaire, tempéré, désert…) ; " + climate);
         Layer("Océan", "Courants", DisplayMode.OceanCurrents, climate);
         Layer("Océan", "Remontées d'eau froide", DisplayMode.Upwelling, climate);
     }
@@ -281,7 +282,7 @@ public partial class Main
             : null);
         Field("Pluie", c => Climate() ? $"{_climate.Statistics.AnnualPrecipitation[c]:N0} mm/an" : null);
         Field("Vent", c => Climate() ? $"{French(_climate.Winds.Wind[c].Length())} m/s, {_climate.Winds.Pressure[c]:0} hPa" : null);
-        Field("Milieu", c => Climate() && Land(c) ? Biomes.Name(_climate.Biomes[c]) : null);
+        Field("Climat", c => Climate() && Land(c) ? LandName(_climate.Biomes[c]) : null);
         Field("Neige", c => Climate() && Land(c) && _climate.Snow[c] > 1f ? $"{_climate.Snow[c]:N0} mm d'eau" : null);
         Field("Littoral", c =>
         {

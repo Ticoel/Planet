@@ -794,7 +794,7 @@ public partial class Main : Node3D
     private static bool IsClimateLayer(DisplayMode mode) => mode is DisplayMode.Temperature
         or DisplayMode.WindSpeed or DisplayMode.Pressure or DisplayMode.RecentPrecipitation
         or DisplayMode.AnnualPrecipitation or DisplayMode.Humidity or DisplayMode.Biomes or DisplayMode.Realistic
-        or DisplayMode.OceanCurrents or DisplayMode.Upwelling;
+        or DisplayMode.OceanCurrents or DisplayMode.Upwelling or DisplayMode.NaturalEvents;
 
     /// <summary>Coloration du terrain selon la couche choisie.</summary>
     private TerrainColoring ColoringFor(DisplayMode mode) => mode switch
@@ -1489,6 +1489,7 @@ public partial class Main : Node3D
             lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
+            lines.Add("[B] Aller voir l'événement naturel suivant (Maj+B : précédent) : éruption, cyclone, tsunami, crue, tornade, tempête de sable, aurores…");
             lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] averse  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
         }
         else if (!withUi)
@@ -1574,7 +1575,8 @@ public partial class Main : Node3D
         DisplayMode.RecentPrecipitation => "pluie des derniers jours",
         DisplayMode.AnnualPrecipitation => "pluie annuelle",
         DisplayMode.Humidity => "humidité de l'air",
-        DisplayMode.Biomes => "biomes",
+        DisplayMode.Biomes => PlanetColorizer.Vegetation ? "biomes" : "climats (Köppen)",
+        DisplayMode.NaturalEvents => "événements naturels en cours",
         DisplayMode.Realistic => "vue réaliste",
         _ => "",
     };
@@ -1587,7 +1589,7 @@ public partial class Main : Node3D
             return text;
         text += $", {French(_climate.SurfaceTemperature[cell])} °C, pluie {_climate.Statistics.AnnualPrecipitation[cell]:N0} mm/an";
         if (!_climate.Model.IsOcean(cell))
-            text += $", {Biomes.Name(_climate.Biomes[cell])}";
+            text += $", {LandName(_climate.Biomes[cell])}";
         return text;
     }
 
@@ -1622,10 +1624,21 @@ public partial class Main : Node3D
         DisplayMode.RecentPrecipitation => "Précipitations des derniers jours, en rythme annuel (beige : sec, vert, bleu, violet : plus de 4 m/an)",
         DisplayMode.AnnualPrecipitation => "Précipitations annuelles (beige : désert, < 250 mm ; vert : 1 m ; bleu : 2 m et plus)",
         DisplayMode.Humidity => "Humidité relative de l'air (brun : sec, blanc : 60 %, bleu : saturé)",
-        DisplayMode.Biomes => "Biomes (classification simplifiée de Köppen, mise à jour à chaque année simulée)",
-        DisplayMode.Realistic => "Vue réaliste (végétation, déserts, neige, glaciers, banquise, lacs)",
+        DisplayMode.NaturalEvents => "Événements naturels : rouge, éruptions ; orange, fissures ; violet, cyclones (plus clair : plus fort) ; " +
+            "anneau bleu clair, front d'un tsunami ; cyan, fleuves en crue ; ocre, tempêtes de sable ; mauve, orages à tornades ; " +
+            "vert, aurores (côté nuit) ; blanc, glaciers qui vêlent ; bleu pâle, neige épaisse (avalanches) ; jaune, séismes récents ; brun, glissements récents",
+        DisplayMode.Biomes => "Climats (classification simplifiée de Köppen, mise à jour à chaque année simulée ; les couleurs rappellent les milieux que chaque climat permettrait, une fois la vie apparue)",
+        DisplayMode.Realistic => PlanetColorizer.Vegetation
+            ? "Vue réaliste (végétation imaginée, déserts, neige, glaciers, banquise, lacs)"
+            : "Vue réaliste (planète sans vie : roches et sols nus selon le climat, déserts, neige, glaciers, banquise, lacs, vasières)",
         _ => "",
     };
+
+    /// <summary>
+    /// Nom d'un milieu des terres : avant la vie, le climat seul (pas de forêt ni de savane) ;
+    /// avec la végétation imaginée, le biome qu'il permettrait.
+    /// </summary>
+    private static string LandName(Biome biome) => PlanetColorizer.Vegetation ? Biomes.Name(biome) : Biomes.ClimateName(biome);
 
     /// <summary>Part des terres occupée par chaque biome (les cinq plus étendus).</summary>
     private string BiomeSummary()
@@ -1645,8 +1658,8 @@ public partial class Main : Node3D
             .Where(b => counts[b] > 0)
             .OrderByDescending(b => counts[b])
             .Take(5)
-            .Select(b => $"{Biomes.Name((Biome)b)} {counts[b] * 100 / land} %");
-        return "Terres : " + string.Join(", ", top);
+            .Select(b => $"{LandName((Biome)b)} {counts[b] * 100 / land} %");
+        return (PlanetColorizer.Vegetation ? "Terres : " : "Climats des terres : ") + string.Join(", ", top);
     }
 
     /// <summary>Repère la cellule sous la souris (rayon depuis la caméra, sphère du niveau de la mer).</summary>
@@ -1695,7 +1708,7 @@ public partial class Main : Node3D
                       $"   Vent : {French(_climate.Winds.Wind[cell].Length())} m/s, {_climate.Winds.Pressure[cell]:0} hPa";
         if (!_climate.Model.IsOcean(cell))
         {
-            text += $"   {Biomes.Name(_climate.Biomes[cell])}";
+            text += $"   {LandName(_climate.Biomes[cell])}";
             if (_climate.Snow[cell] > 1f)
                 text += $", neige {_climate.Snow[cell]:N0} mm";
             var hydrology = _climate.Hydrology;
@@ -2032,6 +2045,9 @@ public partial class Main : Node3D
                 break;
             case Key.L:
                 GoToPlace(10);
+                break;
+            case Key.B:
+                GoToNextEvent(key.ShiftPressed ? -1 : 1);
                 break;
             case Key.J:
                 GoToNextHabitat();
