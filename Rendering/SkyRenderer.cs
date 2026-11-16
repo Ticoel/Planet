@@ -736,7 +736,7 @@ void sky() {
         vec3 north = cross(up, east);
         // Aurores : rideaux verts (oxygène, ~100-150 km) frangés de rouge en haut (oxygène, plus
         // haut), du côté du pôle, qui ondulent lentement et se plissent en rayons
-        if (aurora_strength > 0.0 && elevation > 0.0 && night > 0.0) {
+        if (aurora_strength > 0.0 && elevation > -0.05 && night > 0.0) {
             float azimuth = atan(dot(dir, east), dot(dir, north));
             float toward = smoothstep(-0.3, 0.5, dot(dir, north) * aurora_pole);
             float arc = 0.22 + 0.08 * sin(azimuth * 2.0 + TIME * 0.05) + 0.04 * sin(azimuth * 5.0 - TIME * 0.09);
@@ -745,7 +745,11 @@ void sky() {
             float curtain = exp(-low * low) + 0.5 * exp(-high * high);
             float rays = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(azimuth * 55.0 + 4.0 * sin(azimuth * 6.0 + TIME * 0.25) + TIME * 0.4), 3.0);
             vec3 tint = mix(vec3(0.15, 1.0, 0.45), vec3(0.95, 0.25, 0.4), smoothstep(arc + 0.05, arc + 0.35, elevation));
-            color += tint * aurora_strength * toward * curtain * rays * night * 0.5;
+            // Bas du rideau doux (il s'arrête vers 100 km d'altitude, pas sur l'horizon), qui
+            // s'efface en approchant de l'horizon : plus de coupure nette
+            float lower = smoothstep(arc - 0.16 + 0.03 * sin(azimuth * 9.0 + TIME * 0.2), arc - 0.02, elevation);
+            float horizon = smoothstep(-0.02, 0.1, elevation);
+            color += tint * aurora_strength * toward * curtain * rays * night * 0.5 * lower * horizon;
         }
         // Étoiles filantes : une traînée brève toutes les quelques secondes à minutes (selon le
         // taux, plus fort pendant les pluies d'étoiles filantes)

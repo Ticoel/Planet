@@ -546,6 +546,11 @@ Faites :
     remplaçait le fond marin, 3 km plus bas (rapport de bug) ; il ne compte plus que la hauteur
     au-dessus de la roche. Le sol des blocs reprend exactement le relief détaillé et sa pente : plus
     de carrés de lumière différente.
+15. **Fleuves trop hauts vus de loin** : quand le relief passe à un niveau de détail plus
+    grossier, le lit étroit est lissé et les berges descendaient sous le niveau de l'eau, cachée
+    jusque-là : le fleuve s'étalait en ruban au ras de la plaine. Le niveau caché suit maintenant
+    le sol.
+16. **Aurores coupées net à l'horizon** : bas du rideau doux, qui s'efface vers l'horizon.
 13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
     surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis

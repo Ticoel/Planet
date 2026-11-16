@@ -1705,6 +1705,11 @@ void vertex() {
     v_water = UV;
     vec3 up = normalize((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz - planet_center);
     float level = water_surface(up, v_water.x);
+    // Niveau caché sous le sol (berges, plaine d'inondation) : il suit le sol quand celui-ci se
+    // transforme vers le niveau de détail plus grossier (morphing) ; sinon, le lit étroit lissé,
+    // les berges descendaient sous l'eau et le fleuve s'étalait en ruban, au ras de la plaine
+    if (v_water.x > 0.01 && v_water.x < CUSTOM0.w)
+        level += v_height - CUSTOM0.w;
     // Point des terres loin des côtes, sans eau à lui (ni lac ni fleuve) : surface posée juste sous
     // le sol plutôt que tout en bas (sinon, entre un point inondé par une crue et son voisin sec,
     // le triangle d'eau se dressait en mur vertical de la hauteur de la crue). Près des côtes, la
