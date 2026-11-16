@@ -144,6 +144,9 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
       haute définition, nuages et panaches plus fins ;
   - U : masquer l'eau ; N : masquer les nuages ; K : couper le son ;
   - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
+  - Ctrl + F12 : **rapport de bug** : capture de l'écran (interface comprise) et fichier texte du
+    même nom qui décrit l'état du jeu (caméra, horloge, sol, terrain, relief en volume, grottes,
+    événements, fin du journal de Godot), à joindre au message ;
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
     (fichiers rangés dans le dossier Images/Planet) ;
   - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;

@@ -55,6 +55,41 @@ public partial class TerrainRenderer
 
     /// <summary>Blocs de volume affichés.</summary>
     public int VolumeChunkCount => _volume.Values.Count(e => e.Instance.IsValid);
+    /// <summary>État du relief en volume, pour le rapport de bug (Ctrl + F12).</summary>
+    public string VolumeReport()
+    {
+        if (_volumeFrame == null)
+            return $"inactif (autorisé : {VolumeEnabled}, altitude {Explorer.AltitudeAboveGround:0.0} m, transition : {Explorer.InTransition})";
+        Double3 local = _volumeFrame.ToLocal(Explorer.Position);
+        int ci = (int)Math.Floor(local.X / VolumeChunkBuilder.ChunkM), cj = (int)Math.Floor(local.Y / VolumeChunkBuilder.ChunkM);
+        var text = new System.Text.StringBuilder();
+        text.AppendLine($"actif ; ancrage à {_volumeFrame.Origin.DistanceTo(Explorer.Position):0} m ; caméra dans le bloc ({ci}, {cj}), " +
+                        $"position locale ({local.X:0.0}, {local.Y:0.0}, {local.Z:0.0})");
+        text.AppendLine($"blocs : {_volume.Count} suivis, {_volume.Values.Count(e => e.Built)} construits, {VolumeChunkCount} dessinés, " +
+                        $"{_volume.Values.Count(e => e.Built && !e.Instance.IsValid)} vides, {_volume.Values.Count(e => e.Build != null)} en calcul, " +
+                        $"{VolumeMaskedCount} remplacent la surface ; grottes creusées : {VolumeCaves.Count}");
+        // Carte des blocs autour de la caméra : # masqué et dessiné, + dessiné hors masque,
+        // o construit vide, ~ en calcul, . absent ; C : caméra
+        int corner = VolumeMaskSize / 2;
+        for (int dj = VolumeDrawnRadius + 1; dj >= -VolumeDrawnRadius - 1; dj--)
+        {
+            text.Append("  ");
+            for (int di = -VolumeDrawnRadius - 1; di <= VolumeDrawnRadius + 1; di++)
+            {
+                char c = '.';
+                if (_volume.TryGetValue((ci + di, cj + dj), out var e))
+                {
+                    int mi = di + corner, mj = dj + corner;
+                    bool masked = mi >= 0 && mj >= 0 && mi < VolumeMaskSize && mj < VolumeMaskSize && _volumeMaskBytes[mj * VolumeMaskSize + mi] != 0;
+                    c = e.Build != null && !e.Built ? '~' : e.Instance.IsValid ? (masked ? '#' : '+') : e.Built ? 'o' : '.';
+                }
+                text.Append(di == 0 && dj == 0 ? 'C' : c);
+            }
+            text.AppendLine();
+        }
+        return text.ToString().TrimEnd();
+    }
+
     /// <summary>Blocs qui remplacent la surface (masque du shader).</summary>
     public int VolumeMaskedCount => _volumeMaskBytes.Count(b => b != 0);
 
