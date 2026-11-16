@@ -345,9 +345,10 @@ public sealed partial class SkyRenderer : Node3D
         float activity = 0.35f + 0.65f * Mathf.Clamp(0.5f + 0.5f * (float)(Math.Sin(day * 0.9) * Math.Sin(day * 0.37 + 1.3)), 0f, 1f);
         float oval = Mathf.SmoothStep(50f, 63f, Math.Abs(latitude)) * (1f - Mathf.SmoothStep(80f, 88f, Math.Abs(latitude)));
         bool climate = frame.Weather.HasValue;
-        // (les aurores brillent vers 100 km d'altitude : vues d'en dessous, comme des rideaux dans
-        // le ciel ; de l'espace, ce rideau dessiné sur le ciel n'a plus de sens)
-        float belowAurora = 1f - Mathf.SmoothStep(30000f, 90000f, (float)frame.AltitudeAboveGround);
+        // (les aurores brillent vers 100 km d'altitude : vues du sol, comme des rideaux dans le
+        // ciel ; ce rideau dessiné sur la voûte céleste n'a plus de sens dès que le ciel devient
+        // noir : effacé entre 8 et 25 km d'altitude)
+        float belowAurora = 1f - Mathf.SmoothStep(8000f, 25000f, (float)frame.AltitudeAboveGround);
         _skyMaterial.SetShaderParameter("aurora_strength", climate ? oval * activity * belowAurora : 0f);
         _skyMaterial.SetShaderParameter("aurora_pole", latitude >= 0 ? 1f : -1f);
         double yearDay = day % 365.25;

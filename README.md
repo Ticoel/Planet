@@ -527,7 +527,7 @@ Faites :
     caméra, hors de la vue). Touche Y : arrivée en vol près de la grotte.
 5.  **Fleuves et lacs qui coulaient par grand froid** : les lacs gèlent sous −2 °C, les fleuves
     par grand froid (les rapides restent ouverts), la glace se couvre de neige.
-6.  **Aurores vues de l'espace** : elles s'effacent au-dessus de 30 à 90 km d'altitude.
+6.  **Aurores vues de l'espace** : elles s'effacent entre 8 et 25 km d'altitude.
 7.  **Rubans d'eau surélevés pendant les crues** : entre un point inondé et son voisin sec, la
     surface de l'eau plongeait jusqu'au niveau de la mer et se dressait en mur vertical de la
     hauteur de la crue ; elle s'arrête désormais juste sous le sol.
