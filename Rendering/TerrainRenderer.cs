@@ -55,8 +55,9 @@ public partial class TerrainRenderer : Node3D
     // Godot leur réserve 16 cases dans un tampon global dont la taille par défaut (65 536) ne
     // suffit que pour 4 096 instances. Après un saut de caméra, le cache, les morceaux de la
     // nouvelle vue et ceux en attente de libération dépassaient cette limite et faisaient
-    // planter le jeu : le tampon est agrandi à 524 288 cases (32 768 instances) dans project.godot
-    // (rendering/limits/global_shader_variables/buffer_size).
+    // planter le jeu : le tampon est agrandi à 1 048 576 cases (65 536 instances) dans project.godot
+    // (rendering/limits/global_shader_variables/buffer_size) : de quoi garder 9 000 morceaux en
+    // qualité haute, plus autant pour le relief suivant pendant une bascule.
     private const double UploadBudgetMs = 3.0;
 
     /// <summary>Nombre de morceaux gardés en mémoire (selon la qualité).</summary>
@@ -153,7 +154,7 @@ public partial class TerrainRenderer : Node3D
     private readonly PriorityQueue<ChunkKey, double> _queue = new();
     private readonly HashSet<long> _queued = new();
     private readonly HashSet<long> _inProgress = new();
-    private readonly ConcurrentQueue<(TerrainChunk chunk, int generation, int stamp)> _completed = new();
+    private readonly ConcurrentQueue<(PreparedChunk prepared, int generation, int stamp)> _completed = new();
     // Croûte modulaire (étape 16a) : morceaux affichés dont le relief a changé, à recalculer
     // (numéro de la modification la plus récente qui les touche) ; le morceau périmé reste
     // affiché jusqu'à l'arrivée du nouveau
@@ -644,13 +645,13 @@ public partial class TerrainRenderer : Node3D
         var stopwatch = Stopwatch.StartNew();
         while (stopwatch.Elapsed.TotalMilliseconds < UploadBudgetMs && _completed.TryDequeue(out var item))
         {
-            long packed = item.chunk.Key.Packed;
+            long packed = item.prepared.Chunk.Key.Packed;
             if (item.generation == _displayGeneration)
             {
                 if (!_cache.TryGetValue(packed, out var old))
                 {
-                    _cache[packed] = CreateEntry(item.chunk, item.generation);
-                    if (item.stamp < _editStamp && NewerEdit(item.chunk, item.stamp) is > 0 and var newer)
+                    _cache[packed] = CreateEntry(item.prepared, item.generation);
+                    if (item.stamp < _editStamp && NewerEdit(item.prepared.Chunk, item.stamp) is > 0 and var newer)
                         _stale[packed] = newer;
                 }
                 else if (_stale.TryGetValue(packed, out int since))
@@ -660,7 +661,7 @@ public partial class TerrainRenderer : Node3D
                     // modification, il reste à refaire
                     if (item.stamp >= since)
                         _stale.Remove(packed);
-                    var entry = CreateEntry(item.chunk, item.generation);
+                    var entry = CreateEntry(item.prepared, item.generation);
                     entry.LastUsedFrame = old.LastUsedFrame;
                     if (old.Visible)
                         _visible.Remove(old);
@@ -672,54 +673,51 @@ public partial class TerrainRenderer : Node3D
             {
                 // Nouveau relief : mis de côté jusqu'à la bascule
                 if (!_pending.ContainsKey(packed))
-                    _pending[packed] = CreateEntry(item.chunk, item.generation);
+                    _pending[packed] = CreateEntry(item.prepared, item.generation);
             }
             // Sinon : calculé sur un relief abandonné
         }
     }
 
-    private ChunkEntry CreateEntry(TerrainChunk chunk, int generation)
+    /// <summary>
+    /// Morceau prêt à envoyer à la carte graphique : tableaux de sommets et boîte englobante
+    /// préparés par les threads de calcul (sur le fil principal, ce travail limitait le nombre de
+    /// morceaux affichés par image : le relief se chargeait lentement).
+    /// </summary>
+    private sealed class PreparedChunk
+    {
+        public TerrainChunk Chunk;
+        public Vector3[] Vertices, Normals;
+        public Vector2[] Water, Debris;
+        public Color[] Colors;
+        public Aabb Bounds;
+    }
+
+    private static PreparedChunk Prepare(TerrainChunk chunk)
     {
         int count = TerrainChunkBuilder.VertexCount;
-        var vertices = new Vector3[count];
-        var normals = new Vector3[count];
-        var water = new Vector2[count];
-        var debris = new Vector2[count];
-        var wetland = new Color[count];
+        var prepared = new PreparedChunk
+        {
+            Chunk = chunk,
+            Vertices = new Vector3[count], Normals = new Vector3[count],
+            Water = new Vector2[count], Debris = new Vector2[count], Colors = new Color[count],
+        };
         for (int v = 0; v < count; v++)
         {
-            wetland[v] = new Color(chunk.Wetland[v], 0f, 0f, 1f);
-            debris[v] = new Vector2(chunk.Debris[v * 2], chunk.Debris[v * 2 + 1]);
-            vertices[v] = new Vector3(chunk.Positions[v * 3], chunk.Positions[v * 3 + 1], chunk.Positions[v * 3 + 2]);
-            normals[v] = new Vector3(chunk.Normals[v * 3], chunk.Normals[v * 3 + 1], chunk.Normals[v * 3 + 2]);
-            water[v] = new Vector2(chunk.Water[v * 2], chunk.Water[v * 2 + 1]);
+            prepared.Colors[v] = new Color(chunk.Wetland[v], 0f, 0f, 1f);
+            prepared.Debris[v] = new Vector2(chunk.Debris[v * 2], chunk.Debris[v * 2 + 1]);
+            prepared.Vertices[v] = new Vector3(chunk.Positions[v * 3], chunk.Positions[v * 3 + 1], chunk.Positions[v * 3 + 2]);
+            prepared.Normals[v] = new Vector3(chunk.Normals[v * 3], chunk.Normals[v * 3 + 1], chunk.Normals[v * 3 + 2]);
+            prepared.Water[v] = new Vector2(chunk.Water[v * 2], chunk.Water[v * 2 + 1]);
         }
-        var arrays = new Godot.Collections.Array();
-        arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex] = vertices;
-        arrays[(int)Mesh.ArrayType.Normal] = normals;
-        arrays[(int)Mesh.ArrayType.Custom0] = chunk.Custom0;
-        arrays[(int)Mesh.ArrayType.Custom1] = chunk.Custom1;
-        arrays[(int)Mesh.ArrayType.TexUV] = water;
-        arrays[(int)Mesh.ArrayType.TexUV2] = debris;
-        arrays[(int)Mesh.ArrayType.Color] = wetland;
-        arrays[(int)Mesh.ArrayType.Index] = TerrainChunkBuilder.Indices;
-        long format = ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom0Shift)
-                      | ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom1Shift);
-
-        Rid mesh = RenderingServer.MeshCreate();
-        RenderingServer.MeshAddSurfaceFromArrays(mesh, RenderingServer.PrimitiveType.Triangles, arrays,
-                                                 EmptyBlendShapes, EmptyLods, (RenderingServer.ArrayFormat)format);
-        RenderingServer.MeshSurfaceSetMaterial(mesh, 0, _material.GetRid());
-
         // Boîte englobante qui contient aussi ce que les shaders déplacent : sommets « morphés »
         // et surface de l'eau (posée jusqu'à des centaines de mètres au-dessus du fond d'un lac).
         // Avec la boîte du seul maillage, Godot jetait l'eau dès que le fond sortait du champ :
         // des carrés d'eau disparaissaient sous la caméra
-        Aabb bounds = new(vertices[0], Vector3.Zero);
+        Aabb bounds = new(prepared.Vertices[0], Vector3.Zero);
         for (int v = 0; v < count; v++)
         {
-            Vector3 p = vertices[v];
+            Vector3 p = prepared.Vertices[v];
             bounds = bounds.Expand(p);
             bounds = bounds.Expand(p + new Vector3(chunk.Custom0[v * 4], chunk.Custom0[v * 4 + 1], chunk.Custom0[v * 4 + 2]));
             float rise = chunk.Water[v * 2] - chunk.Custom0[v * 4 + 3];
@@ -730,7 +728,33 @@ public partial class TerrainRenderer : Node3D
             }
         }
         // (plus la marée et les variations du niveau de la mer, qui soulèvent la surface de la mer)
-        bounds = bounds.Grow(1f + Tides.MaxHeightMeters + SeaLevel.MaxRiseMeters + (float)Math.Max(FloodModel.MaxRiseM, TsunamiModel.MaxRunupM));
+        prepared.Bounds = bounds.Grow(1f + Tides.MaxHeightMeters + SeaLevel.MaxRiseMeters + (float)Math.Max(FloodModel.MaxRiseM, TsunamiModel.MaxRunupM));
+        return prepared;
+    }
+
+    private ChunkEntry CreateEntry(TerrainChunk chunk, int generation) => CreateEntry(Prepare(chunk), generation);
+
+    private ChunkEntry CreateEntry(PreparedChunk prepared, int generation)
+    {
+        TerrainChunk chunk = prepared.Chunk;
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = prepared.Vertices;
+        arrays[(int)Mesh.ArrayType.Normal] = prepared.Normals;
+        arrays[(int)Mesh.ArrayType.Custom0] = chunk.Custom0;
+        arrays[(int)Mesh.ArrayType.Custom1] = chunk.Custom1;
+        arrays[(int)Mesh.ArrayType.TexUV] = prepared.Water;
+        arrays[(int)Mesh.ArrayType.TexUV2] = prepared.Debris;
+        arrays[(int)Mesh.ArrayType.Color] = prepared.Colors;
+        arrays[(int)Mesh.ArrayType.Index] = TerrainChunkBuilder.Indices;
+        long format = ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom0Shift)
+                      | ((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom1Shift);
+
+        Rid mesh = RenderingServer.MeshCreate();
+        RenderingServer.MeshAddSurfaceFromArrays(mesh, RenderingServer.PrimitiveType.Triangles, arrays,
+                                                 EmptyBlendShapes, EmptyLods, (RenderingServer.ArrayFormat)format);
+        RenderingServer.MeshSurfaceSetMaterial(mesh, 0, _material.GetRid());
+        Aabb bounds = prepared.Bounds;
 
         Rid instance = RenderingServer.InstanceCreate2(mesh, GetWorld3D().Scenario);
         RenderingServer.InstanceSetCustomAabb(instance, bounds);
@@ -827,7 +851,7 @@ public partial class TerrainRenderer : Node3D
             try
             {
                 if (field != null)
-                    _completed.Enqueue((TerrainChunkBuilder.Build(field, key), generation, stamp));
+                    _completed.Enqueue((Prepare(TerrainChunkBuilder.Build(field, key)), generation, stamp));
             }
             catch (Exception exception)
             {

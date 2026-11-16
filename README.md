@@ -140,7 +140,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
     - **basse** : image calculée à 59 % puis agrandie (AMD FSR 1), relief allégé, pas d'ombres
       portées, lancer de rayons grossier dans les nuages et les panaches ;
     - **moyenne** : image à 67 % (FSR 2), ombres portées du relief ;
-    - **haute** : pleine résolution lissée par FSR 2, relief plus fin au loin, ombres douces en
+    - **haute** : pleine résolution lissée par FSR 2, relief fin jusqu'au loin, ombres douces en
       haute définition, nuages et panaches plus fins ;
   - U : masquer l'eau ; N : masquer les nuages ; K : couper le son ;
   - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
@@ -575,6 +575,14 @@ Faites :
     ~20-25 cm de marnage (au lieu de 2 cm).
 24. **Texte des détails illisible** (touche I) : retiré de l'écran (il est dans le rapport de
     bug) ; l'aide des commandes est un panneau, touches dessinées et rangées par thème.
+25. **Vue à travers les grottes** : dans un tunnel de lave aplati, là où le plafond est plus bas
+    que les yeux, la caméra était posée dans la roche, puis y restait coincée (et voyait à travers
+    les parois) ; un passage trop bas compte maintenant comme une paroi, et une caméra coincée est
+    ramenée au centre de la galerie.
+26. **Relief plus loin et plus vite** : les tableaux des morceaux et leur boîte englobante sont
+    préparés par les threads de calcul (le fil principal en envoie davantage par image) ; détail
+    plus loin en qualité haute (9 000 morceaux en mémoire) ; vallées testées sans le bruit des
+    méandres loin des cours d'eau (−15 % de temps de calcul du relief).
 13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
     surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis

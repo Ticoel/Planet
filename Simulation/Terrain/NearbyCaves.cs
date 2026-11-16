@@ -102,6 +102,32 @@ public sealed class NearbyCaves
         return null;
     }
 
+    /// <summary>Point de l'axe des galeries le plus proche (repère de la planète), ou null si aucune grotte n'est proche.</summary>
+    public Double3? Rescue(Double3 position)
+    {
+        Double3? best = null;
+        double bestDistance = double.MaxValue;
+        foreach (var cave in Ready)
+        {
+            if (cave.Origin.DistanceTo(position) > cave.BoundingRadius + 20)
+                continue;
+            Double3 q = cave.ToLocal(position);
+            foreach (var (a, _, b, _) in cave.Segments)
+            {
+                Double3 ab = b - a;
+                double t = Math.Clamp((q - a).Dot(ab) / Math.Max(ab.LengthSquared(), 1e-9), 0, 1);
+                Double3 point = a + ab * t;
+                double d = point.DistanceTo(q);
+                if (d < bestDistance)
+                {
+                    bestDistance = d;
+                    best = cave.ToWorld(point);
+                }
+            }
+        }
+        return best;
+    }
+
     /// <summary>Ce point est-il sous terre, dans une grotte ?</summary>
     public bool Underground(Double3 position)
     {

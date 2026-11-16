@@ -74,6 +74,14 @@ public sealed class ExplorerCamera
     /// les parois arrêtent la caméra.
     /// </summary>
     public Func<Double3, CaveSpace?> CaveProbe { get; set; }
+    /// <summary>Centre de la galerie la plus proche d'un point (pour sortir la caméra de la roche), ou null.</summary>
+    public Func<Double3, Double3?> CaveRescue { get; set; }
+
+    /// <summary>Roche, ou espace plus bas que les yeux (en marchant) : on ne peut pas y aller.</summary>
+    private bool Blocked(CaveSpace space) =>
+        space.Solid || (!double.IsInfinity(space.CeilingRadius)
+                        && space.CeilingRadius - 0.3 < space.FloorRadius + (Walking ? EyeHeight : 0.6));
+
     /// <summary>Vrai quand la caméra est dans une grotte (le sol est celui de la galerie).</summary>
     public bool InCave { get; private set; }
     // Direction de marche, tangente au sol. Elle est transportée d'un point à l'autre quand la
@@ -383,16 +391,22 @@ public sealed class ExplorerCamera
         if (cave.HasValue)
         {
             var space = cave.Value;
-            if (space.Solid && InCave)
+            if (Blocked(space) && InCave)
             {
-                // Contre une paroi : on reste où l'on était
-                Position = start;
+                // Contre une paroi, ou passage plus bas que les yeux : on reste où l'on était ; si
+                // l'on était déjà dans la roche (coincé), retour au centre de la galerie la plus
+                // proche (avant : la caméra restait dans la roche et voyait à travers tout)
+                var before = CaveProbe(start);
+                if (before.HasValue && !Blocked(before.Value))
+                    Position = start;
+                else if (CaveRescue?.Invoke(Position) is Double3 rescue)
+                    Position = rescue;
                 _verticalSpeed = 0;
                 TransportHeading();
                 Speed = 0;
                 return;
             }
-            if (!space.Solid)
+            if (!Blocked(space))
             {
                 double low = space.FloorRadius + (Walking ? EyeHeight : 0.6);
                 double high = double.IsInfinity(space.CeilingRadius) ? double.MaxValue : Math.Max(low, space.CeilingRadius - 0.3);

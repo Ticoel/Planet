@@ -28,6 +28,7 @@ public partial class Main
     private void SetupCaves()
     {
         _terrain.Explorer.CaveProbe = p => _caves.SpaceAt(p);
+        _terrain.Explorer.CaveRescue = p => _caves.Rescue(p);
     }
 
     /// <summary>Emplacements des grottes du relief et de l'eau souterraine actuels.</summary>

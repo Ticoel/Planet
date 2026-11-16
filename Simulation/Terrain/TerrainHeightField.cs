@@ -1001,6 +1001,10 @@ public sealed class TerrainHeightField
             double channelFull = 3.5 * Math.Sqrt(qCell);
             double wavelength = Math.Clamp(12 * channelFull, 300, MeanderWavelength);
             double amplitude = Math.Clamp(3 * channelFull, 25, MeanderAmplitude) * (1 - 0.7 * mountain);
+            // Test rapide sans méandres (le point ne bouge que de √3 fois l'amplitude au plus) : loin du
+            // tracé, pas de bruit à calculer (avant, trois bruits par cours d'eau et par point)
+            if (CurveDistance(curve, direction, out _) - 1.8 * amplitude >= widthMax)
+                continue;
             double mx = position.X / wavelength, my = position.Y / wavelength, mz = position.Z / wavelength;
             var meander = new Double3(
                 GradientNoise.Sample(mx, my, mz, Seed + 301),
@@ -1008,19 +1012,7 @@ public sealed class TerrainHeightField
                 GradientNoise.Sample(mx - 7.1, my + 44.2, mz - 23.8, Seed + 303));
             meander -= direction * meander.Dot(direction);
             Double3 p = (direction + meander * (amplitude / RadiusMeters)).Normalized();
-            // Point le plus proche du tracé courbe
-            double distance = double.MaxValue, along = 0;
-            for (int k = 0; k < RiverCurveSegments; k++)
-            {
-                Double3 a = curve[k], ab = curve[k + 1] - a;
-                double t = Math.Clamp((p - a).Dot(ab) / Math.Max(ab.LengthSquared(), 1e-30), 0, 1);
-                double d = (a + ab * t).Normalized().DistanceTo(p) * RadiusMeters;
-                if (d < distance)
-                {
-                    distance = d;
-                    along = (k + t) / RiverCurveSegments;
-                }
-            }
+            double distance = CurveDistance(curve, p, out double along);
             // Tronçon de tête : le débit croît depuis la source (torrent, puis rivière)
             double q = _riverHead[cell] ? qCell * (0.01 + 0.99 * SmoothStep(0.0, 1.0, along)) : qCell;
             double width = ValleyHalfWidth(q, mountain, out double channelHalf, out double bankDepth, out double floorHalf, out double depth);
@@ -1042,6 +1034,25 @@ public sealed class TerrainHeightField
                 : Math.Min(1, 2 * channelHalf / Math.Max(minWavelength, 1)) * (1 - SmoothStep(0.25 * minWavelength, 0.6 * minWavelength, distance));
             best = new ValleyShape(carve, 1 - SmoothStep(floorHalf * 0.5, floorHalf * 1.5, distance), river * birth,
                                    drawn ? bedProfile * birth : 0, valleyCarve, depth * birth);
+        }
+        return best;
+    }
+
+    /// <summary>Distance (m) d'un point au tracé courbe d'un cours d'eau, et position le long du tracé (0 à 1).</summary>
+    private static double CurveDistance(Double3[] curve, Double3 p, out double along)
+    {
+        double best = double.MaxValue;
+        along = 0;
+        for (int k = 0; k < RiverCurveSegments; k++)
+        {
+            Double3 a = curve[k], ab = curve[k + 1] - a;
+            double t = Math.Clamp((p - a).Dot(ab) / Math.Max(ab.LengthSquared(), 1e-30), 0, 1);
+            double d = (a + ab * t).Normalized().DistanceTo(p) * RadiusMeters;
+            if (d < best)
+            {
+                best = d;
+                along = (k + t) / RiverCurveSegments;
+            }
         }
         return best;
     }

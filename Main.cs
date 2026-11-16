@@ -203,7 +203,7 @@ public partial class Main : Node3D
             LodFactor: 2.5, CachedChunks: 3500, Shadows: true, ShadowAtlas: 4096,
             CloudSteps: 36, PlumeSteps: 160, PlumeStep: 0.11f),
         new("haute (pleine résolution lissée par FSR 2, relief fin, ombres douces)", Viewport.Scaling3DModeEnum.Fsr2, 1.0f,
-            LodFactor: 3.5, CachedChunks: 6000, Shadows: true, ShadowAtlas: 8192,
+            LodFactor: 4.5, CachedChunks: 9000, Shadows: true, ShadowAtlas: 8192,
             CloudSteps: 56, PlumeSteps: 256, PlumeStep: 0.08f),
     };
     // (niveau du démarrage : haute)
