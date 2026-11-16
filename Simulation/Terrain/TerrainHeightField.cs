@@ -798,10 +798,24 @@ public sealed class TerrainHeightField
         var valley = Valley(direction, position, near, baseHeight, minWavelength);
         double river = valley.River;
 
-        double folds = Folds(position, baseHeight, baseSlope, SlopeCoherence(position / RadiusMeters, near), minWavelength, out double foldShare);
-        double height = baseHeight
-                        + Detail(position, baseHeight, baseSlope, minWavelength) * (1 - 0.85 * valley.Floor) * (1 - FoldNoiseReduction * foldShare)
-                        + folds * (1 - valley.Floor);
+        double coherence = SlopeCoherence(position / RadiusMeters, near);
+        double folds = Folds(position, baseHeight, baseSlope, coherence, minWavelength, out double foldShare);
+        double noiseScale = 1 - FoldNoiseReduction * foldShare;
+        double detail = Detail(position, baseHeight, baseSlope, minWavelength) * noiseScale;
+        // Fond des vallées aplani : seulement les détails plus fins que sa largeur. (Avant, tout le
+        // relief fin y était raboté : à la source d'un torrent, le fond ne fait que 2 m de large,
+        // et une bosse de 900 m de la montagne y devenait une fente de 800 m de profondeur ; vue
+        // de loin, une aiguille ou un puits. Et combler les creux dressait ailleurs le fond en
+        // digue au-dessus des alentours)
+        double smoothest = Math.Max(minWavelength, 4 * valley.FloorHalf);
+        if (valley.Floor > 0 && smoothest > minWavelength)
+        {
+            double broadDetail = Detail(position, baseHeight, baseSlope, smoothest) * noiseScale;
+            double broadFolds = Folds(position, baseHeight, baseSlope, coherence, smoothest, out _);
+            detail = broadDetail + (detail - broadDetail) * (1 - 0.85 * valley.Floor);
+            folds = broadFolds + (folds - broadFolds) * (1 - valley.Floor);
+        }
+        double height = baseHeight + detail + folds;
         // Le fond des vallées reste au-dessus de la mer tant que le sol l'est : le fleuve coule
         // jusqu'à la côte au lieu de transformer toute la plaine en bras de mer
         // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait
@@ -973,7 +987,7 @@ public sealed class TerrainHeightField
     }
 
     /// <summary>Vallée et lit du cours d'eau le plus proche (voir <see cref="Valley"/>).</summary>
-    private readonly record struct ValleyShape(double Depth, double Floor, double River, double Bed, double ValleyCarve, double FloorDepth);
+    private readonly record struct ValleyShape(double Depth, double Floor, double River, double Bed, double ValleyCarve, double FloorDepth, double FloorHalf = 0);
 
     /// <summary>
     /// Vallée et lit du cours d'eau le plus proche, selon son débit Q (m³/s) et le relief :
@@ -1038,15 +1052,25 @@ public sealed class TerrainHeightField
             bool drawn = 2 * channelHalf > 0.5 * minWavelength;
             double bedProfile = 1 - SmoothStep(channelHalf * 0.7, channelHalf * 1.05, distance);
             double carve = valleyCarve + (drawn ? (bankDepth + 0.4) * bedProfile : 0);
-            if (carve <= best.Depth && best.Depth > 0)
-                continue;
             double river = drawn
                 ? bedProfile
                 // De loin : part du trait d'eau dans la maille (fleuves visibles jusqu'à l'horizon,
                 // d'autant plus marqués qu'ils sont larges)
                 : Math.Min(1, 2 * channelHalf / Math.Max(minWavelength, 1)) * (1 - SmoothStep(0.25 * minWavelength, 0.6 * minWavelength, distance));
-            best = new ValleyShape(carve, 1 - SmoothStep(floorHalf * 0.5, floorHalf * 1.5, distance), river * birth,
-                                   drawn ? bedProfile * birth : 0, valleyCarve, depth * birth);
+            // Plusieurs tracés proches (le même fleuve vu par deux cellules voisines, dont les
+            // tracés se recouvrent ; un confluent) : chaque grandeur garde son maximum, sans
+            // cassure. (Avant, on prenait tout du tracé qui creusait le plus : là où deux tracés
+            // creusaient presque autant, le choix changeait d'un point à l'autre, et le fond de
+            // vallée avec lui : des aiguilles de centaines de mètres le long des fleuves)
+            double floor = 1 - SmoothStep(floorHalf * 0.5, floorHalf * 1.5, distance);
+            best = new ValleyShape(Math.Max(best.Depth, carve),
+                                   Math.Max(best.Floor, floor),
+                                   Math.Max(best.River, river * birth),
+                                   Math.Max(best.Bed, drawn ? bedProfile * birth : 0),
+                                   Math.Max(best.ValleyCarve, valleyCarve),
+                                   Math.Max(best.FloorDepth, depth * birth),
+                                   // (largeur du fond pondérée par sa présence : sans cassure)
+                                   Math.Max(best.FloorHalf, floorHalf * floor));
         }
         return best;
     }

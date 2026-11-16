@@ -80,6 +80,33 @@ public static class RobustnessTests
                     Assert.True(float.IsFinite(s.Wetland) && float.IsFinite(s.Debris), $"{where} : vasière, croûte");
                 }
 
+                // Ni aiguille ni puits : sur 150 cellules de terre, une grille de 50 × 50 points tous
+                // les 12 m (la maille des morceaux vus de quelques km) ; aucun point ne s'écarte de
+                // la moyenne de ses 4 voisins de plus de 8 mailles (pente moyenne de 400 %).
+                // (Des fonds de vallée de 2 m de large rabotaient des bosses de 900 m : fentes et
+                // aiguilles de centaines de mètres le long des fleuves)
+                const int n = 50;
+                const double spacing = 12;
+                var grid = new double[n, n];
+                var land = Enumerable.Range(0, world.Grid.CellCount).Where(c => world.Tectonics.CellElevation[c] > 0.2f).ToArray();
+                foreach (int c in land.Where((_, k) => k % Math.Max(1, land.Length / 150) == 0))
+                {
+                    Double3 center = Double3.From(world.Grid.Positions[c]).Normalized();
+                    var (ax, ay) = LavaFlow.TangentFrame(center);
+                    for (int j = 0; j < n; j++)
+                        for (int i = 0; i < n; i++)
+                        {
+                            Double3 d = (center + (ax * (i - n / 2) + ay * (j - n / 2)) * (spacing / TerrainHeightField.RadiusMeters)).Normalized();
+                            grid[i, j] = world.Field.Sample(d, 2.5 * spacing, ref hint).Height;
+                        }
+                    for (int j = 1; j < n - 1; j++)
+                        for (int i = 1; i < n - 1; i++)
+                        {
+                            double step = grid[i, j] - (grid[i - 1, j] + grid[i + 1, j] + grid[i, j - 1] + grid[i, j + 1]) / 4;
+                            Assert.True(Math.Abs(step) < 8 * spacing, $"{where} : aiguille ou puits de {step:0} m près de la cellule {c}");
+                        }
+                }
+
                 // Morceaux de terrain à tous les niveaux
                 for (int i = 0; i < 60; i++)
                 {
