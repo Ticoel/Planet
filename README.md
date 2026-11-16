@@ -551,6 +551,13 @@ Faites :
     jusque-là : le fleuve s'étalait en ruban au ras de la plaine. Le niveau caché suit maintenant
     le sol.
 16. **Aurores coupées net à l'horizon** : bas du rideau doux, qui s'efface vers l'horizon.
+17. **Fleuves tous de la même largeur, vallées en sillons** : lit selon le débit (géométrie
+    hydraulique de Leopold et Maddock : largeur ≈ 3,5·Q^0,5, profondeur ≈ 0,25·Q^0,4 : grand
+    fleuve de 1 000 m³/s ~110 m de large, rivière de 10 m³/s ~11 m, torrent de 1 m³/s ~3,5 m) ;
+    torrents en tête de chaque cours d'eau ; vallées larges et peu profondes en plaine (plaine
+    d'inondation d'une dizaine de largeurs de lit), étroites et en V en montagne ; méandres à
+    l'échelle du lit ; réseau plus dense (rivières dès ~25 m³/s) ; de loin, un trait d'eau
+    proportionnel à la largeur, jusqu'à l'horizon.
 13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
     surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis

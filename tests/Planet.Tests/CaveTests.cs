@@ -31,7 +31,7 @@ public static class CaveTests
             {
                 if (Math.Sqrt(a.X * a.X + a.Y * a.Y) < cave.HoleRadius + 4)
                     continue;
-                Assert.True(cave.GroundZ(a.X, a.Y) - a.Z > ra, $"{kind} : galerie couverte de roche");
+                Assert.True(cave.GroundZ(a.X, a.Y) - a.Z > ra, $"{kind} : galerie couverte de roche (sol {cave.GroundZ(a.X, a.Y):0.0}, galerie {a.Z:0.0}, rayon {ra:0.0}, à {Math.Sqrt(a.X * a.X + a.Y * a.Y):0} m)");
                 Assert.True(cave.Density(a, cave.GroundZ(a.X, a.Y)) < 0, $"{kind} : vide au centre de la galerie");
             }
             // On peut entrer : au-dessus de l'ouverture, on tombe dans la grotte

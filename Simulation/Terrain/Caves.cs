@@ -115,6 +115,12 @@ public sealed class Cave
             double nr = Math.Clamp(r + (random.NextDouble() - 0.5) * 1.4, 2.0, 5.0);
             if (k > 3 && random.NextDouble() < 0.12)
                 nr = 6 + random.NextDouble() * 4;                     // salle
+            // Le début du tronçon s'élargit aussi : la salle ne dépasse pas la roche au-dessus
+            if (k >= 2)
+            {
+                double roofAtStart = cave.GroundZ(p.X, p.Y) - p.Z;
+                nr = Math.Max(2.0, Math.Min(nr, 2 * (roofAtStart - 1.5) - r));
+            }
             // Profondeur : jamais à moins de (rayon + 3 m) sous la surface, une fois sorti de l'entrée
             double ground = cave.GroundZ(next.X, next.Y);
             double depth = ground - next.Z;

@@ -161,8 +161,10 @@ public sealed class TerrainHeightField
     // Là où les plis sont bien marqués, le bruit isotrope des montagnes est réduit d'autant
     private const double FoldNoiseReduction = 0.4;
     // Vallées : débit minimal (m³/s), largeur et profondeur selon le débit
-    private const double ValleyMinDischarge = 200.0;
-    private const int ValleyMinUpstreamCells = 3;
+    // Cours d'eau creusés dans le relief : rivières dès quelques dizaines de m³/s (les torrents
+    // naissent en tête de chaque tronçon de source)
+    private const double ValleyMinDischarge = 25.0;
+    private const int ValleyMinUpstreamCells = 1;
     private const double MeanderAmplitude = 2500.0, MeanderWavelength = 14000.0;
     // Côtes : hauteur des falaises (m) selon le relief. Sur Terre, les côtes rocheuses à falaises
     // forment la majorité des rivages (~3/4 selon Emery et Kuhn 1982) ; avant, seul ~1/3 des côtes
@@ -780,18 +782,19 @@ public sealed class TerrainHeightField
         Double3 position = direction * RadiusMeters;
 
         // Vallées des fleuves (calculées d'abord : le fond des vallées est lissé)
-        var (valley, river, bed, valleyDepth) = Valley(direction, position, near, baseHeight, minWavelength);
+        var valley = Valley(direction, position, near, baseHeight, minWavelength);
+        double river = valley.River;
 
         double folds = Folds(position, baseHeight, baseSlope, SlopeCoherence(position / RadiusMeters, near), minWavelength, out double foldShare);
         double height = baseHeight
-                        + Detail(position, baseHeight, baseSlope, minWavelength) * (1 - 0.85 * valley.floor) * (1 - FoldNoiseReduction * foldShare)
-                        + folds * (1 - valley.floor);
+                        + Detail(position, baseHeight, baseSlope, minWavelength) * (1 - 0.85 * valley.Floor) * (1 - FoldNoiseReduction * foldShare)
+                        + folds * (1 - valley.Floor);
         // Le fond des vallées reste au-dessus de la mer tant que le sol l'est : le fleuve coule
         // jusqu'à la côte au lieu de transformer toute la plaine en bras de mer
         // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
         double uncarved = height;
-        height = Math.Max(height - valley.depth, Math.Min(height, 1.0));
+        height = Math.Max(height - valley.Depth, Math.Min(height, 1.0));
         // Deltas et vasières : plaine de vase au ras de la mer, sans falaise
         var wetShare = WetlandShare(direction, position, near[0], baseHeight, baseSlope);
         var (wetHeight, wetland) = ApplyWetland(position, height, wetShare, minWavelength);
@@ -815,16 +818,17 @@ public sealed class TerrainHeightField
             water = Math.Max(0.0, dry + (lakeLevel - dry) * full);
         }
         // Fleuves : de la vraie eau (la surface de l'eau, comme pour la mer et les lacs), pas une
-        // couleur peinte. Le lit est creusé 3 m sous les berges ; l'eau le remplit jusqu'à 40 cm
-        // sous elles (surface plane d'une berge à l'autre). Hors du lit, son niveau reste sous le
-        // sol (caché), pour que l'eau s'interpole sans nappe entre deux sommets
-        if (valley.depth > 0 && height > 1.0)
+        // couleur peinte. Le lit est creusé sous les berges selon le débit ; l'eau le remplit
+        // jusqu'à 40 cm sous elles (surface plane d'une berge à l'autre). Hors du lit, son niveau
+        // reste sous le sol (caché), pour que l'eau s'interpole sans nappe entre deux sommets
+        if (valley.Depth > 0 && height > 1.0)
         {
-            double riverWater = height - 3.0 + (3.0 * bed + 2.6) * SmoothStep(0.0, 0.1, bed);
+            double bank = uncarved - valley.ValleyCarve;
+            double riverWater = valley.Bed > 0.01 ? bank - 0.4 : height - 3.0;
             // Plaine d'inondation : le niveau du fleuve (fond de vallée moins 40 cm), caché sous le
-            // sol ; une crue le fait monter (shader de l'eau) et il apparaît, à plat, sur les
-            // parties basses de la vallée
-            double floodplain = Math.Min(height - 0.05, uncarved - valleyDepth - 0.4);
+            // sol ; une crue le fait monter (shader de l'eau) et il apparaît, à plat, sur le fond
+            // de la vallée
+            double floodplain = Math.Min(height - 0.05, uncarved - valley.FloorDepth - 0.4);
             water = Math.Max(water, Math.Max(riverWater, floodplain));
         }
         return new TerrainSample(height, water, river, Wetland: (float)wetland);
@@ -955,45 +959,56 @@ public sealed class TerrainHeightField
         return amplitude * visibility * strength * Math.Cos(2 * Math.PI * phase);
     }
 
+    /// <summary>Vallée et lit du cours d'eau le plus proche (voir <see cref="Valley"/>).</summary>
+    private readonly record struct ValleyShape(double Depth, double Floor, double River, double Bed, double ValleyCarve, double FloorDepth);
+
     /// <summary>
-    /// Vallée creusée par le fleuve le plus proche : profondeur et largeur selon le débit, fond
-    /// plat, méandres (le tracé entre deux cellules est ondulé par un bruit). Renvoie la
-    /// profondeur creusée, la part du point en fond de vallée, et la part dans le lit du fleuve.
+    /// Vallée et lit du cours d'eau le plus proche, selon son débit Q (m³/s) et le relief :
+    /// <list type="bullet">
+    /// <item><b>Lit</b> (géométrie hydraulique, Leopold et Maddock 1953) : largeur ≈ 3,5·Q^0,5,
+    /// profondeur ≈ 0,25·Q^0,4 : un grand fleuve de 1 000 m³/s fait ~110 m de large et 4 m de
+    /// fond, une rivière de 10 m³/s ~11 m, un torrent de 1 m³/s ~3,5 m ; près de la source, le
+    /// débit croît depuis presque rien (torrents de tête).</item>
+    /// <item><b>Vallée</b> : en plaine, large et peu profonde, avec une plaine d'inondation d'une
+    /// dizaine de fois la largeur du lit et des versants doux ; en montagne, étroite et profonde, en
+    /// V (gorges), le fond à peine plus large que le lit.</item>
+    /// <item><b>Méandres</b> : longueur d'onde ~12 fois la largeur du lit, amplitude ~3 fois.</item>
+    /// </list>
     /// </summary>
-    private ((double depth, double floor) valley, double river, double bed, double full) Valley(
-        Double3 direction, Double3 position, ReadOnlySpan<int> cells, double baseHeight, double minWavelength)
+    private ValleyShape Valley(Double3 direction, Double3 position, ReadOnlySpan<int> cells, double baseHeight, double minWavelength)
     {
         bool any = false;
         foreach (int cell in cells)
             if (_riverCell[cell]) { any = true; break; }
         if (!any || baseHeight <= -50)
-            return ((0, 0), 0, 0, 0);
+            return default;
 
-        // Méandres : on déplace le point plutôt que le tracé
-        double mx = position.X / MeanderWavelength, my = position.Y / MeanderWavelength, mz = position.Z / MeanderWavelength;
-        var meander = new Double3(
-            GradientNoise.Sample(mx, my, mz, Seed + 301),
-            GradientNoise.Sample(mx + 31.7, my - 12.9, mz + 5.3, Seed + 302),
-            GradientNoise.Sample(mx - 7.1, my + 44.2, mz - 23.8, Seed + 303));
-        // Seule la partie horizontale compte (sinon le point s'écarte du sol et n'est jamais sur le lit)
-        meander -= direction * meander.Dot(direction);
-        Double3 p = (direction + meander * (MeanderAmplitude / RadiusMeters)).Normalized();
-
-        double bestDepth = 0, bestFloor = 0, bestRiver = 0, bestBed = 0, bestFull = 0;
+        // Relief : 0 en plaine, 1 en montagne (vallées en V, gorges)
+        double mountain = SmoothStep(300, 1800, baseHeight);
+        var best = default(ValleyShape);
         foreach (int cell in cells)
         {
             if (!_riverCell[cell])
                 continue;
-            double q = _discharge[cell];
-            double width = 300 + 25 * Math.Sqrt(q);              // demi-largeur de la vallée (m)
             Double3[] curve = _riverCurve[cell];
-            // Tronçon trop loin : on passe (test grossier sur la sphère englobante de la courbe)
             Double3 middle = curve[RiverCurveSegments / 2];
             double reach = (curve[0] - middle).Length() + (curve[RiverCurveSegments] - middle).Length();
-            if ((p - middle).Length() * RadiusMeters > reach * RadiusMeters + width)
+            double qCell = _discharge[cell];
+            double widthMax = ValleyHalfWidth(qCell, mountain, out _, out _, out _, out _);
+            if ((direction - middle).Length() * RadiusMeters > reach * RadiusMeters + widthMax + MeanderAmplitude)
                 continue;
-            // Point le plus proche du tracé courbe (petits segments : sur la corde, ramené sur
-            // la sphère)
+            // Méandres à l'échelle du lit : on déplace le point plutôt que le tracé
+            double channelFull = 3.5 * Math.Sqrt(qCell);
+            double wavelength = Math.Clamp(12 * channelFull, 300, MeanderWavelength);
+            double amplitude = Math.Clamp(3 * channelFull, 25, MeanderAmplitude) * (1 - 0.7 * mountain);
+            double mx = position.X / wavelength, my = position.Y / wavelength, mz = position.Z / wavelength;
+            var meander = new Double3(
+                GradientNoise.Sample(mx, my, mz, Seed + 301),
+                GradientNoise.Sample(mx + 31.7, my - 12.9, mz + 5.3, Seed + 302),
+                GradientNoise.Sample(mx - 7.1, my + 44.2, mz - 23.8, Seed + 303));
+            meander -= direction * meander.Dot(direction);
+            Double3 p = (direction + meander * (amplitude / RadiusMeters)).Normalized();
+            // Point le plus proche du tracé courbe
             double distance = double.MaxValue, along = 0;
             for (int k = 0; k < RiverCurveSegments; k++)
             {
@@ -1006,36 +1021,45 @@ public sealed class TerrainHeightField
                     along = (k + t) / RiverCurveSegments;
                 }
             }
+            // Tronçon de tête : le débit croît depuis la source (torrent, puis rivière)
+            double q = _riverHead[cell] ? qCell * (0.01 + 0.99 * SmoothStep(0.0, 1.0, along)) : qCell;
+            double width = ValleyHalfWidth(q, mountain, out double channelHalf, out double bankDepth, out double floorHalf, out double depth);
             if (distance >= width)
                 continue;
-            double channel = 5 + 3 * Math.Sqrt(q);               // largeur du lit (m)
-            double floorHalf = Math.Max(channel, 0.12 * width);  // demi-largeur du fond plat
-            double depth = Math.Min(60 + 6 * Math.Sqrt(q), 0.6 * Math.Max(baseHeight, 0) + 15);
-            double profile = 1 - SmoothStep(floorHalf, width, distance);
-            // Lit du fleuve : 3 m de plus, avec une transition douce (une marche nette dessinait
-            // des dents de scie le long des berges)
-            double carve = depth * profile + 3.0 * (1 - SmoothStep(channel * 0.35, channel * 0.6, distance));
-            // À la source, la vallée se creuse peu à peu (sinon elle partait du centre de la
-            // cellule à pleine profondeur : un sillon droit jusqu'au sommet des montagnes)
-            if (_riverHead[cell])
-                carve *= SmoothStep(0.05, 0.6, along);
-            if (carve > bestDepth)
-            {
-                bestDepth = carve;
-                bestFull = depth;
-                bestFloor = 1 - SmoothStep(floorHalf * 0.5, floorHalf * 2, distance);
-                // Le lit n'est visible que si le maillage est assez fin pour lui
-                bestRiver = channel > minWavelength ? 1 - SmoothStep(channel * 0.4, channel * 0.55, distance) : 0;
-                // Part du lit creusé (les 3 m de plus) : l'eau le remplit (voir SampleNatural)
-                bestBed = channel > minWavelength ? 1 - SmoothStep(channel * 0.35, channel * 0.6, distance) : 0;
-                if (_riverHead[cell])
-                {
-                    bestRiver *= SmoothStep(0.05, 0.6, along);
-                    bestBed *= SmoothStep(0.05, 0.6, along);
-                }
-            }
+            // À la source, la vallée naît peu à peu
+            double birth = _riverHead[cell] ? SmoothStep(0.0, 0.25, along) : 1;
+            double valleyCarve = depth * (1 - SmoothStep(floorHalf, width, distance)) * birth;
+            // Lit : seulement si le maillage est assez fin pour lui (sinon, de loin, un trait d'eau)
+            bool drawn = 2 * channelHalf > 0.5 * minWavelength;
+            double bedProfile = 1 - SmoothStep(channelHalf * 0.7, channelHalf * 1.05, distance);
+            double carve = valleyCarve + (drawn ? (bankDepth + 0.4) * bedProfile : 0);
+            if (carve <= best.Depth && best.Depth > 0)
+                continue;
+            double river = drawn
+                ? bedProfile
+                // De loin : part du trait d'eau dans la maille (fleuves visibles jusqu'à l'horizon,
+                // d'autant plus marqués qu'ils sont larges)
+                : Math.Min(1, 2 * channelHalf / Math.Max(minWavelength, 1)) * (1 - SmoothStep(0.25 * minWavelength, 0.6 * minWavelength, distance));
+            best = new ValleyShape(carve, 1 - SmoothStep(floorHalf * 0.5, floorHalf * 1.5, distance), river * birth,
+                                   drawn ? bedProfile * birth : 0, valleyCarve, depth * birth);
         }
-        return ((bestDepth, bestFloor), bestRiver, bestBed, bestFull);
+        return best;
+    }
+
+    /// <summary>
+    /// Dimensions d'une vallée de débit <paramref name="q"/> (m³/s) : demi-largeur du lit,
+    /// profondeur du lit, demi-largeur du fond plat, profondeur de la vallée ; renvoie la
+    /// demi-largeur totale (m).
+    /// </summary>
+    private static double ValleyHalfWidth(double q, double mountain, out double channelHalf, out double bankDepth, out double floorHalf, out double depth)
+    {
+        q = Math.Max(q, 0.05);
+        channelHalf = Math.Clamp(1.75 * Math.Sqrt(q), 1, 600);
+        bankDepth = Math.Clamp(0.25 * Math.Pow(q, 0.4), 0.3, 12);
+        floorHalf = channelHalf * (1.3 + 8.7 * (1 - mountain));
+        depth = 3 + 0.4 * Math.Sqrt(q) + (25 + 3 * Math.Sqrt(q)) * mountain;
+        double sideSlope = 0.06 + 0.5 * mountain;
+        return floorHalf + depth / sideSlope;
     }
 
     // --- Deltas et vasières (étape 16) ------------------------------------------------------------
