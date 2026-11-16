@@ -104,7 +104,8 @@ public partial class TerrainRenderer
     private void UpdateVolume()
     {
         Double3 camera = Explorer.Position;
-        bool wanted = VolumeEnabled && Field != null && Explorer.AltitudeAboveGround < VolumeMaxAltitude && !Explorer.InTransition;
+        // (hauteur au-dessus de la roche, pas de l'eau : au-dessus de la mer, le fond est loin)
+        bool wanted = VolumeEnabled && Field != null && !Explorer.InTransition && HeightAboveRock() < VolumeMaxAltitude;
         if (!wanted)
         {
             if (_volume.Count > 0)
@@ -202,6 +203,15 @@ public partial class TerrainRenderer
         _material.SetShaderParameter("volume_axis_y", _volumeFrame.AxisY.ToVector3());
         _material.SetShaderParameter("volume_corner", new Vector2(ci - corner, cj - corner));
         _material.SetShaderParameter("volume_chunk", (float)VolumeChunkBuilder.ChunkM);
+    }
+
+    private int _rockHint = -1;
+
+    /// <summary>Hauteur de la caméra au-dessus de la roche (le fond, sous la mer ou un lac).</summary>
+    private double HeightAboveRock()
+    {
+        Double3 position = Explorer.Position;
+        return position.Length() - TerrainHeightField.RadiusMeters - Field.Sample(position.Normalized(), 1, ref _rockHint).Height;
     }
 
     private void ShowVolumeChunk(VolumeEntry entry, VolumeChunkMesh chunk)

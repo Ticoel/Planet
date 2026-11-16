@@ -222,6 +222,20 @@ public static class VolumeChunkBuilder
                         if (w < wall) { wall = w; kind = cave.Kind; }
                     }
                     bool inside = wall < depth;
+                    // Sol de surface loin des grottes : sommet posé exactement sur le relief détaillé,
+                    // normale tirée de sa pente (comme les morceaux de terrain) ; sinon la lumière
+                    // différait un peu et les blocs se voyaient en carrés
+                    if (!inside && wall > RimWidthM)
+                    {
+                        double u = (local.X - x0) / s, v = (local.Y - y0) / s;
+                        double dx = (Bilinear(ground, p, u + 0.5, v) - Bilinear(ground, p, u - 0.5, v)) / s;
+                        double dy = (Bilinear(ground, p, u, v + 0.5) - Bilinear(ground, p, u, v - 0.5)) / s;
+                        normal = (frame.Up - frame.AxisX * dx - frame.AxisY * dy).Normalized();
+                        local = new Double3(local.X, local.Y, groundHere);
+                        world = frame.ToWorld(local);
+                        direction = world.Normalized();
+                        height = world.Length() - TerrainHeightField.RadiusMeters;
+                    }
                     var sample = field.Sample(direction, 0.5, ref hint);
                     double level = sample.WaterLevel > 0.01 || field.NearOcean(hint) ? sample.WaterLevel : TerrainHeightField.NoSeaLevel;
 

@@ -542,6 +542,10 @@ Faites :
 12. **Sources aussi grosses que des fleuves** : leur débit venait de la recharge d'une part de la
     cellule (~20 000 km²) ; chacune a maintenant son bassin d'alimentation (0,5 à 5 km² pour une
     source de pente, 50 à 800 km² pour une résurgence karstique).
+14. **Relief en volume au-dessus de la mer** : il s'activait à 30 m au-dessus de l'eau et
+    remplaçait le fond marin, 3 km plus bas (rapport de bug) ; il ne compte plus que la hauteur
+    au-dessus de la roche. Le sol des blocs reprend exactement le relief détaillé et sa pente : plus
+    de carrés de lumière différente.
 13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
     surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis
