@@ -535,6 +535,15 @@ Faites :
 9.  **Eau peinte sous l'eau des sources chaudes** : le fond du bassin n'est plus peint en bleu
     (la vraie eau le teinte selon la profondeur) ; les anneaux minéraux suivent le vrai bord de
     l'eau.
+11. **Pluies absurdes de l'horloge géologique** : l'estimation rapide du climat, sans saisons,
+    faisait tomber la pluie en bandes étroites (la moitié des terres sous 100 mm/an, des cellules à
+    20 ou 40 m/an). Elle est étalée sur les voisines (les ceintures de pluie se déplacent avec les
+    saisons) et plafonnée à 12 m/an (record terrestre).
+12. **Sources aussi grosses que des fleuves** : leur débit venait de la recharge d'une part de la
+    cellule (~20 000 km²) ; chacune a maintenant son bassin d'alimentation (0,5 à 5 km² pour une
+    source de pente, 50 à 800 km² pour une résurgence karstique).
+13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
+    surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis
     autour des ouvertures (calcaire clair, basalte noir des tunnels de lave).
 

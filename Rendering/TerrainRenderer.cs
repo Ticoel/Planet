@@ -1705,11 +1705,13 @@ void vertex() {
     v_water = UV;
     vec3 up = normalize((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz - planet_center);
     float level = water_surface(up, v_water.x);
-    // Point sans eau à lui (ni lac ni fleuve) : surface posée juste sous le sol plutôt qu'au niveau
-    // de la mer, des centaines de mètres plus bas (sinon, entre un point inondé par une crue et
-    // son voisin sec, le triangle d'eau se dressait en mur vertical de la hauteur de la crue)
-    if (v_water.x <= 0.01)
-        level = max(level, v_height - 1.0);
+    // Point des terres loin des côtes, sans eau à lui (ni lac ni fleuve) : surface posée juste sous
+    // le sol plutôt que tout en bas (sinon, entre un point inondé par une crue et son voisin sec,
+    // le triangle d'eau se dressait en mur vertical de la hauteur de la crue). Près des côtes, la
+    // surface reste au niveau de la mer : le rivage coupe alors les triangles en proportion de la
+    // pente (posée juste sous le sol, elle collait aux sommets : côtes en marches d'escalier)
+    if (abs(v_water.x - (" + TerrainHeightField.NoSeaLevel.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + @")) < 1.0)
+        level = v_height - 1.0;
     v_depth = level - v_height;
     VERTEX += up * v_depth;
     NORMAL = up;

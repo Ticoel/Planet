@@ -73,6 +73,8 @@ public static class FastClimateEstimator
             }
         }
 
+        SpreadPrecipitation(coarseGrid, accumulation);
+
         // Report sur la grille fine (cellule grossière la plus proche)
         int count = grid.CellCount;
         var estimate = new FastClimateEstimate
@@ -105,5 +107,43 @@ public static class FastClimateEstimator
             estimate.Snow[cell] = ocean ? 0f : state[c * 4 + 3];
         }
         return estimate;
+    }
+
+    /// <summary>
+    /// Sans saisons, la pluie tombait en bandes étroites, toujours aux mêmes endroits (la moitié
+    /// des terres sous 100 mm/an, des cellules à 20 ou 40 m/an). Au fil de l'année, les ceintures
+    /// de pluie se déplacent avec le Soleil : la pluie est étalée sur les voisines (quatre passes),
+    /// total conservé, puis plafonnée à ~12 m/an (record terrestre : Cherrapunji, Mawsynram).
+    /// Ruissellement et neige suivent la même proportion.
+    /// </summary>
+    private static void SpreadPrecipitation(PlanetGrid grid, float[] accumulation)
+    {
+        int n = grid.CellCount;
+        var rain = new float[n];
+        for (int c = 0; c < n; c++)
+            rain[c] = accumulation[c * 4];
+        var original = (float[])rain.Clone();
+        var next = new float[n];
+        for (int pass = 0; pass < 4; pass++)
+        {
+            for (int c = 0; c < n; c++)
+            {
+                float sum = 0;
+                foreach (int nb in grid.Neighbors[c])
+                    sum += rain[nb];
+                next[c] = 0.5f * rain[c] + 0.5f * sum / grid.Neighbors[c].Length;
+            }
+            (rain, next) = (next, rain);
+        }
+        // Plafond : 12 m/an, rapporté aux 180 jours mesurés
+        float cap = 12000f * MeasureDays / 365.25f;
+        for (int c = 0; c < n; c++)
+        {
+            float value = MathF.Min(rain[c], cap);
+            float ratio = original[c] > 1e-6f ? value / original[c] : 1f;
+            accumulation[c * 4] = value;
+            accumulation[c * 4 + 2] = MathF.Min(accumulation[c * 4 + 2] * ratio, value);
+            accumulation[c * 4 + 3] = MathF.Min(accumulation[c * 4 + 3] * ratio, value);
+        }
     }
 }

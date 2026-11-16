@@ -35,6 +35,9 @@ public static class GroundwaterTests
         Assert.True(karst.Average(s => s.FlowLs) > water.Springs.Where(s => s.Kind == SpringKind.Slope).Average(s => s.FlowLs) * 10,
             "une résurgence débite bien plus qu'une petite source");
         Assert.True(water.Benches().All(b => b.Water), "les vasques des sources sont pleines d'eau");
+        Assert.True(water.Springs.Where(s => s.Kind == SpringKind.Slope).All(s => s.FlowLs is > 0.05f and < 300f),
+            "source de pente : de quelques L/s à quelques dizaines (pas un fleuve)");
+        Assert.True(karst.All(s => s.FlowLs is > 300f and < 60000f), "résurgence : de l'ordre du m³/s (Vaucluse : ~20 m³/s)");
         Assert.True(water.Describe(wet[0]).Contains("nappe"), "lisible à la sonde");
     }
 }

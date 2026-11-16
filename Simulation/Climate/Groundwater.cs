@@ -77,7 +77,7 @@ public sealed class Groundwater
             if (elevationKm[c] <= 0)
                 continue;
             Karst[c] = carbonPpm != null && carbonPpm[c] > 5000;
-            double p = Math.Max(0, annualMm[c]);
+            double p = Math.Clamp(annualMm[c], 0, 12000);
             double share = Karst[c] ? 0.5 : 0.25;
             share *= Math.Clamp((p - 150) / 350, 0, 1);             // désert : presque rien ne s'infiltre
             if (meanTemperatureC[c] < -5) share *= 0.08;            // sol gelé (pergélisol)
@@ -110,9 +110,12 @@ public sealed class Groundwater
             {
                 float a = (float)(random.NextDouble() * 2 - 1) * spread, b = (float)(random.NextDouble() * 2 - 1) * spread;
                 Vector3 position = (center + east * a + north * b).Normalized();
-                // Débit : la recharge d'une part du bassin (L/s)
-                double share = Karst[c] ? 0.4 : 0.02 / Math.Max(1, count);
-                float flow = (float)(Recharge[c] / 1000 * cellAreaM2 * share / (365.25 * 86400) * 1000);
+                // Débit : la recharge de son bassin d'alimentation (L/s) : 0,5 à 5 km² pour une source
+                // de pente (de quelques L/s à quelques dizaines), 50 à 800 km² pour une résurgence
+                // karstique (quelques m³/s, comme la Fontaine de Vaucluse : ~20 m³/s en moyenne)
+                double catchmentM2 = (Karst[c] ? 50e6 + 750e6 * random.NextDouble() : 0.5e6 + 4.5e6 * random.NextDouble());
+                catchmentM2 = Math.Min(catchmentM2, cellAreaM2 * 0.4);
+                float flow = (float)(Recharge[c] / 1000 * catchmentM2 / (365.25 * 86400) * 1000);
                 var spring = new Spring
                 {
                     Kind = Karst[c] ? SpringKind.Karst : SpringKind.Slope,
