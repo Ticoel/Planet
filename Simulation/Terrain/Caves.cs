@@ -55,6 +55,8 @@ public sealed class Cave
         Up = direction.Normalized();
         Origin = Up * (TerrainHeightField.RadiusMeters + groundHeight);
         (AxisX, AxisY) = LavaFlow.TangentFrame(Up);
+        // (orientation des lobes de l'ouverture, propre à chaque grotte)
+        _openingPhase = Math.Abs(Up.X * 1289.98 + Up.Y * 7823.3 + Up.Z * 3771.9) % (2 * Math.PI);
         double r0 = Origin.Length();
         _groundZ = (x, y) =>
         {
@@ -254,7 +256,7 @@ public sealed class Cave
         double depth = groundZ - q.Z;
         double tunnel = TunnelDistance(q, candidates);
         if (tunnel < FarRock)
-            tunnel += WallNoiseM * WallNoise(q);
+            tunnel += WallNoiseM * WallNoise(q) + OpeningNoise(q);
         // Roche sous le sol, hors des galeries ; air au-dessus du sol
         ground = depth < tunnel;
         return ground ? depth : tunnel;
@@ -268,7 +270,7 @@ public sealed class Cave
     public double WallDistance(Double3 q, int[] candidates)
     {
         double tunnel = TunnelDistance(q, candidates);
-        return tunnel < FarRock ? tunnel + WallNoiseM * WallNoise(q) : tunnel;
+        return tunnel < FarRock ? tunnel + WallNoiseM * WallNoise(q) + OpeningNoise(q) : tunnel;
     }
 
     /// <summary>Galeries assez proches d'un point (repère local) pour compter à moins de <paramref name="radiusM"/> mètres.</summary>
@@ -332,6 +334,25 @@ public sealed class Cave
     }
 
     private static double Smooth(double t) => t * t * (3 - 2 * t);
+
+    private readonly double _openingPhase;
+
+    /// <summary>
+    /// Contour de l'ouverture, bien plus découpé que les parois (effondrement : lèvres
+    /// irrégulières, blocs tombés, forme allongée) ; seulement autour de l'entrée, dans les
+    /// derniers mètres sous la surface. Sans lui, l'entrée était un disque presque parfait.
+    /// (Au centre du trou, le vide est assez profond pour que l'ouverture reste ouverte.)
+    /// </summary>
+    private double OpeningNoise(Double3 q)
+    {
+        double rho = Math.Sqrt(q.X * q.X + q.Y * q.Y);
+        double near = (1 - Smooth(Math.Clamp((rho - HoleRadius * 1.1) / HoleRadius, 0, 1))) * Smooth(Math.Clamp((q.Z + 7) / 6, 0, 1));
+        if (near <= 0)
+            return 0;
+        double angle = Math.Atan2(q.Y, q.X);
+        double lobes = 0.6 * Math.Sin(2 * angle + _openingPhase) + 0.4 * Math.Sin(3 * angle + 1.7 * _openingPhase);
+        return near * (0.18 * HoleRadius * lobes + 1.0 * ValueNoise(q / 2.2 + new Double3(3.1, 7.7, 1.9)));
+    }
 
     private static double Hash(int x, int y, int z)
     {

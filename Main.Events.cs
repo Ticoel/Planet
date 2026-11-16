@@ -356,11 +356,11 @@ public partial class Main
         if (field == null)
             return (a + b).Normalized();
         int hint = -1;
-        double lo = 0, hi = 1;
+        double lo = 0, hi = 1, level = _displaySeaLevel + _climate.SeaLevelMeters;
         for (int k = 0; k < 24; k++)
         {
             double t = (lo + hi) / 2;
-            if (field.Sample((a * (1 - t) + b * t).Normalized(), 50, ref hint).Height > 0) lo = t; else hi = t;
+            if (field.Sample((a * (1 - t) + b * t).Normalized(), 50, ref hint).Height > level) lo = t; else hi = t;
         }
         return (a * (1 - hi) + b * hi).Normalized();
     }
@@ -403,6 +403,10 @@ public partial class Main
         }
         Double3 camera = _terrain.Explorer.Position;
         Double3 up = camera.Normalized();
+        // Niveau actuel de la mer (abaissé pendant les glaciations : jusqu'à −8 m dans les
+        // rapports ; comparés à 0, des fonds de −5 m, à sec, recevaient des icebergs, cachés sous
+        // le sol)
+        float seaLevel = _displaySeaLevel + _climate.SeaLevelMeters;
         _icebergTimer -= realDelta;
         if (_running && _icebergTimer <= 0 && _calvingCells.Length > 0 && _terrain.Explorer.AltitudeAboveGround < 60000)
         {
@@ -419,7 +423,7 @@ public partial class Main
                 double spread = 3000 / TerrainHeightField.RadiusMeters, offshore = (300 + 2500 * _eventRandom.NextDouble()) / TerrainHeightField.RadiusMeters;
                 Double3 at = (front + seaward * offshore + (ax * (_eventRandom.NextDouble() - 0.5) + ay * (_eventRandom.NextDouble() - 0.5)) * spread).Normalized();
                 int hint = -1;
-                if (_terrain.Field.Sample(at, 50, ref hint).Height > -5)
+                if (_terrain.Field.Sample(at, 50, ref hint).Height > seaLevel - 5)
                     continue;   // sur la terre ou un haut-fond : pas d'iceberg
                 _icebergs.Add((at, (float)(20 + 130 * Math.Pow(_eventRandom.NextDouble(), 2)), (float)(_eventRandom.NextDouble() * 6.28)));
                 _calvedCount++;
@@ -436,13 +440,13 @@ public partial class Main
             // Échoué sur la côte : le relief détaillé sous l'iceberg (et non la cellule la plus
             // proche, souvent de terre près d'une côte : l'iceberg disparaissait aussitôt vêlé).
             // (Seulement quand le temps avance : en pause, rien ne bouge ni ne fond)
-            bool aground = _terrain.Field != null && _terrain.Field.Sample(direction, 50, ref _icebergFieldHint).Height > -2;
+            bool aground = _terrain.Field != null && _terrain.Field.Sample(direction, 50, ref _icebergFieldHint).Height > seaLevel - 2;
             if (size < 5 || far || aground)
                 _icebergs.RemoveAt(i);
             else
                 _icebergs[i] = (direction, size, heading);
         }
-        _icebergRenderer.UpdateIcebergs(camera, _icebergs, _displaySeaLevel + _climate.SeaLevelMeters);
+        _icebergRenderer.UpdateIcebergs(camera, _icebergs, seaLevel);
     }
 
     /// <summary>Ligne des détails : les événements de la planète vivante.</summary>

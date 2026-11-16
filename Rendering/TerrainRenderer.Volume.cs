@@ -14,12 +14,18 @@ namespace Planet.Rendering;
 /// mètres de la caméra (le shader du terrain n'y dessine plus la surface : masque des blocs
 /// prêts). Une couronne de blocs en plus, au-delà du masque, est dessinée un peu enfoncée sous
 /// la surface : elle bouche les fentes du raccord sans se battre avec elle.
+/// <para>Le volume ne remplace la surface que là où elle est déjà à son plus fin : sur un relief
+/// encore grossier (juste après un saut de la caméra), les deux ne se raccordaient pas (marches,
+/// éclats). Dans une grotte, toute la grotte est construite et masquée, pas seulement les
+/// environs de la caméra : sinon, au-delà, les jupes des morceaux de terrain pendaient dans le
+/// tunnel et le relief du dessus se voyait par en dessous.</para>
 /// </summary>
 public partial class TerrainRenderer
 {
     private const int VolumeMaskedRadius = 5;          // blocs (≈ 90 m) qui remplacent la surface
     private const int VolumeDrawnRadius = 6;           // plus une couronne enfoncée
-    private const int VolumeMaskSize = 16;             // masque : 16 × 16 blocs autour de la caméra
+    private const int VolumeMaskSize = 64;             // masque : 64 × 64 blocs (≈ 1 km) autour de la caméra
+    private const int VolumeMaxCaveChunks = 400;       // blocs d'une grotte construits au plus
     private const double VolumeMaxAltitude = 250;      // au-dessus, la surface suffit
     private const double VolumeReanchorM = 1500;
     private const int VolumeBuilders = 3;
@@ -33,7 +39,14 @@ public partial class TerrainRenderer
         public bool Failed;
         public Double3 Center;
         public Rid Mesh, Instance;
+        public bool Shown = true;
     }
+
+    // Blocs de la grotte où se trouve la caméra (du plus proche au plus lointain), pour quel repère
+    // et quelle version des grottes
+    private (int i, int j)[] _caveChunks = Array.Empty<(int, int)>();
+    private readonly HashSet<(int, int)> _caveChunkSet = new();
+    private (VolumeFrame frame, int version, Cave cave) _caveChunksFor;
 
     private VolumeFrame _volumeFrame;
     private TerrainHeightField _volumeField;
@@ -149,6 +162,7 @@ public partial class TerrainRenderer
 
         Double3 local = _volumeFrame.ToLocal(camera);
         int ci = (int)Math.Floor(local.X / VolumeChunkBuilder.ChunkM), cj = (int)Math.Floor(local.Y / VolumeChunkBuilder.ChunkM);
+        UpdateCaveChunks(camera, ci, cj);
 
         // Blocs arrivés
         foreach (var entry in _volume.Values)
@@ -169,11 +183,10 @@ public partial class TerrainRenderer
         foreach (var entry in _volume.Values)
             if (entry.Build != null)
                 building++;
-        foreach (var (di, dj) in VolumeOffsets)
+        foreach (var (i, j) in WantedVolumeChunks(ci, cj))
         {
             if (building >= VolumeBuilders)
                 break;
-            int i = ci + di, j = cj + dj;
             if (!_volume.TryGetValue((i, j), out var entry))
                 _volume[(i, j)] = entry = new VolumeEntry { I = i, J = j };
             else if (entry.Build != null || (entry.Built && !entry.Rebuild) || (entry.Failed && !entry.Rebuild))
@@ -191,7 +204,7 @@ public partial class TerrainRenderer
         {
             var entry = _volume[key];
             int di = key.Item1 - ci, dj = key.Item2 - cj;
-            if (di * di + dj * dj > (VolumeDrawnRadius + 2) * (VolumeDrawnRadius + 2) && entry.Build == null)
+            if (di * di + dj * dj > (VolumeDrawnRadius + 2) * (VolumeDrawnRadius + 2) && entry.Build == null && !_caveChunkSet.Contains(key))
             {
                 FreeVolumeChunk(entry);
                 _volume.Remove(key);
@@ -202,17 +215,29 @@ public partial class TerrainRenderer
         var mask = _volumeMaskNext;
         Array.Clear(mask);
         int corner = VolumeMaskSize / 2;
+        bool inCave = _caveChunkSet.Count > 0;
         foreach (var entry in _volume.Values)
         {
             if (!entry.Instance.IsValid)
                 continue;
-            RenderingServer.InstanceSetTransform(entry.Instance, new Transform3D(Godot.Basis.Identity, (entry.Center - camera).ToVector3()));
             int di = entry.I - ci, dj = entry.J - cj;
             int mi = di + corner, mj = dj + corner;
+            bool cave = inCave && _caveChunkSet.Contains((entry.I, entry.J));
+            // Surface pas encore à son plus fin : le bloc n'est pas montré (hors de la grotte où
+            // l'on est : elle doit rester close)
+            bool shown = cave || FineSurfaceAt(entry.Center);
+            if (shown != entry.Shown)
+            {
+                entry.Shown = shown;
+                RenderingServer.InstanceSetVisible(entry.Instance, shown);
+            }
+            if (!shown)
+                continue;
+            RenderingServer.InstanceSetTransform(entry.Instance, new Transform3D(Godot.Basis.Identity, (entry.Center - camera).ToVector3()));
             // Un bloc dessine de −0,5 à +15,5 m de sa case : la dernière demi-rangée est celle des
             // voisins en x+, y+ et en diagonale. Sans eux, une fente (ni surface ni volume)
             // laissait voir le ciel le long du bord
-            if (di * di + dj * dj <= VolumeMaskedRadius * VolumeMaskedRadius + 1 && mi >= 0 && mj >= 0 && mi < VolumeMaskSize && mj < VolumeMaskSize
+            if ((cave || di * di + dj * dj <= VolumeMaskedRadius * VolumeMaskedRadius + 1) && mi >= 0 && mj >= 0 && mi < VolumeMaskSize && mj < VolumeMaskSize
                 && VolumeChunkBuilt(entry.I + 1, entry.J) && VolumeChunkBuilt(entry.I, entry.J + 1) && VolumeChunkBuilt(entry.I + 1, entry.J + 1))
                 mask[mj * VolumeMaskSize + mi] = 255;
         }
@@ -228,6 +253,77 @@ public partial class TerrainRenderer
         _material.SetShaderParameter("volume_axis_y", _volumeFrame.AxisY.ToVector3());
         _material.SetShaderParameter("volume_corner", new Vector2(ci - corner, cj - corner));
         _material.SetShaderParameter("volume_chunk", (float)VolumeChunkBuilder.ChunkM);
+        _material.SetShaderParameter("volume_mask_size", (float)VolumeMaskSize);
+    }
+
+    /// <summary>Blocs voulus, les plus proches d'abord : autour de la caméra, puis toute la grotte où elle se trouve.</summary>
+    private IEnumerable<(int i, int j)> WantedVolumeChunks(int ci, int cj)
+    {
+        foreach (var (di, dj) in VolumeOffsets)
+            yield return (ci + di, cj + dj);
+        foreach (var chunk in _caveChunks)
+            yield return chunk;
+    }
+
+    /// <summary>
+    /// Blocs de la grotte où se trouve la caméra : tous ceux que ses galeries traversent (et une
+    /// rangée autour, pour le masque). Refaits quand la caméra change de grotte, de repère, ou
+    /// quand les grottes changent.
+    /// </summary>
+    private void UpdateCaveChunks(Double3 camera, int ci, int cj)
+    {
+        Cave current = null;
+        if (Explorer.InCave)
+            foreach (var cave in VolumeCaves)
+                if (cave.Contains(cave.ToLocal(camera)))
+                {
+                    current = cave;
+                    break;
+                }
+        if (current == null)
+        {
+            _caveChunks = Array.Empty<(int, int)>();
+            _caveChunkSet.Clear();
+            _caveChunksFor = default;
+            return;
+        }
+        if (_caveChunksFor.frame != _volumeFrame || _caveChunksFor.version != _volumeCaveVersion || _caveChunksFor.cave != current)
+        {
+            _caveChunksFor = (_volumeFrame, _volumeCaveVersion, current);
+            _caveChunkSet.Clear();
+            double size = VolumeChunkBuilder.ChunkM;
+            foreach (var (a, ra, b, rb) in current.Segments)
+            {
+                Double3 la = _volumeFrame.ToLocal(current.ToWorld(a)), lb = _volumeFrame.ToLocal(current.ToWorld(b));
+                double margin = Math.Max(ra, rb) + 3;
+                int i0 = (int)Math.Floor((Math.Min(la.X, lb.X) - margin) / size) - 1, i1 = (int)Math.Floor((Math.Max(la.X, lb.X) + margin) / size) + 1;
+                int j0 = (int)Math.Floor((Math.Min(la.Y, lb.Y) - margin) / size) - 1, j1 = (int)Math.Floor((Math.Max(la.Y, lb.Y) + margin) / size) + 1;
+                for (int j = j0; j <= j1; j++)
+                    for (int i = i0; i <= i1; i++)
+                        if (_caveChunkSet.Count < VolumeMaxCaveChunks)
+                            _caveChunkSet.Add((i, j));
+            }
+            _caveChunks = _caveChunkSet.ToArray();
+        }
+        // Les plus proches de la caméra d'abord
+        Array.Sort(_caveChunks, (p, q) => ((p.i - ci) * (p.i - ci) + (p.j - cj) * (p.j - cj)).CompareTo((q.i - ci) * (q.i - ci) + (q.j - cj) * (q.j - cj)));
+    }
+
+    /// <summary>
+    /// La surface affichée à cet endroit est-elle à son plus fin (niveau maximal ou juste
+    /// au-dessus) ? Sinon, elle ne se raccorde pas au volume, calculé au mètre près.
+    /// </summary>
+    private bool FineSurfaceAt(Double3 point)
+    {
+        var (face, s, t) = CubeSphere.FromDirection(point.Normalized());
+        for (int level = Quadtree.MaxLevel; level >= Quadtree.MaxLevel - 1; level--)
+        {
+            int n = 1 << level;
+            var key = new ChunkKey(face, level, Math.Clamp((int)(s * n), 0, n - 1), Math.Clamp((int)(t * n), 0, n - 1));
+            if (_cache.TryGetValue(key.Packed, out var entry) && entry.Visible)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Bloc construit (vide ou non) : sa part de surface est dessinée.</summary>
@@ -268,6 +364,7 @@ public partial class TerrainRenderer
         entry.Instance = RenderingServer.InstanceCreate2(entry.Mesh, GetWorld3D().Scenario);
         RenderingServer.InstanceGeometrySetCastShadowsSetting(entry.Instance, ShadowSetting);
         RenderingServer.InstanceSetTransform(entry.Instance, new Transform3D(Godot.Basis.Identity, (entry.Center - Explorer.Position).ToVector3()));
+        entry.Shown = true;
     }
 
     private static void FreeVolumeChunk(VolumeEntry entry)
@@ -286,6 +383,9 @@ public partial class TerrainRenderer
             FreeVolumeChunk(entry);
         _volume.Clear();
         _volumeFrame = null;
+        _caveChunks = Array.Empty<(int, int)>();
+        _caveChunkSet.Clear();
+        _caveChunksFor = default;
         if (_volumeMaskBytes.Any(b => b != 0))
         {
             _volumeMaskBytes = new byte[VolumeMaskSize * VolumeMaskSize];

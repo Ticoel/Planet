@@ -35,12 +35,17 @@ public partial class DebrisRenderer : Node3D
     {
         // Bloc : sphère à facettes, aplatie et tournée au hasard (allure de roche anguleuse)
         var rock = new SphereMesh { Radius = 0.5f, Height = 0.8f, RadialSegments = 7, Rings = 4 };
+        // (couleur par bloc : roche, neige d'une avalanche, boue d'un lahar)
         rock.Material = new StandardMaterial3D
         {
-            AlbedoColor = new Color(0.42f, 0.39f, 0.35f),
+            VertexColorUseAsAlbedo = true,
             Roughness = 1f,
         };
-        _boulderMesh = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = rock, InstanceCount = MaxBoulders, VisibleInstanceCount = 0 };
+        _boulderMesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseColors = true, Mesh = rock,
+            InstanceCount = MaxBoulders, VisibleInstanceCount = 0,
+        };
         _boulders = new MultiMeshInstance3D { Multimesh = _boulderMesh, CastShadow = GeometryInstance3D.ShadowCastingSetting.On };
         AddChild(_boulders);
 
@@ -108,6 +113,14 @@ public partial class DebrisRenderer : Node3D
             float roll = seed + time * p.Speed / Math.Max(0.3f, p.Size);
             var basis = new Basis(axis, roll).Scaled(new Vector3(p.Size, p.Size * (0.7f + 0.3f * Mathf.Abs(Mathf.Sin(seed))), p.Size * 1.2f));
             _boulderMesh.SetInstanceTransform(i, new Transform3D(basis, (position - camera).ToVector3()));
+            _boulderMesh.SetInstanceColor(i, p.Kind switch
+            {
+                // (avant, les blocs de neige d'une avalanche étaient dessinés en roche sombre :
+                // des carrés noirs sur la neige)
+                SlideKind.SnowAvalanche => new Color(0.86f, 0.88f, 0.92f),
+                SlideKind.Lahar => new Color(0.30f, 0.26f, 0.21f),
+                _ => new Color(0.42f, 0.39f, 0.35f),
+            });
 
             // Poussière : là où ça va vite, d'autant plus que le bloc est gros
             if (p.Speed > 2f && _puffs.Count < MaxPuffs && _random.NextDouble() < delta * Math.Min(3.0, p.Speed * 0.15) * (count > 400 ? 400.0 / count : 1))

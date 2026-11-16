@@ -1,5 +1,41 @@
 # Historique des versions
 
+## 1.0.1 — 2026-11-16
+
+Corrections d'après les rapports de bug de la 1.0 (touche ²), et nouvelle chasse aux bugs.
+
+- **Aiguilles grises et puits le long des fleuves** : le fond plat des vallées rabotait tout le
+  relief fin ; à la source d'un torrent (fond de 2 m de large), une bosse de 900 m devenait une
+  fente de 800 m de profondeur, une aiguille vue de loin. Le fond n'efface plus que les détails
+  plus fins que sa largeur ; deux tracés du même fleuve qui se recouvrent ne se disputent plus
+  le fond de la vallée. Un test vérifie 450 zones de terre sur trois planètes.
+- **Relief qui restait grossier** (jusqu'à 1 174 morceaux en attente) : les morceaux à refaire
+  après un glissement de terrain passaient avant tout l'affinage, plusieurs fois par seconde.
+  Le sol sous la caméra s'affine maintenant d'abord, quel que soit le niveau de détail ; les
+  glissements lointains mettent le relief à jour moins souvent.
+- **Relief en volume** : il ne remplace plus qu'une surface déjà à son plus fin (plus de marches
+  ni d'éclats juste après un saut de la caméra) ; dans une grotte, toute la grotte est
+  construite : on ne voit plus le relief extérieur par en dessous, ni les « jupes » du terrain
+  pendre dans le tunnel.
+- **Damier sur tout le sol sous l'averse** : les ronds de pluie des flaques divisaient par zéro
+  sur la carte graphique.
+- **Fonds de vallée blanc vif pendant les crues** : le fond inondé était peint en sable de plage ;
+  il est maintenant de limon sombre, et l'eau de crue est brune et opaque. La crue ne monte plus
+  que dans les vallées et les lacs (plus de nappe drapée sur les versants, ni de bassin de source
+  qui déborde).
+- **Cascades en mur d'eau plat aux falaises** : vers son embouchure, la vallée descend jusqu'à la
+  mer, et la falaise s'interrompt à son débouché (plus de plate-forme de 30 m sous la cascade).
+- **Icebergs absents** quand la mer est basse (glaciations) : ils étaient placés sur des fonds à
+  sec, cachés sous le sol.
+- **Blocs d'avalanche** dessinés en roche sombre sur la neige : blancs (boue pour les lahars).
+- **« Éboulement de 0 m³ »** annoncé : un mouvement sans rien d'arraché est ignoré.
+- **Ouvertures des grottes** moins rondes : lèvres découpées, forme allongée.
+- **Chasse aux bugs** : cratères géants empilés (−19 km) ; calculs en tâche de fond qui
+  échouaient redemandés à chaque image ; en pause, les séismes du dernier pas repassaient à
+  chaque image (un tsunami de plus par image) ; caméra vers une source chaude près d'un pôle.
+- Nouveaux tests : robustesse (planètes vieillies, 20 000 points du relief, morceaux, grottes),
+  caméra (transitions et marche en grotte sans entrer dans la roche).
+
 ## 1.0.0 — 2026-11-16
 
 Première version complète : une petite planète « éprouvette » (2 000 km de rayon) entièrement

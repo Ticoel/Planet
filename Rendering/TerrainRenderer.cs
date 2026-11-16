@@ -566,7 +566,10 @@ public partial class TerrainRenderer : Node3D
         }
         StaleChunkCount = stale;
 
-        // Morceaux à refaire après une modification de la croûte : ceux qu'on voit d'abord
+        // Morceaux à refaire après une modification de la croûte : ceux qu'on voit d'abord, mais
+        // après l'affinage du sol proche (le morceau périmé reste affiché en attendant ; avant,
+        // ils passaient avant tout : pendant les glissements de terrain, qui se publient plusieurs
+        // fois par seconde, le relief ne s'affinait plus, et restait grossier à quelques mètres)
         if (!updating && _stale.Count > 0)
         {
             var shown = new HashSet<long>();
@@ -577,7 +580,8 @@ public partial class TerrainRenderer : Node3D
                 if (!_cache.TryGetValue(packed, out var entry))
                     continue;
                 double distance = Math.Max(0, entry.BoundsCenter.DistanceTo(camera) - entry.BoundsRadius);
-                requests.Add((entry.Key, shown.Contains(packed) ? -1e9 + distance : entry.Key.Level * 1e9 + 5e8 + distance));
+                double priority = TerrainQuadtree.RequestPriority(entry.Key.Level, distance);
+                requests.Add((entry.Key, shown.Contains(packed) ? 1.5 + priority : 100 + priority));
             }
         }
 
@@ -710,7 +714,8 @@ public partial class TerrainRenderer : Node3D
         };
         for (int v = 0; v < count; v++)
         {
-            prepared.Colors[v] = new Color(chunk.Wetland[v], 0f, 0f, 1f);
+            // (a : eau qui monte avec les crues ; sur les blocs de volume, a est l'ouverture vers le ciel)
+            prepared.Colors[v] = new Color(chunk.Wetland[v], 0f, 0f, chunk.Floodable?[v] ?? 0f);
             prepared.Debris[v] = new Vector2(chunk.Debris[v * 2], chunk.Debris[v * 2 + 1]);
             prepared.Vertices[v] = new Vector3(chunk.Positions[v * 3], chunk.Positions[v * 3 + 1], chunk.Positions[v * 3 + 2]);
             prepared.Normals[v] = new Vector3(chunk.Normals[v * 3], chunk.Normals[v * 3 + 1], chunk.Normals[v * 3 + 2]);
@@ -968,10 +973,11 @@ float sea_surface(vec3 up) {
 }
 
 // Niveau de l'eau : celui du lac ou du fleuve s'il y en a un (stocké dans le maillage, > 0 ;
-// une crue le fait monter), aucun loin des côtes (NoSeaLevel), sinon la mer
-float water_surface(vec3 up, float stored) {
+// une crue le fait monter là où l'eau est inondable : vallée d'un fleuve, lac), aucun loin des
+// côtes (NoSeaLevel), sinon la mer
+float water_surface(vec3 up, float stored, float floodable) {
     if (stored > 0.01)
-        return stored + flood_rise * event_fade(up);
+        return stored + flood_rise * event_fade(up) * clamp(floodable, 0.0, 1.0);
     return abs(stored - (" + TerrainHeightField.NoSeaLevel.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + @")) < 1.0 ? -1e6 : sea_surface(up);
 }
 // Lumière du Soleil arrivée jusqu'au point (atmosphère traversée), ombre des nuages
@@ -1027,9 +1033,11 @@ vec4 gradient_noise(vec3 x, int period) {
     return vec4(value * 1.6, derivative * 1.6);
 }
 
-// Bruit à l'échelle « scale » (m, diviseur de NOISE_PERIOD) ; dérivées en 1/m × scale
+// Bruit à l'échelle « scale » (m, diviseur de NOISE_PERIOD, ou moins de 1 m) ; dérivées en 1/m × scale.
+// (La période en mailles se calcule en flottants : « NOISE_PERIOD / int(0,5) » divisait par zéro,
+// et les ronds de pluie des flaques dessinaient un damier sur tout le sol)
 vec4 texture_noise(vec3 p, float scale) {
-    return gradient_noise(p / scale, NOISE_PERIOD / int(scale));
+    return gradient_noise(p / scale, int(float(NOISE_PERIOD) / scale + 0.5));
 }
 
 // Poids d'un détail de taille « scale » selon la taille d'un pixel au sol : on efface ce qui
@@ -1283,6 +1291,7 @@ uniform vec3 volume_axis_x = vec3(1.0, 0.0, 0.0);
 uniform vec3 volume_axis_y = vec3(0.0, 0.0, 1.0);
 uniform vec2 volume_corner;
 uniform float volume_chunk = 16.0;
+uniform float volume_mask_size = 16.0;
 // Lampe portée par la caméra sous terre (0 ou 1)
 uniform float cave_lamp = 0.0;
 
@@ -1291,7 +1300,7 @@ bool in_volume(vec3 p) {
         return false;
     vec3 r = p - volume_origin;
     vec2 c = floor(vec2(dot(r, volume_axis_x), dot(r, volume_axis_y)) / volume_chunk) - volume_corner;
-    if (any(lessThan(c, vec2(0.0))) || any(greaterThanEqual(c, vec2(16.0))))
+    if (any(lessThan(c, vec2(0.0))) || any(greaterThanEqual(c, vec2(volume_mask_size))))
         return false;
     return texelFetch(volume_mask, ivec2(c), 0).r > 0.5;
 }
@@ -1347,7 +1356,7 @@ void fragment() {
     vec3 up = normalize(v_world - planet_center);
     vec3 normal = normalize(v_world_normal);
     float h = v_height;
-    float depth = water_surface(up, v_water.x) - h;   // > 0 : sous l'eau (mer ou lac)
+    float depth = water_surface(up, v_water.x, v_volume > 0.5 ? 0.0 : v_open) - h;   // > 0 : sous l'eau (mer ou lac)
     vec3 p = v_world + noise_offset;       // position (m), modulo la période des bruits
     float footprint = length(fwidth(v_world));
 
@@ -1427,7 +1436,11 @@ void fragment() {
     } else if (depth > 0.0) {
         // Fonds : sable près des côtes, vase sombre au large (l'eau est dessinée par-dessus) ;
         // vase aussi au fond des chenaux et des mares des deltas
-        color = mix(sand, vec3(0.30, 0.30, 0.26), smoothstep(5.0, 200.0, depth));
+        // (sous un lac, un fleuve ou une crue : limon et vase sombres ; le sable clair des plages,
+        // sous quelques décimètres de crue, blanchissait tout le fond des vallées)
+        color = v_water.x > 0.01
+            ? mix(vec3(0.27, 0.23, 0.17), vec3(0.17, 0.15, 0.12), smoothstep(0.5, 8.0, depth))
+            : mix(sand, vec3(0.30, 0.30, 0.26), smoothstep(5.0, 200.0, depth));
         color = mix(color, vec3(0.20, 0.18, 0.14), v_wetland);
         color = mix(color, rock, smoothstep(0.25, 0.5, slope));
         color *= 1.0 + 0.08 * n128.x + 0.06 * n8.x;
@@ -1735,6 +1748,8 @@ varying float v_depth;
 // 1 sur les jupes (sommets ajoutés après la grille) : pas d'eau dessus, sinon on les voyait
 // en traits sombres à travers l'eau transparente, le long des bords des morceaux
 varying float v_skirt;
+// Montée de l'eau due à la crue en ce point (m) : eau boueuse
+varying float v_flood;
 
 void vertex() {
     v_skirt = VERTEX_ID >= GRID_VERTICES ? 1.0 : 0.0;
@@ -1744,7 +1759,8 @@ void vertex() {
     v_height = mix(CUSTOM0.w, CUSTOM1.w, m);
     v_water = UV;
     vec3 up = normalize((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz - planet_center);
-    float level = water_surface(up, v_water.x);
+    float level = water_surface(up, v_water.x, COLOR.a);
+    v_flood = v_water.x > 0.01 ? flood_rise * event_fade(up) * clamp(COLOR.a, 0.0, 1.0) : 0.0;
     // Niveau caché sous le sol (berges, plaine d'inondation) : il suit le sol quand celui-ci se
     // transforme vers le niveau de détail plus grossier (morphing) ; sinon, le lit étroit lissé,
     // les berges descendaient sous l'eau et le fleuve s'étalait en ruban, au ras de la plaine
@@ -1842,6 +1858,9 @@ void fragment() {
         // vu de loin, les rouleaux se fondent en une frange blanche
         foam = mix(shore * 0.35, foam, detail_weight(4.0, footprint));
     }
+    // Crue : eau chargée de limon, brune et opaque
+    float muddy = clamp(v_flood / 1.5, 0.0, 0.8);
+    color = mix(color, vec3(0.30, 0.24, 0.16), muddy);
     foam = max(foam, rapids);
     color = mix(color, vec3(0.92, 0.95, 0.97), foam);
     // Glace : bleutée et lisse, fissurée de fines lignes, blanche sous la neige
@@ -1858,7 +1877,7 @@ void fragment() {
     // les eaux de moins d'un mètre (bassins des sources, bords des lacs et des fleuves) restent
     // claires : on voit leur fond
     float clear = 1.0 - smoothstep(0.1, 1.5, v_depth);
-    ALPHA = max(max(mix(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), 0.28, clear), foam), ice);
+    ALPHA = max(max(max(mix(clamp(0.62 + v_depth / 25.0, 0.62, 0.98), 0.28, clear), foam), ice), muddy);
 }
 ";
 }

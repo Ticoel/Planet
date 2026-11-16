@@ -51,6 +51,16 @@ public sealed class TerrainQuadtree
     // chevauchaient et les bords ne coïncidaient plus tout à fait (dents le long des limites)
     private const double MorphFraction = 0.15;
 
+    /// <summary>
+    /// Urgence d'un morceau manquant (plus petit = plus urgent) : sa distance à la caméra, en
+    /// tailles de morceau (de 0 à 2 × <see cref="LodFactor"/>). Le plus en retard de détail
+    /// d'abord, quel que soit son niveau : le sol sous la caméra s'affine jusqu'au bout avant
+    /// le lointain. (Avant : tous les morceaux d'un niveau, sur toute la vue, avant ceux du
+    /// niveau suivant ; après un saut de la caméra, le sol tout proche restait grossier pendant
+    /// des secondes, et le relief en volume ne s'y raccordait pas.)
+    /// </summary>
+    public static double RequestPriority(int level, double distance) => distance / CubeSphere.ChunkSizeMeters(level);
+
     /// <summary>Plage de distance où un morceau de ce niveau est remplacé par ses enfants (m).</summary>
     public double SubdivisionDistance(int level) => LodFactor * CubeSphere.ChunkSizeMeters(level);
 
@@ -115,8 +125,7 @@ public sealed class TerrainQuadtree
                     if (children[c] == null)
                     {
                         allReady = false;
-                        // Priorité : les plus grossiers et les plus proches d'abord
-                        request(child, child.Level * 1e9 + distance);
+                        request(child, RequestPriority(child.Level, distance));
                     }
                 }
                 if (allReady)

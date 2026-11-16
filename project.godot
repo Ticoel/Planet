@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Planet"
 config/description="Une planète entièrement procédurale et autonome : tectonique, climat, eau, de l'orbite au sol."
-config/version="1.0.0"
+config/version="1.0.1"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"

@@ -24,7 +24,11 @@ public readonly record struct TerrainBench(Double3 Direction, double RadiusM, do
 /// +1 éboulis ; 0 : sol naturel.</param>
 /// <param name="DebrisDay">Jour (horloge climatique) où le sol a été remanié.</param>
 /// <param name="Wetland">Delta ou vasière côtière (0 à 1) : plaine de boue au ras de l'eau.</param>
-public readonly record struct TerrainSample(double Height, double WaterLevel, double River, float Debris = 0, float DebrisDay = 0, float Wetland = 0)
+/// <param name="Floodable">L'eau de ce point monte avec les crues (vallée d'un fleuve, lac) : 1 ;
+/// 0 ailleurs (bassins des sources, abords cachés sous le sol), sinon une crue y dressait une
+/// nappe d'eau.</param>
+public readonly record struct TerrainSample(double Height, double WaterLevel, double River, float Debris = 0, float DebrisDay = 0, float Wetland = 0,
+                                            float Floodable = 0)
 {
     /// <summary>Altitude de la surface visible (le sol, ou l'eau qui le recouvre).</summary>
     public double Surface => Math.Max(Height, WaterLevel);
@@ -181,6 +185,8 @@ public sealed class TerrainHeightField
     private readonly Double3[][] _riverCurve;
     // Tronçon de tête (aucun fleuve en amont) : sa vallée naît progressivement
     private bool[] _riverHead;
+    // Tronçon d'embouchure : la cellule en aval est en mer
+    private bool[] _riverMouth;
     private const int RiverCurveSegments = 12;
     // Grandes boucles du tracé : écart latéral maximal, en part de la longueur du tronçon
     private const double RiverBendAmplitude = 0.18, RiverBendWavelength = 45000.0;
@@ -527,6 +533,7 @@ public sealed class TerrainHeightField
     {
         var curves = new Double3[count][];
         _riverHead = new bool[count];
+        _riverMouth = new bool[count];
         // Affluent principal : la cellule de fleuve d'amont au plus fort débit
         var mainUpstream = new int[count];
         Array.Fill(mainUpstream, -1);
@@ -551,6 +558,7 @@ public sealed class TerrainHeightField
             Double3 a = _positions[c], b = End(c);
             int up = mainUpstream[c], down = _downstream[c];
             _riverHead[c] = up < 0;
+            _riverMouth[c] = _elevation[down] <= 0;
             Double3 before = up >= 0 ? _positions[up] : a - (b - a);
             Double3 after = _riverCell[down] ? End(down) : b + (b - a);
             Double3 ta = (b - before) * 0.5, tb = (after - a) * 0.5;
@@ -822,11 +830,18 @@ public sealed class TerrainHeightField
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
         double uncarved = height;
         height = Math.Max(height - valley.Depth, Math.Min(height, 1.0));
+        // Embouchure : le fleuve creuse jusqu'à son niveau de base, la mer ; sa vallée descend
+        // jusqu'au rivage au lieu de rester perchée sur le plateau (le fleuve tombait d'une
+        // falaise de 200 m, en mur d'eau plat)
+        if (valley.Mouth > 0 && height > 1.0)
+            height -= (height - 1.0) * valley.Mouth;
         // Deltas et vasières : plaine de vase au ras de la mer, sans falaise
         var wetShare = WetlandShare(direction, position, near[0], baseHeight, baseSlope);
         var (wetHeight, wetland) = ApplyWetland(position, height, wetShare, minWavelength);
         double cliffHeight = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
-        double noCliff = Math.Min(1, 2 * Math.Max(wetShare.delta, wetShare.coastal));
+        // (ni dans les deltas et les vasières, ni au débouché d'une vallée : sur son fond plat, à
+        // 1 m, la falaise dressait une plate-forme de 30 m, d'où le fleuve tombait en cascade)
+        double noCliff = Math.Min(1, Math.Max(2 * Math.Max(wetShare.delta, wetShare.coastal), Math.Max(valley.Floor, valley.Mouth)));
         height = wetHeight + (cliffHeight - height) * (1 - noCliff);
         height += LandformHeight(direction, near[0], minWavelength);
 
@@ -836,8 +851,10 @@ public sealed class TerrainHeightField
         // le lac s'arrêtait net sur la limite entre deux cellules, ou, en remontant le sol au
         // bord, formait un mur.)
         double water = 0;
+        float floodable = 0;
         if (lakeShare > LakeEdgeShare && lakeLevel > 0)
         {
+            floodable = 1;
             double full = SmoothStep(LakeEdgeShare, LakeThreshold, lakeShare);
             double dry = height - 20.0;   // niveau sûrement sous le sol
             // Même sous le sol, on garde ce niveau (et non 0) : entre deux sommets, l'eau
@@ -851,14 +868,23 @@ public sealed class TerrainHeightField
         if (valley.Depth > 0 && height > 1.0)
         {
             double bank = uncarved - valley.ValleyCarve;
-            double riverWater = valley.Bed > 0.01 ? bank - 0.4 : height - 3.0;
-            // Plaine d'inondation : le niveau du fleuve (fond de vallée moins 40 cm), caché sous le
-            // sol ; une crue le fait monter (shader de l'eau) et il apparaît, à plat, sur le fond
-            // de la vallée
+            // Plaine d'inondation : le niveau du fleuve (fond de vallée moins 40 cm), plan, caché
+            // sous le sol jusque sous les versants ; une crue le fait monter (shader de l'eau) et
+            // il apparaît, à plat, sur le fond de la vallée, jusqu'où il touche les versants.
+            // (Avant, sous les versants, un niveau qui suivait le sol 3 m plus bas : une crue de
+            // 3 m le faisait affleurer partout, en nappe drapée sur les pentes)
             double floodplain = Math.Min(height - 0.05, uncarved - valley.FloorDepth - 0.4);
+            double riverWater = valley.Bed > 0.01 ? bank - 0.4 : floodplain;
+            // (vers l'embouchure, l'eau descend avec le fond)
+            if (valley.Mouth > 0)
+            {
+                floodplain = Math.Min(height - 0.05, floodplain - Math.Max(0, floodplain - 1.0) * valley.Mouth);
+                riverWater -= Math.Max(0, riverWater - 1.0) * valley.Mouth;
+            }
             water = Math.Max(water, Math.Max(riverWater, floodplain));
+            floodable = 1;
         }
-        return new TerrainSample(height, water, river, Wetland: (float)wetland);
+        return new TerrainSample(height, water, river, Wetland: (float)wetland, Floodable: floodable);
     }
 
     /// <summary>
@@ -987,7 +1013,8 @@ public sealed class TerrainHeightField
     }
 
     /// <summary>Vallée et lit du cours d'eau le plus proche (voir <see cref="Valley"/>).</summary>
-    private readonly record struct ValleyShape(double Depth, double Floor, double River, double Bed, double ValleyCarve, double FloorDepth, double FloorHalf = 0);
+    private readonly record struct ValleyShape(double Depth, double Floor, double River, double Bed, double ValleyCarve, double FloorDepth, double FloorHalf = 0,
+                                               double Mouth = 0);
 
     /// <summary>
     /// Vallée et lit du cours d'eau le plus proche, selon son débit Q (m³/s) et le relief :
@@ -1070,7 +1097,9 @@ public sealed class TerrainHeightField
                                    Math.Max(best.ValleyCarve, valleyCarve),
                                    Math.Max(best.FloorDepth, depth * birth),
                                    // (largeur du fond pondérée par sa présence : sans cassure)
-                                   Math.Max(best.FloorHalf, floorHalf * floor));
+                                   Math.Max(best.FloorHalf, floorHalf * floor),
+                                   // Vers l'embouchure, la vallée descend jusqu'à la mer (fond et versants)
+                                   Math.Max(best.Mouth, _riverMouth[cell] ? SmoothStep(0.4, 1.0, along) * (1 - SmoothStep(floorHalf, width, distance)) : 0));
         }
         return best;
     }

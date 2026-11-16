@@ -8,7 +8,8 @@ namespace Planet.Simulation.Terrain;
 /// <param name="Height">Altitude (m) de la surface du flot à cet endroit.</param>
 /// <param name="Speed">Vitesse (m/s).</param>
 /// <param name="Size">Taille d'un bloc représentatif (m).</param>
-public readonly record struct DebrisParticle(Double3 Direction, double Height, float Speed, float Size, int Id);
+/// <param name="Kind">Type du mouvement : couleur des blocs (neige d'une avalanche, boue d'un lahar, roche).</param>
+public readonly record struct DebrisParticle(Double3 Direction, double Height, float Speed, float Size, int Id, SlideKind Kind = SlideKind.Landslide);
 
 /// <summary>
 /// Un mouvement de terrain en temps réel (étape 16a) : glissement, éboulement ou avalanche
@@ -215,7 +216,8 @@ public sealed class Landslide
         // Les volumes des paquets valent exactement le volume arraché
         double packetSum = 0;
         foreach (var p in _packets) packetSum += p.Volume;
-        foreach (var p in _packets) p.Volume *= released / packetSum;
+        if (packetSum > 0)
+            foreach (var p in _packets) p.Volume *= released / packetSum;
         ReleasedVolume = released;
         MovingVolume = released;
     }
@@ -438,7 +440,7 @@ public sealed class Landslide
         {
             double x = p.X - Patch.HalfExtentM, y = p.Y - Patch.HalfExtentM;
             double h = Bilinear(_ground, p.X, p.Y) + Bilinear(_flow, p.X, p.Y);
-            output.Add(new DebrisParticle(Patch.DirectionAt(x, y), h, (float)Math.Sqrt(p.Vx * p.Vx + p.Vy * p.Vy), p.Size, p.Id));
+            output.Add(new DebrisParticle(Patch.DirectionAt(x, y), h, (float)Math.Sqrt(p.Vx * p.Vx + p.Vy * p.Vy), p.Size, p.Id, Kind));
         }
     }
 

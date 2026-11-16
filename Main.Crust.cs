@@ -316,8 +316,11 @@ public partial class Main
             double dt = delta * rate;
             active.PublishTimer -= delta;
             bool publish = active.PublishTimer <= 0;
+            // (au loin, le relief se met à jour moins souvent : chaque publication fait recalculer
+            // tous les morceaux de terrain touchés ; 4 fois par seconde au pied du glissement,
+            // toutes les 2 s à 4 km et plus)
             if (publish)
-                active.PublishTimer = SlidePublishSeconds;
+                active.PublishTimer = SlidePublishSeconds * Math.Clamp(active.DistanceKm / 0.5, 1, 8);
             if (dt > 0 || publish)
             {
                 var back = active.Back;
@@ -495,10 +498,9 @@ public partial class Main
             return;
         }
         var slide = build.Result;
-        if (slide == null)
-        {
+        // (rien d'arraché : la niche tombait hors de la grille ; « éboulement de 0 m³ » annoncé)
+        if (slide == null || slide.ReleasedVolume < 1)
             return;
-        }
         // Le relief a pu être remplacé entre-temps (nouvelle planète) : on jette
         if (_clock != ClockMode.Climate)
             return;
