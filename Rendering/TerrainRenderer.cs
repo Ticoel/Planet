@@ -154,6 +154,9 @@ public partial class TerrainRenderer : Node3D
     private readonly PriorityQueue<ChunkKey, double> _queue = new();
     private readonly HashSet<long> _queued = new();
     private readonly HashSet<long> _inProgress = new();
+    // Morceaux dont le calcul a échoué : plus redemandés (une erreur à chaque image sinon) avant
+    // un nouveau relief ou une modification de la croûte
+    private readonly HashSet<long> _failed = new();
     private readonly ConcurrentQueue<(PreparedChunk prepared, int generation, int stamp)> _completed = new();
     // Croûte modulaire (étape 16a) : morceaux affichés dont le relief a changé, à recalculer
     // (numéro de la modification la plus récente qui les touche) ; le morceau périmé reste
@@ -367,6 +370,7 @@ public partial class TerrainRenderer : Node3D
         {
             _queue.Clear();
             _queued.Clear();
+            _failed.Clear();
         }
         Field = field;
         _stale.Clear();
@@ -397,6 +401,8 @@ public partial class TerrainRenderer : Node3D
     {
         int stamp = Interlocked.Increment(ref _editStamp);
         direction = direction.Normalized();
+        lock (_queueLock)
+            _failed.Clear();
         foreach (var (packed, entry) in _cache)
             if (Touches(entry.Key, entry.BoundsCenter, entry.BoundsRadius, direction, radiusM))
                 _stale[packed] = stamp;
@@ -581,7 +587,7 @@ public partial class TerrainRenderer : Node3D
             _queue.Clear();
             _queued.Clear();
             foreach (var (key, priority) in requests)
-                if (!_inProgress.Contains(key.Packed) && !_pending.ContainsKey(key.Packed) && _queued.Add(key.Packed))
+                if (!_inProgress.Contains(key.Packed) && !_failed.Contains(key.Packed) && !_pending.ContainsKey(key.Packed) && _queued.Add(key.Packed))
                     _queue.Enqueue(key, priority);
             PendingChunkCount = _queue.Count + _inProgress.Count;
             if (_queue.Count > 0)
@@ -856,6 +862,8 @@ public partial class TerrainRenderer : Node3D
             catch (Exception exception)
             {
                 GD.PushError($"Terrain chunk {key} failed: {exception.Message}");
+                lock (_queueLock)
+                    _failed.Add(key.Packed);
             }
             finally
             {

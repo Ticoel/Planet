@@ -439,6 +439,12 @@ public sealed class TerrainHeightField
         if (list == null)
             return 0;
         double total = 0;
+        // Cuvettes des cratères qui se chevauchent : elles ne s'additionnent pas (un impact creuse
+        // dans les débris et la roche broyée du précédent, pas sous son fond intact). Norme 8 des
+        // profondeurs : un cratère seul est inchangé, des cratères empilés vont à peine plus bas
+        // que le plus profond (20 bassins géants au même endroit, additionnés, creusaient à
+        // −19 km) ; sans cassure, les pentes restent continues là où deux cuvettes se croisent
+        double bowls = 0;
         foreach (int i in list)
         {
             var landform = _landforms[i];
@@ -486,12 +492,20 @@ public sealed class TerrainHeightField
                     {
                         h = rim * Math.Pow(q, -3) * (1 - SmoothStep(2.2, 3.0, q));
                     }
-                    total += landform.Freshness * h;
+                    h *= landform.Freshness;
+                    if (h >= 0)
+                        total += h;
+                    else
+                    {
+                        // (en km, pour que la puissance 8 reste loin des limites des doubles)
+                        double x2 = h * h * 1e-6, x4 = x2 * x2;
+                        bowls += x4 * x4;
+                    }
                     break;
                 }
             }
         }
-        return total;
+        return bowls > 0 ? total - 1000 * Math.Pow(bowls, 0.125) : total;
     }
 
     /// <summary>Détails du volcan i (rifts, cônes, coulées, ravines ; voir <see cref="VolcanoDetail"/>).</summary>

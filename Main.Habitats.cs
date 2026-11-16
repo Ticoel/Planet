@@ -283,8 +283,8 @@ public partial class Main
         _visitedHabitats.Add(habitat.Position);
         Double3 anchor = Anchor(habitat);
         Double3 site = anchor.Normalized();
-        Double3 east = Double3.UnitY.Cross(site).Normalized();
-        Double3 north = site.Cross(east);
+        // (repère qui tient aussi au pôle : « axe Y × site » y était nul, d'où une caméra NaN)
+        var (east, north) = LavaFlow.TangentFrame(site);
         // De côté, à quelques rayons du bassin, à hauteur d'homme : on voit le bassin et sa vapeur
         double distance = Math.Max(90, 7.0 * habitat.RadiusM);
         var explorer = _terrain.Explorer;

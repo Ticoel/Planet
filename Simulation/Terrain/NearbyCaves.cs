@@ -16,6 +16,8 @@ public sealed class NearbyCaves
 
     private readonly Dictionary<CaveSite, Task<Cave>> _building = new();
     private readonly Dictionary<CaveSite, Cave> _ready = new();
+    // Tracés qui ont échoué : pas retentés à chaque image (jusqu'au prochain relief)
+    private readonly HashSet<CaveSite> _failed = new();
     private TerrainHeightField _field;
 
     public IReadOnlyList<CaveSite> Sites { get; private set; } = Array.Empty<CaveSite>();
@@ -33,6 +35,7 @@ public sealed class NearbyCaves
         {
             _building.Clear();
             _ready.Clear();
+            _failed.Clear();
         }
         _field = field;
         Sites = sites;
@@ -54,7 +57,9 @@ public sealed class NearbyCaves
             if (!task.IsCompleted)
                 continue;
             _building.Remove(site);
-            if (task.IsCompletedSuccessfully && Sites.Contains(site))
+            if (!task.IsCompletedSuccessfully)
+                _failed.Add(site);
+            else if (Sites.Contains(site))
             {
                 _ready[site] = task.Result;
                 changed = true;
@@ -65,7 +70,7 @@ public sealed class NearbyCaves
         {
             if ((site.Direction - up).Length() * TerrainHeightField.RadiusMeters > BuildDistanceM || _building.Count >= 2)
                 break;
-            if (_ready.ContainsKey(site) || _building.ContainsKey(site))
+            if (_ready.ContainsKey(site) || _building.ContainsKey(site) || _failed.Contains(site))
                 continue;
             var field = _field;
             _building[site] = Task.Run(() =>

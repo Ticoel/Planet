@@ -29,6 +29,8 @@ public partial class TerrainRenderer
         public int I, J;
         public Task<VolumeChunkMesh> Build;
         public bool Rebuild, Built;
+        // Construction échouée : pas retentée à chaque image (jusqu'à une modification du relief)
+        public bool Failed;
         public Double3 Center;
         public Rid Mesh, Instance;
     }
@@ -156,7 +158,10 @@ public partial class TerrainRenderer
             if (entry.Build.IsCompletedSuccessfully)
                 ShowVolumeChunk(entry, entry.Build.Result);
             else
+            {
+                entry.Failed = true;
                 GD.PushWarning($"Relief en volume : {entry.Build.Exception?.GetBaseException().Message}");
+            }
             entry.Build = null;
         }
         // Blocs à calculer, les plus proches d'abord
@@ -171,9 +176,10 @@ public partial class TerrainRenderer
             int i = ci + di, j = cj + dj;
             if (!_volume.TryGetValue((i, j), out var entry))
                 _volume[(i, j)] = entry = new VolumeEntry { I = i, J = j };
-            else if (entry.Build != null || (entry.Built && !entry.Rebuild))
+            else if (entry.Build != null || (entry.Built && !entry.Rebuild) || (entry.Failed && !entry.Rebuild))
                 continue;
             entry.Rebuild = false;
+            entry.Failed = false;
             var frame = _volumeFrame;
             var field = Field;
             var caves = VolumeCaves;
@@ -291,9 +297,16 @@ public partial class TerrainRenderer
     /// <summary>Croûte modulaire : les blocs de volume qui touchent la zone modifiée sont refaits.</summary>
     private void InvalidateVolume(Double3 direction, double radiusM)
     {
+        if (_volumeFrame == null)
+            return;
         Double3 point = direction.Normalized() * TerrainHeightField.RadiusMeters;
         foreach (var entry in _volume.Values)
-            if (entry.Built && (entry.Center.Normalized() * TerrainHeightField.RadiusMeters).DistanceTo(point) < radiusM + VolumeChunkBuilder.ChunkM * 1.5)
+        {
+            // (centre d'après le repère : un bloc qui a échoué n'a pas de centre connu)
+            double half = VolumeChunkBuilder.ChunkM / 2;
+            Double3 center = _volumeFrame.ToWorld(new Double3(entry.I * VolumeChunkBuilder.ChunkM + half, entry.J * VolumeChunkBuilder.ChunkM + half, 0));
+            if ((entry.Built || entry.Failed) && (center.Normalized() * TerrainHeightField.RadiusMeters).DistanceTo(point) < radiusM + VolumeChunkBuilder.ChunkM * 1.5)
                 entry.Rebuild = true;
+        }
     }
 }

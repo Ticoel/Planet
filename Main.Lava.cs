@@ -81,9 +81,13 @@ public partial class Main
         {
             if (_lavaStep is { IsCompleted: false })
                 _lavaStep.Wait();
-            // (une grille posée sur un relief remplacé entre-temps est jetée)
-            _lava = _lavaBuild.IsCompletedSuccessfully && ReferenceEquals(_lavaBuildField, _terrain.Field) ? _lavaBuild.Result : null;
-            if (_lava == null)
+            // (une grille posée sur un relief remplacé entre-temps est jetée, et refaite sur le
+            // nouveau ; une grille qui n'a pas pu être posée n'est pas redemandée à chaque image)
+            bool built = _lavaBuild.IsCompletedSuccessfully;
+            if (!built)
+                GD.PushWarning($"Lava flow failed: {_lavaBuild.Exception?.GetBaseException().Message}");
+            _lava = built && ReferenceEquals(_lavaBuildField, _terrain.Field) ? _lavaBuild.Result : null;
+            if (_lava == null && built)
                 _lavaVent = default;
             _lavaBuild = null;
             _lavaStep = null;

@@ -37,9 +37,12 @@ public sealed class TerrainQuadtree
     /// <summary>Hors du champ, un morceau n'est subdivisé qu'à cette part de la distance habituelle.</summary>
     private const double CasterLodScale = 0.4;
 
-    // Altitudes extrêmes possibles (fonds marins compris), tant qu'un morceau n'est pas calculé (m)
-    private const double UnknownMinHeight = -11000;
-    private const double UnknownMaxHeight = 9000;
+    // Altitudes extrêmes possibles, tant qu'un morceau n'est pas calculé (m) : fosses et grands
+    // bassins d'impact au fond des océans (jusqu'à ~−16 km), volcans boucliers sur des chaînes de
+    // montagnes (jusqu'à ~11 km). Trop étroites, un morceau en dehors pouvait être jugé à tort
+    // caché derrière l'horizon ou hors du champ, et demandé trop tard
+    private const double UnknownMinHeight = -18000;
+    private const double UnknownMaxHeight = 13000;
     // Part de la plage de distance d'un niveau consacrée au morphing. Elle doit rester assez
     // petite pour que le morphing d'un morceau ne commence pas avant la fin de celui de ses
     // voisins plus fins : un morceau de niveau n subdivisé peut s'étendre jusqu'à

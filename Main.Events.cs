@@ -45,6 +45,7 @@ public partial class Main
     // Icebergs proches de la caméra
     private readonly List<(Double3 direction, float size, float heading)> _icebergs = new();
     private double _icebergTimer;
+    private int _icebergHint = -1, _icebergFieldHint = -1;
     private int[] _calvingCells = Array.Empty<int>();
     // Fronts des glaciers qui vêlent : le point de la côte entre le glacier et la mer
     private Double3[] _calvingFronts = Array.Empty<Double3>();
@@ -347,11 +348,6 @@ public partial class Main
 
     // --- Icebergs --------------------------------------------------------------------------------------
 
-    /// <summary>
-    /// Icebergs : les glaciers qui atteignent la mer vêlent des blocs de glace (chaque front en
-    /// lâche quelques-uns par mois), qui dérivent à ~2 % du vent et fondent (quelques mètres par
-    /// jour dans une eau à quelques degrés).
-    /// </summary>
     /// <summary>Point de la côte entre une cellule de terre et une cellule de mer voisines (relief détaillé).</summary>
     private Double3 CoastPoint(int land, int sea)
     {
@@ -369,6 +365,11 @@ public partial class Main
         return (a * (1 - hi) + b * hi).Normalized();
     }
 
+    /// <summary>
+    /// Icebergs : les glaciers qui atteignent la mer vêlent des blocs de glace (chaque front en
+    /// lâche quelques-uns par mois), qui dérivent à ~2 % du vent et fondent (quelques mètres par
+    /// jour dans une eau à quelques degrés).
+    /// </summary>
     private void UpdateIcebergs(double realDelta, double days)
     {
         var hydrology = _climate.Hydrology;
@@ -424,18 +425,18 @@ public partial class Main
                 _calvedCount++;
             }
         }
-        for (int i = _icebergs.Count - 1; i >= 0; i--)
+        for (int i = _icebergs.Count - 1; i >= 0 && days > 0; i--)
         {
             var (direction, size, heading) = _icebergs[i];
-            int c = _grid.NearestCell(direction.ToVector3(), 0);
+            int c = _icebergHint = _grid.NearestCell(direction.ToVector3(), Math.Max(_icebergHint, 0));
             Double3 drift = Double3.From(_climate.Winds.Wind[c]) * 0.02;
             direction = (direction + drift * (days * 86400 / TerrainHeightField.RadiusMeters)).Normalized();
             size -= (float)(days * Math.Max(0.3, _climate.SurfaceTemperature[c] + 2) * 1.5);
             bool far = direction.DistanceTo(up) * TerrainHeightField.RadiusMeters > 400000;
             // Échoué sur la côte : le relief détaillé sous l'iceberg (et non la cellule la plus
-            // proche, souvent de terre près d'une côte : l'iceberg disparaissait aussitôt vêlé)
-            int hint = -1;
-            bool aground = _terrain.Field != null && _terrain.Field.Sample(direction, 50, ref hint).Height > -2;
+            // proche, souvent de terre près d'une côte : l'iceberg disparaissait aussitôt vêlé).
+            // (Seulement quand le temps avance : en pause, rien ne bouge ni ne fond)
+            bool aground = _terrain.Field != null && _terrain.Field.Sample(direction, 50, ref _icebergFieldHint).Height > -2;
             if (size < 5 || far || aground)
                 _icebergs.RemoveAt(i);
             else

@@ -335,6 +335,10 @@ public partial class Main : Node3D
         UpdateHover();
         UpdateHud();
         UpdateUi(delta);
+        // Séismes du pas : vus une fois par toutes les fonctions de l'image. Sans cela, en pause
+        // (plus de pas pour vider la liste), les derniers repassaient à chaque image : un
+        // tsunami de plus et un message par image, des doublons dans les événements
+        _activity.RecentEarthquakes.Clear();
     }
 
     // --- Horloges ----------------------------------------------------------------------------

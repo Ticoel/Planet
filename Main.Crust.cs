@@ -289,7 +289,13 @@ public partial class Main
             if (active.Step != null)
             {
                 if (active.Step.IsFaulted)
+                {
+                    // (abandonné : sinon il échouait à chaque pas et occupait pour toujours une
+                    // des places de mouvement en cours ; sa cicatrice déjà publiée reste)
                     GD.PushError($"Landslide failed: {active.Step.Exception?.GetBaseException().Message}");
+                    _slides.RemoveAt(index);
+                    continue;
+                }
                 (active.Particles, active.Back) = (active.Back, active.Particles);
                 active.Center = active.NextCenter;
                 active.Moving = active.NextMoving;
