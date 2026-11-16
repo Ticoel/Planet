@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using Godot;
 using Planet.Rendering;
-using Planet.Simulation;
 using Planet.Simulation.Chemistry;
 using Planet.Simulation.Tectonics;
 using Planet.Ui;

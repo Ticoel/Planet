@@ -11,7 +11,6 @@ using Planet.Simulation.Audio;
 using Planet.Simulation.Climate;
 using Planet.Simulation.Tectonics;
 using Planet.Simulation.Terrain;
-using Environment = Godot.Environment;
 
 namespace Planet;
 
@@ -280,6 +279,8 @@ public partial class Main : Node3D
     {
         _estimateTask?.Wait();
         _terrainTask?.Wait();
+        // (le calcul des nuages touche aux textures du ciel : attendu avant de tout libérer)
+        _cloudTask?.Wait();
         _climate?.Dispose();
     }
 
@@ -886,6 +887,8 @@ public partial class Main : Node3D
         ResetCrust();
         ResetChemistry();
         ResetEvents();
+        _visitedCaves.Clear();
+        _visitedHabitats.Clear();
         if (_clock == ClockMode.Climate)
             SetClock(ClockMode.Geological);
         RebuildTerrainNow(progressive: false);

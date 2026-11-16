@@ -5,7 +5,6 @@ using Godot;
 using Planet.Rendering;
 using Planet.Simulation;
 using Planet.Simulation.Climate;
-using Planet.Simulation.Tectonics;
 using Planet.Simulation.Terrain;
 using Planet.Ui;
 

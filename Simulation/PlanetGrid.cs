@@ -55,7 +55,8 @@ public sealed class PlanetGrid
     /// </summary>
     public int NearestCell(Vector3 point, int startCell)
     {
-        int current = startCell;
+        // (indice de départ hors de la grille, par exemple venu d'une autre grille : on part de 0)
+        int current = (uint)startCell < (uint)CellCount ? startCell : 0;
         float currentDot = Positions[current].Dot(point);
         while (true)
         {

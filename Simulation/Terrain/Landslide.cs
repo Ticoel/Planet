@@ -364,7 +364,7 @@ public sealed class Landslide
                     if (_deposit[k] <= 1e-4)
                         continue;
                     int best = -1;
-                    double bestExcess = 0, bestDistance = 1;
+                    double bestExcess = 0;
                     for (int dj = -1; dj <= 1; dj++)
                         for (int di = -1; di <= 1; di++)
                         {
@@ -379,7 +379,6 @@ public sealed class Landslide
                             {
                                 bestExcess = excess;
                                 best = nj * s + ni;
-                                bestDistance = distance;
                             }
                         }
                     if (best < 0)

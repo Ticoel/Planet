@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace Planet.Simulation.Terrain;
@@ -71,8 +70,7 @@ public sealed class NearbyCaves
             var field = _field;
             _building[site] = Task.Run(() =>
             {
-                var hints = new ThreadLocal<int[]>(() => new[] { -1 });
-                Func<Double3, double> height = d => field.Sample(d, 0.5, ref hints.Value[0]).Height;
+                Func<Double3, double> height = d => field.Sample(d, 0.5, ref ThreadHint.Value).Height;
                 return site.Kind == CaveKind.Karst
                     ? Cave.Karst(site.Direction, site.Seed, height)
                     : Cave.LavaTube(site.Direction, site.Downhill, site.Seed, height);

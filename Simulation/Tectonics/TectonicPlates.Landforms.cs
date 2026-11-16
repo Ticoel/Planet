@@ -359,7 +359,7 @@ public sealed partial class TectonicPlates
     /// <summary>Croissance des volcans actifs, érosion des volcans éteints, effacement des cratères.</summary>
     private void AgeLandforms(float dtMyr)
     {
-        int hint = 0;
+        int hint;
         for (int i = _landforms.Count - 1; i >= 0; i--)
         {
             var landform = _landforms[i];

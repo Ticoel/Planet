@@ -28,6 +28,7 @@ public sealed class GpuComputeContext : IDisposable
         try
         {
             var device = RenderingServer.CreateLocalRenderingDevice();
+            // (null avec le moteur de rendu « Compatibilité »)
             return device == null ? null : new GpuComputeContext(device);
         }
         catch (Exception exception)

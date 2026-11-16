@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using Planet.Rendering;
@@ -167,8 +166,7 @@ public partial class Main
     /// <summary>Relief détaillé (calques compris) utilisable depuis plusieurs threads à la fois.</summary>
     private static Func<Double3, double> ThreadSafeHeight(TerrainHeightField field, double minWavelength)
     {
-        var hints = new ThreadLocal<int[]>(() => new[] { -1 });
-        return d => field.Height(d, minWavelength, ref hints.Value[0]);
+        return d => field.Height(d, minWavelength, ref ThreadHint.Value);
     }
 
     /// <summary>Conditions du moment sous la caméra : sol détrempé, gel et dégel, secousses.</summary>

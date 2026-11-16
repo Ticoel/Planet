@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Godot;
 using Planet.Rendering;
 using Planet.Simulation.Climate;
 using Planet.Simulation.Tectonics;

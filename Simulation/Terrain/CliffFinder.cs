@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Planet.Simulation;
 
 namespace Planet.Simulation.Terrain;
 

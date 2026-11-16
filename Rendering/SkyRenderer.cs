@@ -423,7 +423,7 @@ public sealed partial class SkyRenderer : Node3D
         Environment.AmbientLightColor = energy > 0 ? ambient / energy : Colors.White;
         Environment.AmbientLightEnergy = energy;
 
-        UpdateWeather(frame, up, sun, delta);
+        UpdateWeather(frame, up, sun);
     }
 
     // --- Météo autour de la caméra (étape 10d) -------------------------------------------------
@@ -495,7 +495,7 @@ public sealed partial class SkyRenderer : Node3D
         return particles;
     }
 
-    private void UpdateWeather(in SkyFrame frame, Vector3 up, Vector3 sun, double delta)
+    private void UpdateWeather(in SkyFrame frame, Vector3 up, Vector3 sun)
     {
         // Repère local : Y vers le haut, comme la gravité des particules
         Vector3 east = Vector3.Up.Cross(up);

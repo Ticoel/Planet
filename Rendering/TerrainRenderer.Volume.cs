@@ -40,6 +40,21 @@ public partial class TerrainRenderer
     private Image _volumeMaskImage;
     private ImageTexture _volumeMaskTexture;
     private byte[] _volumeMaskBytes = new byte[VolumeMaskSize * VolumeMaskSize];
+    private byte[] _volumeMaskNext = new byte[VolumeMaskSize * VolumeMaskSize];
+
+    /// <summary>Décalages des blocs voulus autour de la caméra, du plus proche au plus lointain (calculés une fois).</summary>
+    private static readonly (int di, int dj)[] VolumeOffsets = BuildVolumeOffsets();
+
+    private static (int, int)[] BuildVolumeOffsets()
+    {
+        var offsets = new List<(int di, int dj)>();
+        for (int dj = -VolumeDrawnRadius; dj <= VolumeDrawnRadius; dj++)
+            for (int di = -VolumeDrawnRadius; di <= VolumeDrawnRadius; di++)
+                if (di * di + dj * dj <= VolumeDrawnRadius * VolumeDrawnRadius + 1)
+                    offsets.Add((di, dj));
+        offsets.Sort((a, b) => (a.di * a.di + a.dj * a.dj).CompareTo(b.di * b.di + b.dj * b.dj));
+        return offsets.ToArray();
+    }
 
     /// <summary>Relief en volume autorisé (horloge climatique : le relief ne change plus que par la croûte modulaire).</summary>
     public bool VolumeEnabled { get; set; }
@@ -145,16 +160,15 @@ public partial class TerrainRenderer
             entry.Build = null;
         }
         // Blocs à calculer, les plus proches d'abord
-        int building = _volume.Values.Count(e => e.Build != null);
-        var wantedKeys = new List<(int i, int j, int d2)>();
-        for (int dj = -VolumeDrawnRadius; dj <= VolumeDrawnRadius; dj++)
-            for (int di = -VolumeDrawnRadius; di <= VolumeDrawnRadius; di++)
-                if (di * di + dj * dj <= VolumeDrawnRadius * VolumeDrawnRadius + 1)
-                    wantedKeys.Add((ci + di, cj + dj, di * di + dj * dj));
-        foreach (var (i, j, _) in wantedKeys.OrderBy(k => k.d2))
+        int building = 0;
+        foreach (var entry in _volume.Values)
+            if (entry.Build != null)
+                building++;
+        foreach (var (di, dj) in VolumeOffsets)
         {
             if (building >= VolumeBuilders)
                 break;
+            int i = ci + di, j = cj + dj;
             if (!_volume.TryGetValue((i, j), out var entry))
                 _volume[(i, j)] = entry = new VolumeEntry { I = i, J = j };
             else if (entry.Build != null || (entry.Built && !entry.Rebuild))
@@ -179,7 +193,8 @@ public partial class TerrainRenderer
         }
 
         // Position des blocs, et masque des blocs prêts qui remplacent la surface
-        var mask = new byte[VolumeMaskSize * VolumeMaskSize];
+        var mask = _volumeMaskNext;
+        Array.Clear(mask);
         int corner = VolumeMaskSize / 2;
         foreach (var entry in _volume.Values)
         {
@@ -197,7 +212,7 @@ public partial class TerrainRenderer
         }
         if (!mask.AsSpan().SequenceEqual(_volumeMaskBytes))
         {
-            _volumeMaskBytes = mask;
+            (_volumeMaskBytes, _volumeMaskNext) = (mask, _volumeMaskBytes);
             _volumeMaskImage.SetData(VolumeMaskSize, VolumeMaskSize, false, Image.Format.R8, mask);
             _volumeMaskTexture.Update(_volumeMaskImage);
         }

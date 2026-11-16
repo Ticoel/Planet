@@ -1,5 +1,4 @@
 using System;
-using Godot;
 using Planet.Simulation.Climate;
 using Planet.Simulation.Tectonics;
 
@@ -666,7 +665,7 @@ public sealed class TerrainHeightField
     /// </summary>
     private int Gather(Double3 p, ref int hint, Span<int> cells)
     {
-        int nearest = Grid.NearestCell(p.ToVector3(), hint >= 0 ? hint : 0);
+        int nearest = Grid.NearestCell(p.ToVector3(), hint);
         // La marche en float peut s'arrêter sur une voisine à égalité : on vérifie en double
         double best = p.DistanceTo(_positions[nearest]);
         foreach (int n in Grid.Neighbors[nearest])
