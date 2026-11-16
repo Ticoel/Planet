@@ -583,6 +583,14 @@ Faites :
     préparés par les threads de calcul (le fil principal en envoie davantage par image) ; détail
     plus loin en qualité haute (9 000 morceaux en mémoire) ; vallées testées sans le bruit des
     méandres loin des cours d'eau (−15 % de temps de calcul du relief).
+27. **Fentes le long du relief en volume** : un bloc dessine de −0,5 à +15,5 m de sa case ; la
+    dernière demi-rangée revient à ses voisins. S'ils n'étaient pas encore construits, une fente
+    laissait voir le ciel : une case ne remplace la surface qu'une fois ses voisins prêts.
+28. **Icebergs disparus aussitôt vêlés** : supprimés dès que la cellule la plus proche était de
+    la terre (souvent le cas près d'une côte) ; c'est maintenant le relief sous l'iceberg qui
+    compte.
+29. **Courbe de température en dents de scie** : un point toutes les 0,5 s tombait au hasard des
+    saisons quand l'horloge va vite ; la courbe montre une moyenne glissante (jusqu'à un an).
 13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
     surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis

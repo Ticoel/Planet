@@ -92,9 +92,36 @@ public partial class Main
                $"{Distance(explorer.AltitudeAboveGround)}   {Engine.GetFramesPerSecond():0} img/s";
     }
 
+    // Température moyenne lissée pour la courbe : moyenne glissante d'autant plus longue que
+    // l'horloge va vite (un point toutes les 0,5 s ; à des mois par seconde, les points tombaient
+    // au hasard des saisons et la courbe oscillait en dents de scie)
+    private double _smoothedTemperature = double.NaN, _smoothedDay = double.NaN;
+
+    private void SmoothTemperature()
+    {
+        if (_clock != ClockMode.Climate || !_climate.HasTemperature)
+        {
+            _smoothedTemperature = _smoothedDay = double.NaN;
+            return;
+        }
+        double day = _climate.TimeDays;
+        if (double.IsNaN(_smoothedTemperature) || double.IsNaN(_smoothedDay) || day < _smoothedDay)
+        {
+            _smoothedTemperature = _climate.GlobalMeanTemperature;
+            _smoothedDay = day;
+            return;
+        }
+        double daysPerSample = ClimateSpeeds[_climateSpeed] * SeriesSampleSeconds;
+        double tau = Math.Clamp(daysPerSample * 4, 0.25, 365.25);
+        double alpha = 1 - Math.Exp(-(day - _smoothedDay) / tau);
+        _smoothedTemperature += (_climate.GlobalMeanTemperature - _smoothedTemperature) * alpha;
+        _smoothedDay = day;
+    }
+
     private void UpdateUi(double delta)
     {
         EnsureHabitats(delta);
+        SmoothTemperature();
         if (_running)
         {
             _seriesTimer -= delta;
@@ -314,7 +341,8 @@ public partial class Main
         registry.Add(new TimeSeries
         {
             Label = "Température moyenne", Unit = "°C", Color = (1f, 0.55f, 0.35f),
-            Sample = () => _clock == ClockMode.Climate && _climate.HasTemperature ? _climate.GlobalMeanTemperature : _estimatedMeanTemperature,
+            Sample = () => _clock == ClockMode.Climate && _climate.HasTemperature ? (double.IsNaN(_smoothedTemperature) ? _climate.GlobalMeanTemperature : _smoothedTemperature)
+                                                                                 : _estimatedMeanTemperature,
         });
         registry.Add(new TimeSeries
         {

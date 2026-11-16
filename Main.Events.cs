@@ -432,7 +432,11 @@ public partial class Main
             direction = (direction + drift * (days * 86400 / TerrainHeightField.RadiusMeters)).Normalized();
             size -= (float)(days * Math.Max(0.3, _climate.SurfaceTemperature[c] + 2) * 1.5);
             bool far = direction.DistanceTo(up) * TerrainHeightField.RadiusMeters > 400000;
-            if (size < 5 || far || _tectonics.CellElevation[c] > 0)
+            // Échoué sur la côte : le relief détaillé sous l'iceberg (et non la cellule la plus
+            // proche, souvent de terre près d'une côte : l'iceberg disparaissait aussitôt vêlé)
+            int hint = -1;
+            bool aground = _terrain.Field != null && _terrain.Field.Sample(direction, 50, ref hint).Height > -2;
+            if (size < 5 || far || aground)
                 _icebergs.RemoveAt(i);
             else
                 _icebergs[i] = (direction, size, heading);

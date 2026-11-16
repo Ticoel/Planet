@@ -188,7 +188,11 @@ public partial class TerrainRenderer
             RenderingServer.InstanceSetTransform(entry.Instance, new Transform3D(Godot.Basis.Identity, (entry.Center - camera).ToVector3()));
             int di = entry.I - ci, dj = entry.J - cj;
             int mi = di + corner, mj = dj + corner;
-            if (di * di + dj * dj <= VolumeMaskedRadius * VolumeMaskedRadius + 1 && mi >= 0 && mj >= 0 && mi < VolumeMaskSize && mj < VolumeMaskSize)
+            // Un bloc dessine de −0,5 à +15,5 m de sa case : la dernière demi-rangée est celle des
+            // voisins en x+, y+ et en diagonale. Sans eux, une fente (ni surface ni volume)
+            // laissait voir le ciel le long du bord
+            if (di * di + dj * dj <= VolumeMaskedRadius * VolumeMaskedRadius + 1 && mi >= 0 && mj >= 0 && mi < VolumeMaskSize && mj < VolumeMaskSize
+                && VolumeChunkBuilt(entry.I + 1, entry.J) && VolumeChunkBuilt(entry.I, entry.J + 1) && VolumeChunkBuilt(entry.I + 1, entry.J + 1))
                 mask[mj * VolumeMaskSize + mi] = 255;
         }
         if (!mask.AsSpan().SequenceEqual(_volumeMaskBytes))
@@ -204,6 +208,9 @@ public partial class TerrainRenderer
         _material.SetShaderParameter("volume_corner", new Vector2(ci - corner, cj - corner));
         _material.SetShaderParameter("volume_chunk", (float)VolumeChunkBuilder.ChunkM);
     }
+
+    /// <summary>Bloc construit (vide ou non) : sa part de surface est dessinée.</summary>
+    private bool VolumeChunkBuilt(int i, int j) => _volume.TryGetValue((i, j), out var entry) && entry.Built;
 
     private int _rockHint = -1;
 
