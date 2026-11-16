@@ -1198,7 +1198,7 @@ public partial class Main : Node3D
                     int sea = 0;
                     foreach (int n in _grid.Neighbors[c])
                         if (elevation[n] < 0) sea++;
-                    return sea == 0 ? -1 : sea - Math.Abs(Math.Asin(Cell(c).Y)) * 2;
+                    return sea == 0 ? -1 : sea - Math.Abs(Math.Asin(Math.Clamp(Cell(c).Y, -1, 1))) * 2;
                 });
                 int ocean = Array.Find(_grid.Neighbors[c], n => elevation[n] < 0);
                 explorer.PlaceAbove(Cell(c), 150);
@@ -1234,7 +1234,7 @@ public partial class Main : Node3D
             case 7:
             {
                 var (cover, _) = SkyRenderer.ComputeCloudCover(_climate);
-                int c = Best(c => cover[c] - Math.Abs(Math.Asin(Cell(c).Y)) * 0.3 + Mathf.SmoothStep(-0.1f, 0.3f, Cell(c).ToVector3().Dot(_climate.Sun.Direction)));
+                int c = Best(c => cover[c] - Math.Abs(Math.Asin(Math.Clamp(Cell(c).Y, -1, 1))) * 0.3 + Mathf.SmoothStep(-0.1f, 0.3f, Cell(c).ToVector3().Dot(_climate.Sun.Direction)));
                 explorer.PlaceAbove(Cell(c), 13000);
                 explorer.Face(Double3.UnitY, -0.12);
                 break;
@@ -1259,7 +1259,7 @@ public partial class Main : Node3D
                     place = moonDirection;
                 explorer.PlaceAbove(place, 300);
                 Double3 toMoon = moonDirection * (moon.DistanceKm * 1000) - explorer.Position;
-                double elevationAngle = Math.Asin(toMoon.Normalized().Dot(explorer.Position.Normalized()));
+                double elevationAngle = Math.Asin(Math.Clamp(toMoon.Normalized().Dot(explorer.Position.Normalized()), -1, 1));
                 explorer.Face(toMoon, Math.Min(elevationAngle, 1.2));
                 detail = $"{MoonOrbit.PhaseName(moon.Phase)}, éclairée à {moon.IlluminatedFraction * 100:0} %";
                 break;

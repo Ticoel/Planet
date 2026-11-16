@@ -16,7 +16,7 @@ public partial class HelpPanel : PanelContainer
     {
         ("Se déplacer", new[]
         {
-            (new[] { "↑", "↓" }, "Avancer, reculer"),
+            (new[] { "↑", "↓" }, "Avancer, reculer (aussi Z et S)"),
             (new[] { "←", "→" }, "Tourner"),
             (new[] { "Q", "D" }, "Pas de côté"),
             (new[] { "Pg ↑", "Pg ↓" }, "Monter, descendre"),
@@ -94,6 +94,7 @@ public partial class HelpPanel : PanelContainer
         var header = new HBoxContainer();
         root.AddChild(header);
         header.AddChild(MakeLabel("Commandes", 22, Text));
+        header.AddChild(MakeLabel($"   Planet {ProjectSettings.GetSetting("application/config/version")}", 13, Dim));
         header.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill });
         header.AddChild(MakeLabel("H ou Échap pour fermer", 13, Dim));
 

@@ -11,9 +11,12 @@ config_version=5
 [application]
 
 config/name="Planet"
+config/description="Une planète entièrement procédurale et autonome : tectonique, climat, eau, de l'orbite au sol."
+config/version="1.0.0"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
+boot_splash/bg_color=Color(0.04, 0.05, 0.07, 1)
 
 [display]
 

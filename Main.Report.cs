@@ -49,7 +49,7 @@ public partial class Main
         Double3 up = position.Normalized();
         Vector3 forward = explorer.Forward().ToVector3();
 
-        text.AppendLine($"Rapport de bug Planet — {stamp}");
+        text.AppendLine($"Rapport de bug Planet {ProjectSettings.GetSetting("application/config/version")} — {stamp}");
         Safe("Godot", () => Engine.GetVersionInfo()["string"].AsString());
         Safe("Système", () => $"{OS.GetName()}, carte graphique : {RenderingServer.GetVideoAdapterName()} ({RenderingServer.GetVideoAdapterVendor()})");
         Safe("Écran", () => $"{GetViewport().GetVisibleRect().Size}, {Engine.GetFramesPerSecond():0} images/s");

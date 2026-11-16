@@ -2,7 +2,6 @@
 .godot/
 /android/
 *.translation
-export_presets.cfg
 
 # .NET
 bin/
@@ -13,4 +12,6 @@ obj/
 .vscode/
 *.swp
 .directory
-Claude outputs/
+
+# Versions exportées (tools/export.sh)
+build/

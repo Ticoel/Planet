@@ -3,9 +3,12 @@
 ![Planet : la planète vue d'orbite, ses montagnes, un coucher de soleil, une mer de nuages](docs/images/banniere.jpg)
 
 Une planète **entièrement procédurale** et autonome dans Godot 4.7 (.NET) : tectonique des
-plaques, climat, cycle de l'eau, fleuves, biomes, puis exploration de l'orbite jusqu'au sol à
-l'échelle réelle. Rien ne vient de la vraie Terre : continents, montagnes, climats et nuages
+plaques, climat, cycle de l'eau, fleuves, une planète qui vit d'elle-même (éruptions, séismes,
+glissements, cyclones…), puis exploration de l'orbite jusqu'au sol à l'échelle réelle, jusque
+dans les grottes. Rien ne vient de la vraie Terre : continents, montagnes, climats et nuages
 émergent de la simulation.
+
+**Version 1.0.0** (16 novembre 2026) : voir [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Aperçu
 
@@ -92,20 +95,29 @@ herbes qui jaunissent, banquise australe qui s'étend en dérivant.*
 au pied, inscrits dans le relief). Rendu du moteur du projet ; glissement déclenché par un script pour l'image (dans le jeu, ils
 se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
 
-## Auteurs
+## Installer et lancer
 
-- **Code et conception technique : Claude**, modèle d'intelligence artificielle créé par
-  [Anthropic](https://www.anthropic.com). L'ensemble du code (simulation, rendu, shaders, tests)
-  a été écrit par Claude au fil de conversations.
-- **Idée, direction et essais : Nicolas Troupel**, qui a imaginé le projet, choisi les étapes et
-  testé chaque version.
+**Version exportée** (archive `Planet-1.0.0-linux.zip` ou `Planet-1.0.0-windows.zip`) :
+décompresser, puis lancer `Planet.x86_64` (Linux) ou `Planet.exe` (Windows). Il faut une carte
+graphique compatible Vulkan (ou Direct3D 12 sous Windows) ; le calcul du climat se fait sur la
+carte graphique quand elle le permet, sinon sur le processeur.
 
-## Lancer
+**Depuis le code source** :
 
-- Code source : [github.com/Ticoel/Planet](https://github.com/Ticoel/Planet)
+- Code : [github.com/Ticoel/Planet](https://github.com/Ticoel/Planet)
   (`git clone https://github.com/Ticoel/Planet.git`).
-- Ouvrir le dossier dans Godot 4.7.2 (.NET), lancer la scène `Main.tscn`.
-- Tests : `dotnet run -c Release --project tests/Planet.Tests`.
+- Il faut Godot 4.7.2 .NET et le SDK .NET 8. Ouvrir le dossier dans Godot, lancer la scène
+  principale (F5).
+- Tests (168, dont 7 longs) : `dotnet run -c Release --project tests/Planet.Tests`
+  (`--quick` : sans les longs ; un nom en argument : seulement les tests qui le contiennent).
+- **Construire les versions exportées** : installer les modèles d'export de Godot (Éditeur >
+  Gérer les modèles d'export), puis `tools/export.sh` (ou `GODOT=/chemin/vers/Godot tools/export.sh`) :
+  tests rapides, export Linux et Windows (préréglages dans `export_presets.cfg`), archives
+  `build/Planet-<version>-<plateforme>.zip` avec la licence et ce fichier. Le numéro de version
+  est celui de `project.godot` (`config/version`).
+
+## Jouer
+
 - **Une planète autonome, à contempler** : rien ne se provoque à la main. On laisse la géologie
   avancer jusqu'à l'âge voulu, on la fige (C), puis la planète vit d'elle-même : saisons, pluies,
   éruptions, séismes, glissements de terrain, sources chaudes. On ne fait que régler ses
@@ -128,46 +140,26 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
   - l'interface est modulaire : chaque paramètre, couche, ligne de sonde ou courbe est inscrit
     une seule fois dans un registre (`Ui/UiRegistry.cs`, inscriptions dans `Main.Ui.cs`) et les
     panneaux se construisent seuls.
-- Touches principales (H affiche l'aide complète dans le jeu) :
-  - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : avancer / reculer dans l'axe du regard ; G : marche (atterrit d'abord si l'on vole haut) / vol ;
-  - C : figer la géologie et passer à l'horloge climatique (confirmation demandée, **sans retour** :
-    on choisit d'abord l'âge géologique voulu, la croûte devient ensuite modulaire) ; + / − : vitesse ;
-    T : avance rapide jusqu'à 4,5 milliards d'années (avant de figer la géologie) ;
-  - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
-    7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
-  - H ou bouton « ? » : panneau des commandes (touches dessinées, par thème) ;
-  - O : qualité graphique, trois niveaux (haute au démarrage) :
-    - **basse** : image calculée à 59 % puis agrandie (AMD FSR 1), relief allégé, pas d'ombres
-      portées, lancer de rayons grossier dans les nuages et les panaches ;
-    - **moyenne** : image à 67 % (FSR 2), ombres portées du relief ;
-    - **haute** : pleine résolution lissée par FSR 2, relief fin jusqu'au loin, ombres douces en
-      haute définition, nuages et panaches plus fins ;
-  - U : masquer l'eau ; N : masquer les nuages ; K : couper le son ;
-  - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
-  - ² (touche sous Échap ; ` en QWERTY) ou bouton « Rapport » : **rapport de bug** : capture de l'écran (interface comprise) et fichier texte du
-    même nom qui décrit l'état du jeu (caméra, horloge, sol, terrain, relief en volume, grottes,
-    événements, fin du journal de Godot), à joindre au message ;
-  - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
-    (fichiers rangés dans le dossier Images/Planet) ;
-  - J : source chaude ou geyser suivant (du plus proche au plus lointain) ;
-  - Maj + G : relief en volume autour de la caméra marche / arrêt (pour comparer) ;
-  - Y : survoler la grotte suivante (grotte karstique ou tunnel de lave) ; G pour y entrer à pied, une lampe
-    s'allume sous terre ;
-  - B : voler vers l'événement naturel suivant, au centre de l'écran (Maj + B : le précédent) : tsunami qui approche
-    d'une côte, cyclone vu de haut, éruption ou fissure, orages à tornades, crue, tempête de sable,
-    glissement, lahar ou avalanche récents, séisme, aurores, glacier qui vêle, montagne enneigée ;
-    la couche « Événements naturels » (groupe Climat) les montre tous sur la carte ;
-  - F1 à F7 et F9 à F11 : lieux de test (sommet, fleuve, lac, côte, désert venteux, averse, neige, puis
-    nuages, coucher de soleil, Lune ; pas de F8, qui arrête le jeu lancé depuis l'éditeur) ;
-    Maj + F4 : la plus haute falaise de la côte, vue du large ; L : volcan.
+### Commandes
 
-## Licence
+H (ou le bouton « ? ») ouvre le panneau des commandes dans le jeu.
 
-GNU GPL version 3 (voir le fichier `LICENSE`).
+| Thème | Touches |
+|---|---|
+| **Se déplacer** | flèches (ou Z Q S D) : avancer, tourner, pas de côté ; Page préc. / suiv. : monter, descendre ; Origine / Fin : regarder en haut, en bas ; Maj : plus vite ; molette : avancer dans l'axe du regard ; clic gauche + glisser : déplacer ; clic droit + glisser : regarder ; **G** : marcher (la caméra atterrit d'abord si elle vole haut) ou voler ; X : retour en orbite |
+| **Le temps** | P : pause ; + / − : vitesse ; **C** : figer la géologie et passer au climat (confirmation demandée, **sans retour** : on choisit d'abord l'âge voulu) ; T : avance rapide jusqu'à 4,5 milliards d'années ; R : nouvelle planète ; E : étoile suivante (sa masse fixe sa durée de vie) |
+| **Regarder** | 1 à 0 : couches (géologie et altitude, plaques, frontières, âge du plancher, ensoleillement, température, vents et pression, pluie et humidité, climats, vue réaliste ; 7 plusieurs fois : vent, pression, courants, remontées d'eau froide) ; V : flèches ; F : fleuves ; U : masquer l'eau ; N : masquer les nuages ; O : qualité graphique ; K : son ; Tab : masquer l'interface |
+| **Aller voir** (en vol) | **B** : événement naturel suivant, au centre de l'écran (Maj + B : précédent) ; J : source chaude ou geyser ; **Y** : grotte (G pour y entrer à pied, une lampe s'allume sous terre) ; L : volcan ; F1 à F7, F9 à F11 : sommet, fleuve, lac, côte (Maj + F4 : falaise), désert venteux, averse, neige, nuages, coucher de soleil, Lune |
+| **Garder une trace** | F12 : photo ; Maj + F12 : vidéo ; M : carte de la couche affichée ; **²** (sous Échap ; ` en QWERTY) ou bouton « Rapport » : rapport de bug, capture et fichier texte de l'état du jeu à joindre au message (dossier Images/Planet) ; Maj + G : relief en volume marche / arrêt ; clic : épingler la sonde |
+
+Qualité graphique (O) : **basse** (image à 59 % agrandie par AMD FSR 1, relief allégé, sans
+ombres portées), **moyenne** (image à 67 %, FSR 2, ombres portées), **haute** (pleine résolution
+lissée par FSR 2, relief fin jusqu'au loin, ombres douces, nuages et panaches plus fins ;
+réglage du démarrage).
 
 # Conception
 
-Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite planète autonome, éruptions fissurales, deltas et vasières, Terre vivante, interface du jeu, 165 tests).
+Version 1.0.0 (2026-11-16) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 18 faites, 168 tests.
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -196,7 +188,8 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
 ## Modèles
 - **Tectonique** : plaques tournant autour de pôles d'Euler, croûte océanique et continentale,
   isostasie, subduction, dorsales, collisions, fracturations et fusions ; stable jusqu'à 4,5 Ga
-  (~15 plaques, 27 à 30 % de terres, sommets ~7 km).
+  (sur la petite planète : 5 à 8 plaques, ~30 à 45 % de terres, sommets de 4 à 6 km ; à la taille
+  de la Terre, les tests donnent ~15 plaques et des sommets de ~7 km).
 - **Climat** : ensoleillement (orbite de Kepler, saisons), bilan d'énergie (A = 188, B = 2,09,
   diffusion 0,35), vents diagnostiques (ceintures de pression, Coriolis, frottement, moussons),
   cycle de l'eau (évaporation, pluie de convergence et orographique, neige, fonte, sols),
@@ -211,10 +204,13 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   - niveau de la mer selon la glace des terres ; banquise qui dérive avec le courant et ~2 % du
     vent (règle de Nansen).
 - **Relief détaillé** : plans des cellules mélangés (Shepard, Wendland), fractales (plaines,
-  collines, montagnes « ridged »), plis le long des chaînes, vallées courbes à méandres selon le
-  débit, lacs à rive continue, falaises côtières.
-- **Terrain** : CDLOD (niveaux 0 à 18, morphing exact vers le parent, jupes), morceaux calculés en
-  double précision sur des threads, rendu relatif à la caméra, cache de 3 000 morceaux.
+  collines, montagnes « ridged »), plis le long des chaînes, lacs à rive continue, falaises
+  côtières ; cours d'eau selon leur débit (géométrie hydraulique de Leopold et Maddock : largeur
+  ≈ 3,5·Q^0,5, profondeur ≈ 0,25·Q^0,4), torrents en tête, vallées larges en plaine et en V en
+  montagne, méandres à l'échelle du lit ; de loin, un trait d'eau proportionnel à la largeur.
+- **Terrain** : CDLOD (niveaux 0 à 18, morphing exact vers le parent, jupes), morceaux calculés et
+  préparés en double précision sur des threads, rendu relatif à la caméra, cache de 2 500 à
+  9 000 morceaux selon la qualité ; près de la caméra, relief en volume (voir plus bas).
 - **Ciel** : diffusion de Rayleigh, Mie et ozone (couchers de soleil, liseré bleu vu de l'espace,
   perspective atmosphérique) ; Lune sur son orbite (phases, vraie taille) ; étoiles et Voie lactée.
 - **Nuages** : couverture tirée du climat, découpée par un « temps qu'il fait » procédural
@@ -245,9 +241,11 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
   dont la portée suit l'altitude (fines au sol, larges vues d'avion, estompées depuis l'orbite) ;
   les montagnes hors du champ de vision projettent aussi leur ombre dans le champ.
 - **Sol et saisons** : textures procédurales (strates, roche fissurée, éboulis, dunes et rides de
-  sable, canopée des forêts) ; neige selon le climat ; feuillus qui se colorent puis perdent leurs
-  feuilles, herbes qui jaunissent ; fleuves qui coulent (rapides, cascades), houle et écume ;
-  côtes à falaises sur ~60 % des rivages ; eau plus sombre et saturée que le sol.
+  sable) ; neige selon le climat ; fleuves qui coulent (rapides, cascades), houle et écume ; lacs
+  et fleuves qui gèlent ; côtes à falaises sur ~60 % des rivages ; eau plus sombre et saturée que
+  le sol. Sans vie, le sol est nu ; la case « Végétation imaginée » (Affichage) montre la
+  végétation que le climat permettrait : canopée des forêts, feuillus qui se colorent puis
+  perdent leurs feuilles, herbes qui jaunissent.
 - **Planète active** :
   - points chauds fixes sous les plaques : chaînes d'îles volcaniques de plus en plus vieilles,
     érodées puis englouties ; volcans d'arc au-dessus des subductions ;
@@ -301,7 +299,7 @@ Mise à jour : 2026-11-14 (étapes 1 à 13, 14a, 16a et 16b faites, petite plan�
     pas sur une pente : sur un versant, une source bâtit de telles terrasses de dépôts) ; les
     sources chaudes remplissent leur cuvette et les geysers une petite vasque autour de leur
     bouche : de la vraie eau, comme la mer, les lacs et les fleuves (les mares de boue restent de
-    la boue) ; fond des bassins turquoise, bordé de dépôts minéraux (soufre jaune, oxydes de fer orangés : pas encore de tapis microbiens, il n'y a pas de vie), terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (horloge climatique) ; couche
+    la boue) ; fond des bassins en dépôts pâles que la vraie eau teinte en turquoise et bleu selon la profondeur, anneaux de dépôts minéraux le long du bord de l'eau (soufre jaune, oxydes de fer orangés : pas encore de tapis microbiens, il n'y a pas de vie), terrasses de dépôts clairs, soufre des fumerolles, vapeur et jets des geysers (cycle en temps réel, horloge climatique) ; couche
     « Milieux hydrothermaux », fiche à la sonde (nombre, température, pH), réglage de leur
     abondance ; touche J : source chaude ou geyser suivant. Ce sont les berceaux possibles de
     la vie de l'étape suivante ;
@@ -489,112 +487,10 @@ Faites :
 - **Action sur le milieu**, en retour : la végétation change l'albédo, retient l'eau et l'humus
   (moins d'érosion), produit l'oxygène et capte le carbone (effet de serre, donc climat) ; les
   coraux construisent des récifs ; les castors ou les termites modifient localement le terrain.
-- **Modifier le terrain** : le relief détaillé est une fonction calculée à la demande, donc
-  facile à compléter par des **calques de modifications** (creuser, bâtir, déposer) stockés par
-  morceau du quadtree. Les voxels ne seraient utiles que pour des grottes ou des surplombs : on
-  pourrait les limiter à de petites zones (quelques centaines de mètres) autour des lieux modifiés.
-
-### Bugs corrigés (2026-11-13)
-
-1.  **Son dans l'espace** : le son suit maintenant la densité de l'air (hauteur d'échelle ~8 km) et
-    s'éteint au-delà de ~60 km : silence vu de l'espace. Le grondement des volcans s'entend encore
-    d'avion, pas de l'orbite ; un séisme ne se ressent qu'au sol.
-2.  **L'eau des fleuves** : les fleuves sont de la vraie eau (la surface de l'eau, comme la mer et
-    les lacs), qui remplit leur lit creusé ; le courant y entraîne les vaguelettes vers l'aval,
-    avec des eaux blanches dans les rapides.
-3.  **Biomes dès le début** : la simulation ne part pas d'une boule de feu (la planète est déjà
-    refroidie, avec ses océans), mais il n'y a pas encore de vie : la vue réaliste montre donc un
-    sol minéral nu selon le climat, sans forêts ni prairies. La case « Végétation imaginée »
-    (Affichage) remet la végétation d'après le climat, en attendant l'étape « vie ». La couche
-    « Biomes » montre les milieux que le climat permettrait.
-
-### Bugs corrigés (2026-11-15)
-
-1.  **Mer en rectangles dans les terres** : une cuvette sous le niveau de la mer, loin des côtes,
-    était noyée par la mer, mais seulement dans les morceaux de terrain qui avaient une surface
-    d'eau (d'où des rectangles d'eau sombre sur un désert). Loin des côtes, la mer ne monte plus.
-2.  **Cyclones invisibles** : leur spirale et leur œil étaient calculés par cellule de la
-    simulation (~140 km), plus grosse que l'œil : on ne voyait qu'une tache. Ils sont maintenant
-    dessinés point par point.
-3.  **Grottes** : galeries qui se voyaient à travers le sol, entrées parfaitement rondes, sol de
-    l'entrée en roche brune aux bords déchiquetés, murs gris sous terre, paroi en cercle autour
-    de l'entrée, pluie et brume dans les galeries : refait avec le relief en volume autour de la
-    caméra (un seul relief continu, entrées irrégulières) ; sons de surface coupés sous terre ;
-    formes reproductibles d'une partie à l'autre.
-4.  **Changements de vue brutaux** : la caméra vole vers les lieux, événements, sources et
-    grottes (montée, voyage, descente, le temps que le relief se charge) au lieu de s'y
-    téléporter ; l'événement visé est au centre de l'écran (séismes et glaciers étaient sous la
-    caméra, hors de la vue). Touche Y : arrivée en vol près de la grotte.
-5.  **Fleuves et lacs qui coulaient par grand froid** : les lacs gèlent sous −2 °C, les fleuves
-    par grand froid (les rapides restent ouverts), la glace se couvre de neige.
-6.  **Aurores vues de l'espace** : elles s'effacent entre 8 et 25 km d'altitude.
-7.  **Rubans d'eau surélevés pendant les crues** : entre un point inondé et son voisin sec, la
-    surface de l'eau plongeait jusqu'au niveau de la mer et se dressait en mur vertical de la
-    hauteur de la crue ; elle s'arrête désormais juste sous le sol.
-8.  **Bassins en disques parfaits** (sources, geysers) : contour irrégulier, en lobes.
-9.  **Eau peinte sous l'eau des sources chaudes** : le fond du bassin n'est plus peint en bleu
-    (la vraie eau le teinte selon la profondeur) ; les anneaux minéraux suivent le vrai bord de
-    l'eau.
-11. **Pluies absurdes de l'horloge géologique** : l'estimation rapide du climat, sans saisons,
-    faisait tomber la pluie en bandes étroites (la moitié des terres sous 100 mm/an, des cellules à
-    20 ou 40 m/an). Elle est étalée sur les voisines (les ceintures de pluie se déplacent avec les
-    saisons) et plafonnée à 12 m/an (record terrestre).
-12. **Sources aussi grosses que des fleuves** : leur débit venait de la recharge d'une part de la
-    cellule (~20 000 km²) ; chacune a maintenant son bassin d'alimentation (0,5 à 5 km² pour une
-    source de pente, 50 à 800 km² pour une résurgence karstique).
-14. **Relief en volume au-dessus de la mer** : il s'activait à 30 m au-dessus de l'eau et
-    remplaçait le fond marin, 3 km plus bas (rapport de bug) ; il ne compte plus que la hauteur
-    au-dessus de la roche. Le sol des blocs reprend exactement le relief détaillé et sa pente : plus
-    de carrés de lumière différente.
-15. **Fleuves trop hauts vus de loin** : quand le relief passe à un niveau de détail plus
-    grossier, le lit étroit est lissé et les berges descendaient sous le niveau de l'eau, cachée
-    jusque-là : le fleuve s'étalait en ruban au ras de la plaine. Le niveau caché suit maintenant
-    le sol.
-16. **Aurores coupées net à l'horizon** : bas du rideau doux, qui s'efface vers l'horizon.
-17. **Fleuves tous de la même largeur, vallées en sillons** : lit selon le débit (géométrie
-    hydraulique de Leopold et Maddock : largeur ≈ 3,5·Q^0,5, profondeur ≈ 0,25·Q^0,4 : grand
-    fleuve de 1 000 m³/s ~110 m de large, rivière de 10 m³/s ~11 m, torrent de 1 m³/s ~3,5 m) ;
-    torrents en tête de chaque cours d'eau ; vallées larges et peu profondes en plaine (plaine
-    d'inondation d'une dizaine de largeurs de lit), étroites et en V en montagne ; méandres à
-    l'échelle du lit ; réseau plus dense (rivières dès ~25 m³/s) ; de loin, un trait d'eau
-    proportionnel à la largeur, jusqu'à l'horizon.
-18. **G en orbite** : la marche s'activait à 4 000 km d'altitude (chute vers la planète) ; loin
-    du sol, G fait d'abord atterrir (vol), puis marcher ; transitions plus douces de l'orbite au
-    sol (altitude interpolée en échelle logarithmique).
-19. **Cyclones invisibles de l'espace** : la spirale n'était ajoutée qu'aux ombres des nuages au
-    sol, pas aux nuages eux-mêmes.
-20. **Icebergs invisibles** : ils naissaient au centre de la cellule de mer voisine, à ~140 km de
-    la côte ; ils naissent maintenant au front du glacier, sur la côte, et l'événement montre ce
-    front.
-21. **Flaques visibles seulement de loin** : sombres comme le sol mouillé, elles ne se voyaient
-    qu'en reflet rasant ; elles reflètent maintenant le ciel de près aussi.
-22. **Geysers tantôt hauts, tantôt bas** : leur cycle suivait l'horloge du climat (jusqu'à des
-    mois par seconde, échantillonné au hasard) ; il suit le temps réel (accéléré au plus 3 fois).
-23. **Marées trop faibles** : calculées avec la masse de la Terre, alors que la petite planète,
-    à gravité terrestre, est ~10 fois moins massive ; la Lune y soulève maintenant la mer de
-    ~20-25 cm de marnage (au lieu de 2 cm).
-24. **Texte des détails illisible** (touche I) : retiré de l'écran (il est dans le rapport de
-    bug) ; l'aide des commandes est un panneau, touches dessinées et rangées par thème.
-25. **Vue à travers les grottes** : dans un tunnel de lave aplati, là où le plafond est plus bas
-    que les yeux, la caméra était posée dans la roche, puis y restait coincée (et voyait à travers
-    les parois) ; un passage trop bas compte maintenant comme une paroi, et une caméra coincée est
-    ramenée au centre de la galerie.
-26. **Relief plus loin et plus vite** : les tableaux des morceaux et leur boîte englobante sont
-    préparés par les threads de calcul (le fil principal en envoie davantage par image) ; détail
-    plus loin en qualité haute (9 000 morceaux en mémoire) ; vallées testées sans le bruit des
-    méandres loin des cours d'eau (−15 % de temps de calcul du relief).
-27. **Fentes le long du relief en volume** : un bloc dessine de −0,5 à +15,5 m de sa case ; la
-    dernière demi-rangée revient à ses voisins. S'ils n'étaient pas encore construits, une fente
-    laissait voir le ciel : une case ne remplace la surface qu'une fois ses voisins prêts.
-28. **Icebergs disparus aussitôt vêlés** : supprimés dès que la cellule la plus proche était de
-    la terre (souvent le cas près d'une côte) ; c'est maintenant le relief sous l'iceberg qui
-    compte.
-29. **Courbe de température en dents de scie** : un point toutes les 0,5 s tombait au hasard des
-    saisons quand l'horloge va vite ; la courbe montre une moyenne glissante (jusqu'à un an).
-13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
-    surface de la mer est de nouveau coupée en proportion de la pente.
-10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis
-    autour des ouvertures (calcaire clair, basalte noir des tunnels de lave).
+- **Modifier le terrain** : la croûte modulaire (calques de modification) et le relief en volume
+  autour de la caméra (champ de densité) sont déjà là : terriers, constructions et récifs s'y
+  inscriraient comme des modifications, mémorisées seules, le reste du relief restant calculé à
+  la demande.
 
 # Sources et références
 
@@ -924,3 +820,17 @@ de ces mêmes ouvrages.
   Computer Graphics 11(2), 192-198. — reflets (Blinn-Phong) ; diffusion de Lambert.
 - AMD (2021, 2022). *FidelityFX Super Resolution 1 et 2.* — agrandissement de l'image (touche O),
   fourni par Godot.
+
+# Auteurs et licence
+
+## Auteurs
+
+- **Code et conception technique : Claude**, modèle d'intelligence artificielle créé par
+  [Anthropic](https://www.anthropic.com). L'ensemble du code (simulation, rendu, shaders, tests)
+  a été écrit par Claude au fil de conversations.
+- **Idée, direction et essais : Nicolas Troupel**, qui a imaginé le projet, choisi les étapes et
+  testé chaque version.
+
+## Licence
+
+GNU GPL version 3 (voir le fichier `LICENSE`).
