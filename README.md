@@ -129,7 +129,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
     une seule fois dans un registre (`Ui/UiRegistry.cs`, inscriptions dans `Main.Ui.cs`) et les
     panneaux se construisent seuls.
 - Touches principales (H affiche l'aide complète dans le jeu) :
-  - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : avancer / reculer dans l'axe du regard ; G : vol / marche ;
+  - flèches, Page préc./suiv. : se déplacer, monter, descendre ; molette : avancer / reculer dans l'axe du regard ; G : marche (atterrit d'abord si l'on vole haut) / vol ;
   - C : figer la géologie et passer à l'horloge climatique (confirmation demandée, **sans retour** :
     on choisit d'abord l'âge géologique voulu, la croûte devient ensuite modulaire) ; + / − : vitesse ;
     T : avance rapide jusqu'à 4,5 milliards d'années (avant de figer la géologie) ;
