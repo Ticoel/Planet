@@ -990,9 +990,12 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
     // trajet dans la couche fait au plus 120 km), au lieu de 4 lectures de bruit par pas
     float weather = weather_at(normalize(camera_planet + rd * (0.5 * (t0 + t1))));
     // Rien à faire si aucun nuage aux deux bouts ni au milieu du trajet (cas le plus courant)
-    float probe = max(max(apply_weather(cloud_cover_raw(normalize(camera_planet + rd * t0)), weather).r,
-                          apply_weather(cloud_cover_raw(normalize(camera_planet + rd * t1)), weather).r),
-                      apply_weather(cloud_cover_raw(normalize(camera_planet + rd * (0.5 * (t0 + t1)))), weather).r);
+    // (cyclones compris : leur spirale et leur œil, plus fins que les cellules)
+    vec3 d0 = normalize(camera_planet + rd * t0), d1 = normalize(camera_planet + rd * t1);
+    vec3 dm = normalize(camera_planet + rd * (0.5 * (t0 + t1)));
+    float probe = max(max(apply_cyclones(d0, apply_weather(cloud_cover_raw(d0), weather)).r,
+                          apply_cyclones(d1, apply_weather(cloud_cover_raw(d1), weather)).r),
+                      apply_cyclones(dm, apply_weather(cloud_cover_raw(dm), weather)).r);
     if (probe < 0.03)
         return;
     // (décalage du premier pas : bruit à gradient entrelacé, au grain plus fin et plus régulier
@@ -1011,7 +1014,7 @@ void march_clouds(vec3 up, vec3 rd, float t_scene, vec3 sun, vec2 pixel, out vec
         vec3 p = camera_planet + rd * t;
         float h = ray_height(a, mu, t);
         vec3 d = normalize(p);
-        vec2 cover = apply_weather(cloud_cover_raw(d), weather);
+        vec2 cover = apply_cyclones(d, apply_weather(cloud_cover_raw(d), weather));
         float footprint = t * pixel_angle;
         float density = cloud_density(p, h, cover, footprint);
         if (density > 0.003) {

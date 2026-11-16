@@ -1464,7 +1464,15 @@ void fragment() {
                 // Ronds de pluie : de petites ondes qui s'élargissent et s'effacent
                 vec4 drops = texture_noise(p + vec3(0.0, TIME * 1.5, 0.0), 0.5) * detail_weight(0.5, footprint);
                 vec3 ripples = drops.yzw * rain_now;
-                color = mix(color, color * 0.25 + vec3(0.03, 0.035, 0.04), puddle);
+                // Reflet du ciel : en vision rasante (de loin) presque un miroir ; vue d'au-dessus, un
+                // quart de reflet au moins (sans lui, les flaques proches se confondaient avec le
+                // sol mouillé, aussi sombre qu'elles : on ne les voyait que de loin)
+                vec3 view = normalize(-v_world);
+                float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(up, view), 0.0, 1.0), 5.0);
+                float daylight = smoothstep(-0.1, 0.3, dot(up, sun_direction));
+                vec3 sky_tint = vec3(0.42, 0.52, 0.66) * (0.08 + 0.92 * daylight);
+                vec3 still = mix(color * 0.25 + vec3(0.03, 0.035, 0.04), sky_tint, max(fresnel, 0.3));
+                color = mix(color, still, puddle);
                 roughness = mix(roughness, 0.03, puddle);
                 specular = mix(specular, 0.9, puddle);
                 normal = normalize(mix(normal, normalize(up - (ripples - up * dot(ripples, up)) * 0.25), puddle));

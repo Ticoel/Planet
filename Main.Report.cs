@@ -102,6 +102,14 @@ public partial class Main
             Safe("  Grotte", () => $"{cave.Kind}, entrée à {cave.Origin.DistanceTo(position):0} m, {cave.LengthM:0} m de galeries, jusqu'à {cave.MaxDepthM:0} m sous terre ; " +
                                    $"espace à la caméra : {cave.SpaceAt(position)?.ToString() ?? "aucun"}");
 
+        Section("Détails de la simulation");
+        Safe("Lignes", () =>
+        {
+            var lines = new System.Collections.Generic.List<string>();
+            DetailLines(lines);
+            return "\n" + string.Join("\n", lines);
+        });
+
         Section("Événements");
         Safe("En cours", () => $"{_activity.Eruptions.Count} éruptions, {_cyclones.Cyclones.Count} cyclones, {_tsunami.Waves.Count} tsunamis, crue {_flood.RiseM:0.00} m, " +
                                $"{_icebergs.Count} icebergs, {_calvingCells.Length} fronts de glaciers à la mer");

@@ -56,7 +56,7 @@ public partial class Main
             ProbeTitle = () => ProbeTitle(ProbeCell),
             ProbePinned = () => _probePinned,
             ReleaseProbe = () => _probePinned = false,
-            ToggleHelp = () => _showHelp = !_showHelp,
+            ToggleHelp = () => _helpPanel.Visible = !_helpPanel.Visible,
             BugReport = TakeBugReport,
         });
         RegisterParameters();
@@ -214,7 +214,6 @@ public partial class Main
             Get = () => PlanetColorizer.Vegetation, Set = v => { PlanetColorizer.Vegetation = v; _colorsDirty = true; _climateDataTimer = 0; },
         });
         registry.Add(new SimToggle { Group = "Affichage", Label = "Son", Help = "Touche K", Get = () => !_muted, Set = v => _muted = !v });
-        registry.Add(new SimToggle { Group = "Affichage", Label = "Détails de la simulation", Help = "Touche I", Get = () => _showDetails, Set = v => _showDetails = v });
     }
 
     // --- Couches -------------------------------------------------------------------------------------

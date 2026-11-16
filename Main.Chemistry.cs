@@ -281,7 +281,7 @@ public partial class Main
 
     private static string Percent(double ppm) => ppm >= 10000 ? $"{French(ppm / 10000)} %" : $"{Amount(ppm)} ppm";
 
-    /// <summary>Ligne des détails (touche I) : l'air et la mer.</summary>
+    /// <summary>Ligne des détails (rapport de bug) : l'air et la mer.</summary>
     private string ChemistryLine()
     {
         if (_chemistry == null || !_chemistry.HasData)

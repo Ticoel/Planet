@@ -32,6 +32,10 @@ public partial class Main
     private int _avulsionCount, _tsunamiCount, _cycloneCount, _tornadoCount, _calvedCount;
     private TornadoRenderer _tornadoRenderer;
     private IcebergRenderer _icebergRenderer;
+    // Temps des phénomènes locaux (geysers…) : le temps réel, accéléré au plus 3 fois ; avec
+    // l'horloge du climat (jusqu'à des mois par seconde), le cycle d'un geyser était échantillonné
+    // au hasard d'une image à l'autre : jet tantôt haut, tantôt bas
+    private double _localEventSeconds;
 
     // Tornade en cours (au plus une, près de la caméra)
     private bool _tornado;
@@ -42,6 +46,8 @@ public partial class Main
     private readonly List<(Double3 direction, float size, float heading)> _icebergs = new();
     private double _icebergTimer;
     private int[] _calvingCells = Array.Empty<int>();
+    // Fronts des glaciers qui vêlent : le point de la côte entre le glacier et la mer
+    private Double3[] _calvingFronts = Array.Empty<Double3>();
     private int _calvingVersion = -1;
     private int _glacierCells;
 
@@ -64,6 +70,8 @@ public partial class Main
         _icebergs.Clear();
         _eventsDay = double.NaN;
         _calvingVersion = -1;
+        _calvingCells = Array.Empty<int>();
+        _calvingFronts = Array.Empty<Double3>();
         _glacierCells = 0;
         _recentSlides.Clear();
         _recentQuakes.Clear();
@@ -93,6 +101,7 @@ public partial class Main
         int cell = _grid.NearestCell(cameraDirection, Math.Max(_weatherHint, 0));
         // Temps des événements locaux : le temps réel, un peu accéléré si l'horloge va vite
         double rate = !_running ? 0 : Math.Clamp(ClimateSpeeds[_climateSpeed] * 86400.0, 1.0, 3.0);
+        _localEventSeconds += delta * rate;
 
         RememberQuakes();
         UpdateCyclones(days, cameraDirection);
@@ -343,6 +352,23 @@ public partial class Main
     /// lâche quelques-uns par mois), qui dérivent à ~2 % du vent et fondent (quelques mètres par
     /// jour dans une eau à quelques degrés).
     /// </summary>
+    /// <summary>Point de la côte entre une cellule de terre et une cellule de mer voisines (relief détaillé).</summary>
+    private Double3 CoastPoint(int land, int sea)
+    {
+        Double3 a = Double3.From(_grid.Positions[land]).Normalized(), b = Double3.From(_grid.Positions[sea]).Normalized();
+        var field = _terrain.Field;
+        if (field == null)
+            return (a + b).Normalized();
+        int hint = -1;
+        double lo = 0, hi = 1;
+        for (int k = 0; k < 24; k++)
+        {
+            double t = (lo + hi) / 2;
+            if (field.Sample((a * (1 - t) + b * t).Normalized(), 50, ref hint).Height > 0) lo = t; else hi = t;
+        }
+        return (a * (1 - hi) + b * hi).Normalized();
+    }
+
     private void UpdateIcebergs(double realDelta, double days)
     {
         var hydrology = _climate.Hydrology;
@@ -358,6 +384,7 @@ public partial class Main
                     : $"Les glaciers reculent : {glaciers} cellules couvertes (contre {_glacierCells} l'an dernier)");
             _glacierCells = glaciers;
             var cells = new List<int>();
+            var fronts = new List<Double3>();
             for (int c = 0; c < _grid.CellCount; c++)
             {
                 if (_tectonics.CellElevation[c] <= 0 || !(hydrology.Glacier[c] || _climate.Biomes[c] == Biome.IceSheet))
@@ -366,10 +393,12 @@ public partial class Main
                     if (_tectonics.CellElevation[n] < 0)
                     {
                         cells.Add(n);
+                        fronts.Add(CoastPoint(c, n));
                         break;
                     }
             }
             _calvingCells = cells.ToArray();
+            _calvingFronts = fronts.ToArray();
         }
         Double3 camera = _terrain.Explorer.Position;
         Double3 up = camera.Normalized();
@@ -377,14 +406,17 @@ public partial class Main
         if (_running && _icebergTimer <= 0 && _calvingCells.Length > 0 && _terrain.Explorer.AltitudeAboveGround < 60000)
         {
             _icebergTimer = 4;
-            foreach (int c in _calvingCells)
+            for (int f = 0; f < _calvingFronts.Length; f++)
             {
-                Double3 sea = Double3.From(_grid.Positions[c]).Normalized();
-                if (sea.DistanceTo(up) * TerrainHeightField.RadiusMeters > 300000 || _icebergs.Count >= 80 || _eventRandom.NextDouble() > 0.3)
+                // Au front du glacier, sur la côte, puis un peu au large (le bloc tombe dans la mer)
+                Double3 front = _calvingFronts[f];
+                if (front.DistanceTo(up) * TerrainHeightField.RadiusMeters > 300000 || _icebergs.Count >= 80 || _eventRandom.NextDouble() > 0.3)
                     continue;
-                var (ax, ay) = LavaFlow.TangentFrame(sea);
-                double spread = 60000 / TerrainHeightField.RadiusMeters;
-                Double3 at = (sea + (ax * (_eventRandom.NextDouble() - 0.5) + ay * (_eventRandom.NextDouble() - 0.5)) * spread).Normalized();
+                Double3 sea = Double3.From(_grid.Positions[_calvingCells[f]]).Normalized();
+                Double3 seaward = (sea - front * sea.Dot(front)).Normalized();
+                var (ax, ay) = LavaFlow.TangentFrame(front);
+                double spread = 3000 / TerrainHeightField.RadiusMeters, offshore = (300 + 2500 * _eventRandom.NextDouble()) / TerrainHeightField.RadiusMeters;
+                Double3 at = (front + seaward * offshore + (ax * (_eventRandom.NextDouble() - 0.5) + ay * (_eventRandom.NextDouble() - 0.5)) * spread).Normalized();
                 int hint = -1;
                 if (_terrain.Field.Sample(at, 50, ref hint).Height > -5)
                     continue;   // sur la terre ou un haut-fond : pas d'iceberg

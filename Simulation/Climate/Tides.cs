@@ -57,7 +57,11 @@ public static class Tides
     {
         double radiusKm = PlanetConstants.RadiusKm;
         double ratio = radiusKm / distanceKm;
-        return 1.5 * massRatio * ratio * ratio * ratio * radiusKm * 1000.0;
+        // Rapports de masses donnés pour la Terre ; la planète garde la gravité de la Terre à sa
+        // surface, sa masse suit donc le carré de son rayon (petite planète de 2 000 km : ~10 fois
+        // moins massive, l'astre y soulève 10 fois plus la mer qu'avec la masse de la Terre)
+        double planetMass = Math.Pow(radiusKm / PlanetConstants.EarthRadiusKm, 2);
+        return 1.5 * massRatio / planetMass * ratio * ratio * ratio * radiusKm * 1000.0;
     }
 
     /// <summary>Marée à l'instant donné (jours), amplification côtière comprise.</summary>

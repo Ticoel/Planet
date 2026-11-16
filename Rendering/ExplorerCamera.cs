@@ -164,7 +164,8 @@ public sealed class ExplorerCamera
         _verticalSpeed = 0;
         // Sommet du vol : assez haut pour voir le chemin (le tiers de la distance), durée selon la distance
         _transitionPeak = Math.Min(arc * 0.35, 2.0e6);
-        _transitionSeconds = Math.Clamp(1.2 + 0.9 * Math.Log10(1 + arc / 1000), 1.2, 4.5);
+        double span = Math.Max(arc, Math.Abs(position.Length() - _toPosition.Length()));
+        _transitionSeconds = Math.Clamp(1.2 + 0.9 * Math.Log10(1 + span / 1000), 1.2, 4.5);
         _transitionTime = 0;
         _transition = true;
         UpdateGround();
@@ -187,7 +188,10 @@ public sealed class ExplorerCamera
         Double3 direction = omega < 1e-9 ? b
             : (a * Math.Sin((1 - s) * omega) + b * Math.Sin(s * omega)) / Math.Sin(omega);
         double h0 = _fromPosition.Length() - radius, h1 = _toPosition.Length() - radius;
-        double height = h0 + (h1 - h0) * s + Math.Max(0, _transitionPeak - Math.Max(h0, h1)) * Math.Sin(Math.PI * s);
+        // (altitude interpolée en échelle logarithmique : de l'orbite au sol, la descente ne se fait
+        // pas toute dans la dernière fraction de seconde)
+        double logHeight = Math.Exp(Math.Log(Math.Max(h0, 0) + 10) * (1 - s) + Math.Log(Math.Max(h1, 0) + 10) * s) - 10;
+        double height = logHeight + Math.Max(0, _transitionPeak - Math.Max(h0, h1)) * Math.Sin(Math.PI * s);
         Position = direction.Normalized() * (radius + height);
         // Regard : du regard de départ à celui d'arrivée (en passant par le bas : on voit le sol défiler)
         Double3 heading = _fromHeading * (1 - s) + _toHeading * s;

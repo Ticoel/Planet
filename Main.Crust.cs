@@ -720,7 +720,7 @@ public partial class Main
         });
     }
 
-    /// <summary>Ligne des détails (touche I) : la croûte modulaire.</summary>
+    /// <summary>Ligne des détails (rapport de bug) : la croûte modulaire.</summary>
     private string CrustLine()
     {
         if (!_geologyLocked)

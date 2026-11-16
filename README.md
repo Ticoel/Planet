@@ -135,7 +135,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
     T : avance rapide jusqu'à 4,5 milliards d'années (avant de figer la géologie) ;
   - 1 à 0 : couches (géologie, altitude, plaques, températures, vents, pluie, biomes, vue réaliste) ;
     7 plusieurs fois : vent, pression, courants océaniques, remontées d'eau froide ;
-  - I : détails (Lune, marée sous la caméra, niveau moyen de la mer…) ;
+  - H ou bouton « ? » : panneau des commandes (touches dessinées, par thème) ;
   - O : qualité graphique, trois niveaux (haute au démarrage) :
     - **basse** : image calculée à 59 % puis agrandie (AMD FSR 1), relief allégé, pas d'ombres
       portées, lancer de rayons grossier dans les nuages et les panaches ;
@@ -558,6 +558,23 @@ Faites :
     d'inondation d'une dizaine de largeurs de lit), étroites et en V en montagne ; méandres à
     l'échelle du lit ; réseau plus dense (rivières dès ~25 m³/s) ; de loin, un trait d'eau
     proportionnel à la largeur, jusqu'à l'horizon.
+18. **G en orbite** : la marche s'activait à 4 000 km d'altitude (chute vers la planète) ; loin
+    du sol, G fait d'abord atterrir (vol), puis marcher ; transitions plus douces de l'orbite au
+    sol (altitude interpolée en échelle logarithmique).
+19. **Cyclones invisibles de l'espace** : la spirale n'était ajoutée qu'aux ombres des nuages au
+    sol, pas aux nuages eux-mêmes.
+20. **Icebergs invisibles** : ils naissaient au centre de la cellule de mer voisine, à ~140 km de
+    la côte ; ils naissent maintenant au front du glacier, sur la côte, et l'événement montre ce
+    front.
+21. **Flaques visibles seulement de loin** : sombres comme le sol mouillé, elles ne se voyaient
+    qu'en reflet rasant ; elles reflètent maintenant le ciel de près aussi.
+22. **Geysers tantôt hauts, tantôt bas** : leur cycle suivait l'horloge du climat (jusqu'à des
+    mois par seconde, échantillonné au hasard) ; il suit le temps réel (accéléré au plus 3 fois).
+23. **Marées trop faibles** : calculées avec la masse de la Terre, alors que la petite planète,
+    à gravité terrestre, est ~10 fois moins massive ; la Lune y soulève maintenant la mer de
+    ~20-25 cm de marnage (au lieu de 2 cm).
+24. **Texte des détails illisible** (touche I) : retiré de l'écran (il est dans le rapport de
+    bug) ; l'aide des commandes est un panneau, touches dessinées et rangées par thème.
 13. **Côtes en marches d'escalier** (effet de la correction des crues) : près des côtes, la
     surface de la mer est de nouveau coupée en proportion de la pente.
 10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis

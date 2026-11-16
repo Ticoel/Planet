@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Godot;
 using Planet.Rendering;
 using Planet.Simulation;
+using Planet.Ui;
 using Planet.Simulation.Audio;
 using Planet.Simulation.Climate;
 using Planet.Simulation.Tectonics;
@@ -171,8 +172,7 @@ public partial class Main : Node3D
     private bool _arrowsDirty = true;
 
     private int _hoverCell = -1;
-    private bool _showHelp;
-    private bool _showDetails;
+    private HelpPanel _helpPanel;
     // Ciel, atmosphère, Lune, nuages, météo (étape 10)
     private SkyRenderer _sky;
     private double _cloudTimer;
@@ -989,6 +989,11 @@ public partial class Main : Node3D
         _hud.AddThemeColorOverride("font_outline_color", Colors.Black);
         _hud.AddThemeConstantOverride("outline_size", 4);
         layer.AddChild(_hud);
+        // Aide des commandes, au-dessus de tout le reste
+        var helpLayer = new CanvasLayer { Name = "Help", Layer = 20 };
+        AddChild(helpLayer);
+        _helpPanel = new HelpPanel { Visible = false };
+        helpLayer.AddChild(_helpPanel);
     }
 
     /// <summary>
@@ -1415,7 +1420,7 @@ public partial class Main : Node3D
 
     /// <summary>
     /// Texte à l'écran, volontairement court : horloge, position, couche, valeurs sous la souris.
-    /// [H] affiche l'aide des touches, [I] les détails de la simulation.
+    /// [H] affiche l'aide des touches (panneau HelpPanel).
     /// </summary>
     private void UpdateHud()
     {
@@ -1461,37 +1466,14 @@ public partial class Main : Node3D
         else if (_gameOver)
             lines.Add("FIN : l'étoile est morte. R : nouvelle planète, ou réglez la masse de l'étoile.");
 
-        if (_showDetails)
-        {
-            lines.Add("");
-            DetailLines(lines);
-        }
         if (_noticeTimer > 0 && _notice != null)
             lines.Add(_notice);
-        bool withUi = UiShown;
-        if (_showHelp)
-        {
-            lines.Add("");
-            lines.Add("Molette : avancer / reculer dans l'axe du regard   Clic gauche + glisser : déplacer   Clic droit + glisser : regarder");
-            lines.Add("[↑ ↓] Avancer / reculer   [← →] Tourner   [Page préc. / suiv.] Monter / descendre   [Origine / Fin] Regard haut / bas");
-            lines.Add("[Q D] Pas de côté   [Maj] Plus vite   [G] Vol / marche   [X] Retour en orbite");
-            lines.Add("[C] Figer la géologie et passer au climat (sans retour)   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
-            lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
-            lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
-            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [²] Rapport de bug   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant   [Y] Grotte suivante");
-            lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
-            lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
-            lines.Add("[B] Aller voir l'événement naturel suivant (Maj+B : précédent) : éruption, cyclone, tsunami, crue, tornade, tempête de sable, aurores…");
-            lines.Add("Lieux : [F1] sommet  [F2] fleuve  [F3] lac  [F4] côte  [Maj+F4] falaise  [F5] désert venteux  [F6] averse  [F7] neige  [F9] nuages  [F10] coucher de soleil  [F11] Lune");
-        }
-        else if (!withUi)
-        {
-            lines.Add("[H] Aide   [I] Détails   [Tab] Interface");
-        }
+        if (!UiShown)
+            lines.Add("[H] Aide   [Tab] Interface");
         _hud.Text = string.Join("\n", lines);
     }
 
-    /// <summary>Détails de la simulation (touche I).</summary>
+    /// <summary>Détails de la simulation (dans le rapport de bug, touche ²).</summary>
     private void DetailLines(List<string> lines)
     {
         if (_clock == ClockMode.Geological)
@@ -2014,6 +1996,18 @@ public partial class Main : Node3D
                     _volumeRelief = !_volumeRelief;
                     ShowNotice(_volumeRelief ? "Relief en volume autour de la caméra activé" : "Relief en volume désactivé : surface seule, sans grottes");
                 }
+                else if (!_terrain.Explorer.Walking && _terrain.Explorer.AltitudeAboveGround > 50)
+                {
+                    // Loin du sol : on atterrit d'abord (en vol), puis on marche ; avant, la marche
+                    // s'activait en orbite et la caméra tombait vers la planète depuis 4 000 km
+                    var explorer = _terrain.Explorer;
+                    explorer.Transition(() =>
+                    {
+                        explorer.PlaceAbove(explorer.Position, ExplorerCamera.EyeHeight);
+                        explorer.ToggleWalking();
+                    });
+                    ShowNotice("Atterrissage, puis marche (G : revenir au vol ; Y : grotte suivante)");
+                }
                 else
                     _terrain.Explorer.ToggleWalking();
                 break;
@@ -2074,15 +2068,12 @@ public partial class Main : Node3D
                 ShowNotice(_hideClouds ? "Nuages masqués (N pour les remettre)" : "Nuages affichés");
                 break;
             case Key.H:
-                _showHelp = !_showHelp;
+                _helpPanel.Visible = !_helpPanel.Visible;
                 break;
             case Key.Tab:
                 // Interface masquée : pour contempler ou photographier
                 _uiHidden = !_uiHidden;
                 _ui.Shown = !_uiHidden;
-                break;
-            case Key.I:
-                _showDetails = !_showDetails;
                 break;
             case Key.R:
                 Seed++;

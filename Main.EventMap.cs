@@ -200,9 +200,11 @@ public partial class Main
                 explorer.Face(at + Double3.UnitY * pole, 0.45);
             }));
         }
-        if (_calvingCells.Length > 0)
+        if (_calvingFronts.Length > 0)
         {
-            Double3 front = Cell(_calvingCells[0]);
+            // Le front le plus proche de la caméra
+            Double3 camera = explorer.Position.Normalized();
+            Double3 front = _calvingFronts.OrderBy(f => f.DistanceTo(camera)).First();
             events.Add(new NaturalEvent("Front d'un glacier qui atteint la mer et vêle des icebergs", front, Side(front, 4000, 800)));
         }
         if (snow >= 0)

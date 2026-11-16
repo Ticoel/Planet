@@ -131,7 +131,7 @@ public partial class Main
                     .OrderByDescending(h => h.Position.Dot(cameraDirection)).Take(_habitatSites.Length).ToArray();
         }
 
-        double minutes = _climate.TimeDays * 1440.0;
+        double minutes = _localEventSeconds / 60.0;
         int painted = 0;
         foreach (var habitat in _nearHabitats)
         {
