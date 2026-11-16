@@ -30,7 +30,7 @@ public readonly record struct CaveSpace(bool Solid, double FloorRadius, double C
 public sealed class Cave
 {
     // Irrégularité des parois (m) : galeries et ouvertures jamais parfaitement rondes
-    private const double WallNoiseM = 1.1;
+    private const double WallNoiseM = 1.3;
 
     private readonly List<(Double3 a, double ra, Double3 b, double rb)> _segments = new();
     private readonly Func<double, double, double> _groundZ;     // hauteur du sol dans le repère local
@@ -310,8 +310,10 @@ public sealed class Cave
         return new CaveSpace(false, Origin.Length() + floor, Origin.Length() + ceiling);
     }
 
-    // Bruit de valeur 3D (parois irrégulières), de −1 à 1, deux octaves (4 m et 1,5 m)
-    private static double WallNoise(Double3 q) => 0.7 * ValueNoise(q / 4.0) + 0.3 * ValueNoise(q / 1.5 + new Double3(17.1, 3.3, 9.7));
+    // Bruit de valeur 3D (parois irrégulières), de −1 à 1, trois octaves (7 m, 3 m et 1,2 m) :
+    // galeries qui s'évasent et se resserrent, ouvertures aux contours découpés
+    private static double WallNoise(Double3 q) => 0.5 * ValueNoise(q / 7.0 + new Double3(5.3, 1.7, 8.9))
+                                                  + 0.35 * ValueNoise(q / 3.0) + 0.15 * ValueNoise(q / 1.2 + new Double3(17.1, 3.3, 9.7));
 
     private static double ValueNoise(Double3 p)
     {

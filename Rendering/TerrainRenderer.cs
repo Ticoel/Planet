@@ -1589,25 +1589,21 @@ void fragment() {
                 color = mix(color, vec3(0.74, 0.71, 0.64), field * 0.6);
                 color = mix(color, vec3(0.86, 0.74, 0.16), sulfur * 0.85);
             } else if (kind < 1.5) {
-                // Source chaude : terrasse de dépôts clairs, puis anneaux minéraux (sans vie : soufre
-                // jaune près de l'eau, oxydes de fer orangés puis bruns en s'éloignant, comme à
-                // Dallol), puis l'eau, turquoise au bord et bleu profond au centre
+                // Source chaude : terrasse de dépôts clairs autour du bassin ; anneaux minéraux le
+                // long du vrai bord de l'eau (sans vie : soufre jaune au ras de l'eau, oxydes de fer
+                // orangés puis bruns en s'éloignant, comme à Dallol) ; fond du bassin en dépôts pâles,
+                // que la vraie eau du bassin teinte en turquoise et bleu selon la profondeur
                 float terrace = (1.0 - smoothstep(1.2, 3.2, q)) * 0.75;
                 color = mix(color, ph < 5.0 ? vec3(0.72, 0.7, 0.6) : vec3(0.84, 0.8, 0.72), terrace);
-                if (ph >= 5.0) {
-                    float mats = smoothstep(0.72, 0.84, q) * (1.0 - smoothstep(1.15, 1.45, q)) * mix(0.5, 1.0, heat);
-                    vec3 mat = mix(vec3(0.85, 0.76, 0.3), mix(vec3(0.72, 0.42, 0.16), vec3(0.4, 0.24, 0.12), smoothstep(1.0, 1.35, q)),
-                                   smoothstep(0.8, 0.98, q));
+                float above = -depth;                       // hauteur au-dessus de l'eau du bassin (m)
+                if (ph >= 5.0 && q < 2.0) {
+                    float mats = smoothstep(-0.02, 0.03, above) * (1.0 - smoothstep(0.25, 0.7, above)) * mix(0.5, 1.0, heat);
+                    vec3 mat = mix(vec3(0.85, 0.76, 0.3), mix(vec3(0.72, 0.42, 0.16), vec3(0.4, 0.24, 0.12), smoothstep(0.3, 0.6, above)),
+                                   smoothstep(0.05, 0.3, above));
                     color = mix(color, mat * (0.85 + 0.3 * n8.z), mats);
                 }
-                float water = 1.0 - smoothstep(0.74, 0.8, q);
-                // (source acide : eau laiteuse vert-gris, sans tapis colorés)
-                vec3 pool = ph < 5.0 ? mix(vec3(0.42, 0.56, 0.5), vec3(0.6, 0.7, 0.62), smoothstep(0.2, 0.75, q))
-                                     : mix(vec3(0.02, 0.13, 0.4), vec3(0.1, 0.62, 0.68), smoothstep(0.15, 0.72, q));
-                color = mix(color, pool, water);
-                roughness = mix(roughness, 0.06, water);
-                specular = mix(specular, 0.6, water);
-                normal = normalize(mix(normal, up, water));
+                float floor_deposit = smoothstep(0.0, -0.05, above) * (1.0 - smoothstep(1.4, 2.0, q));
+                color = mix(color, ph < 5.0 ? vec3(0.66, 0.68, 0.6) : vec3(0.8, 0.82, 0.78), floor_deposit);
             } else if (kind < 2.5) {
                 // Mare de boue : argile grise qui bouillonne (bulles en anneaux)
                 float mud = 1.0 - smoothstep(0.85, 1.0, q);
@@ -1617,12 +1613,13 @@ void fragment() {
                 roughness = mix(roughness, 0.3, mud);
                 normal = normalize(mix(normal, up, mud * 0.8));
             } else {
-                // Geyser : cône et tablier de geysérite (silice blanche), bouche sombre, flaques
+                // Geyser : cône et tablier de geysérite (silice blanche), bouche sombre, sol mouillé
                 float apron = 1.0 - smoothstep(1.5, 3.4, q);
                 color = mix(color, vec3(0.86, 0.85, 0.81) * (0.9 + 0.2 * n8.y), apron * 0.85);
-                float puddles = apron * smoothstep(0.6, 0.7, n32.y + 0.3 * n8.x) * smoothstep(1.0, 1.6, q);
-                color = mix(color, vec3(0.25, 0.5, 0.58), puddles * 0.7);
-                roughness = mix(roughness, 0.1, puddles);
+                // (sol mouillé par les retombées du jet, sans eau peinte : la vraie eau est dans le bassin)
+                float wet = apron * smoothstep(0.6, 0.7, n32.y + 0.3 * n8.x) * smoothstep(1.0, 1.6, q);
+                color *= 1.0 - 0.25 * wet;
+                roughness = mix(roughness, 0.25, wet);
                 color = mix(color, vec3(0.08, 0.1, 0.12), 1.0 - smoothstep(0.25, 0.45, q));
             }
         }

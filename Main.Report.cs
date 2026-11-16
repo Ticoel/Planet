@@ -10,7 +10,7 @@ using Planet.Simulation.Terrain;
 namespace Planet;
 
 /// <summary>
-/// Ctrl + F12 : rapport de bug. Une capture de l'écran tel qu'il est (interface comprise) et un
+/// Touche ² (sous Échap ; ` en QWERTY) ou bouton « Rapport » : rapport de bug. Une capture de l'écran tel qu'il est (interface comprise) et un
 /// fichier texte à côté (même nom) qui décrit l'état du jeu à cet instant : caméra, horloge, sol
 /// sous la caméra, terrain, relief en volume, grottes, événements, et les dernières lignes du
 /// journal de Godot (erreurs, avertissements). Les deux fichiers sont à joindre au message.

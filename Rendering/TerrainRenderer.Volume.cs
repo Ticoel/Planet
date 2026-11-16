@@ -55,7 +55,7 @@ public partial class TerrainRenderer
 
     /// <summary>Blocs de volume affichés.</summary>
     public int VolumeChunkCount => _volume.Values.Count(e => e.Instance.IsValid);
-    /// <summary>État du relief en volume, pour le rapport de bug (Ctrl + F12).</summary>
+    /// <summary>État du relief en volume, pour le rapport de bug (touche ²).</summary>
     public string VolumeReport()
     {
         if (_volumeFrame == null)

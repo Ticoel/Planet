@@ -1478,7 +1478,7 @@ public partial class Main : Node3D
             lines.Add("[C] Figer la géologie et passer au climat (sans retour)   [P] Pause   [+ / -] Vitesse de l'horloge   [T] Avance rapide (4,5 Ga)   [R] Nouvelle planète");
             lines.Add("[1] Géologie / altitude   [2] Plaques   [3] Frontières   [4] Âge du plancher   [5] Ensoleillement   [6] Température");
             lines.Add("[7] Vents / pression   [8] Pluie / humidité   [9] Biomes   [0] Vue réaliste   [V] Flèches   [F] Fleuves   [U] Masquer l'eau   [N] Masquer les nuages   [K] Couper le son");
-            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [Ctrl+F12] Rapport de bug   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant   [Y] Grotte suivante");
+            lines.Add("[F12] Photo   [Maj+F12] Vidéo (marche / arrêt)   [²] Rapport de bug   [M] Carte de la couche à cet instant   [L] Volcan en éruption   [J] Source chaude ou geyser suivant   [Y] Grotte suivante");
             lines.Add("[E] Étoile suivante (masse, donc durée de vie) : une nouvelle planète se forme autour");
             lines.Add("[O] Qualité graphique : basse / moyenne / haute   [Tab] Afficher / masquer l'interface   Clic sur la planète : épingler la sonde");
             lines.Add("[B] Aller voir l'événement naturel suivant (Maj+B : précédent) : éruption, cyclone, tsunami, crue, tornade, tempête de sable, aurores…");
@@ -1958,6 +1958,11 @@ public partial class Main : Node3D
         Key code = key.Keycode is >= Key.A and <= Key.Z ? key.Keycode : key.PhysicalKeycode;
         switch (code)
         {
+            case Key.Quoteleft:
+                // Rapport de bug : touche sous Échap (² en AZERTY, ` en QWERTY) ; Ctrl + F12
+                // était pris par le bureau (KDE : afficher le bureau)
+                TakeBugReport();
+                break;
             case Key.Key1 or Key.Kp1: CycleDisplayMode(DisplayMode.Geology, DisplayMode.Elevation); break;
             case Key.Key2 or Key.Kp2: SetDisplayMode(DisplayMode.Plates); break;
             case Key.Key3 or Key.Kp3: SetDisplayMode(DisplayMode.Boundaries); break;
@@ -2038,10 +2043,8 @@ public partial class Main : Node3D
                 _terrain.ShowWater = !_terrain.ShowWater;
                 break;
             case Key.F12:
-                // Photo ; Maj + F12 : démarrer ou arrêter une vidéo ; Ctrl + F12 : rapport de bug
-                if (key.CtrlPressed)
-                    TakeBugReport();
-                else if (key.ShiftPressed)
+                // Photo ; Maj + F12 : démarrer ou arrêter une vidéo
+                if (key.ShiftPressed)
                     _capture.ToggleVideo();
                 else
                     _capture.TakePhoto();

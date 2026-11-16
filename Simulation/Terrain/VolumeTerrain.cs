@@ -92,6 +92,8 @@ public static class VolumeChunkBuilder
     public const int Cells = 16;
     public const double VoxelM = 1.0;
     public const double ChunkM = Cells * VoxelM;
+    // Largeur de la couronne d'éboulis autour des ouvertures des grottes (m)
+    private const double RimWidthM = 3.0;
 
     /// <summary>Construit le bloc (i, j) du repère (tâche de fond : le relief est lu depuis plusieurs threads).</summary>
     public static VolumeChunkMesh Build(VolumeFrame frame, int i, int j, TerrainHeightField field, IReadOnlyList<Cave> caves)
@@ -229,7 +231,17 @@ public static class VolumeChunkBuilder
                     custom0.AddRange(new[] { 0f, 0f, 0f, (float)height });
                     custom1.AddRange(new[] { (float)normal.X, (float)normal.Y, (float)normal.Z, (float)height });
                     water.Add(new Vector2((float)level, inside ? 0f : (float)sample.River));
-                    debris.Add(inside ? Vector2.Zero : new Vector2(sample.Debris, sample.DebrisDay));
+                    // Bord des ouvertures : éboulis (roche claire du calcaire, basalte noir des tunnels
+                    // de lave), plus marqués près de la paroi ; jour « futur » : ils ne s'effacent pas
+                    Vector2 crust = new(sample.Debris, sample.DebrisDay);
+                    if (!inside && wall < RimWidthM)
+                    {
+                        float rim = (float)(1 - Math.Max(0, wall) / RimWidthM);
+                        crust = kind == CaveKind.LavaTube
+                            ? new Vector2(VolcanicDeposits.LavaCode, 1e9f)
+                            : new Vector2(Math.Max(sample.Debris, 0.35f + 0.6f * rim), 1e9f);
+                    }
+                    debris.Add(inside ? Vector2.Zero : crust);
                     float open = inside ? (float)Math.Exp(-Math.Max(0, depth) / 6.0) : 1f;
                     colors.Add(new Color(inside ? 0f : sample.Wetland, inside ? (kind == CaveKind.LavaTube ? 1f : 0.5f) : 0f, 1f, open));
                 }

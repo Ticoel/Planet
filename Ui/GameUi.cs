@@ -27,6 +27,8 @@ public sealed class UiHost
     public required Func<bool> ProbePinned { get; init; }
     public required Action ReleaseProbe { get; init; }
     public required Action ToggleHelp { get; init; }
+    /// <summary>Rapport de bug : capture de l'écran et état du jeu.</summary>
+    public required Action BugReport { get; init; }
 }
 
 /// <summary>
@@ -195,6 +197,7 @@ public sealed partial class GameUi : CanvasLayer
         PanelToggle("Sonde", "Ce qu'on lit en un point (clic sur la planète pour l'épingler)", () => _probePanel);
         PanelToggle("Courbes", "Évolution des grandeurs dans le temps", () => _graphPanel);
         PanelToggle("Journal", "Événements de la simulation", () => _journalPanel);
+        row.AddChild(MakeButton("Rapport", "Rapport de bug : capture de l'écran et état du jeu, dans Images/Planet (touche ² ou `)", () => _host.BugReport()));
         row.AddChild(MakeButton("?", "Aide : touches du clavier (H)", () => _host.ToggleHelp()));
     }
 

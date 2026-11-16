@@ -57,6 +57,7 @@ public partial class Main
             ProbePinned = () => _probePinned,
             ReleaseProbe = () => _probePinned = false,
             ToggleHelp = () => _showHelp = !_showHelp,
+            BugReport = TakeBugReport,
         });
         RegisterParameters();
         RegisterLayers();

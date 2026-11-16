@@ -144,7 +144,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
       haute définition, nuages et panaches plus fins ;
   - U : masquer l'eau ; N : masquer les nuages ; K : couper le son ;
   - E : étoile suivante (masse, donc durée de vie ; une nouvelle planète se forme autour) ;
-  - Ctrl + F12 : **rapport de bug** : capture de l'écran (interface comprise) et fichier texte du
+  - ² (touche sous Échap ; ` en QWERTY) ou bouton « Rapport » : **rapport de bug** : capture de l'écran (interface comprise) et fichier texte du
     même nom qui décrit l'état du jeu (caméra, horloge, sol, terrain, relief en volume, grottes,
     événements, fin du journal de Godot), à joindre au message ;
   - F12 : photo ; Maj + F12 : vidéo (marche / arrêt) ; M : carte de la couche affichée à cet instant
@@ -532,6 +532,11 @@ Faites :
     surface de l'eau plongeait jusqu'au niveau de la mer et se dressait en mur vertical de la
     hauteur de la crue ; elle s'arrête désormais juste sous le sol.
 8.  **Bassins en disques parfaits** (sources, geysers) : contour irrégulier, en lobes.
+9.  **Eau peinte sous l'eau des sources chaudes** : le fond du bassin n'est plus peint en bleu
+    (la vraie eau le teinte selon la profondeur) ; les anneaux minéraux suivent le vrai bord de
+    l'eau.
+10. **Contour des grottes** : parois plus irrégulières (trois échelles), couronne d'éboulis
+    autour des ouvertures (calcaire clair, basalte noir des tunnels de lave).
 
 # Sources et références
 
