@@ -20,6 +20,18 @@ l'orbite au sol.
   rapport de bug (touche ²) ; transitions en vol vers les lieux et les événements.
 - **Emballage** : préréglages d'export Linux et Windows, script `tools/export.sh`.
 
+### Qualité du code et performances (1.0)
+
+- Revue avec les analyseurs .NET (toutes les règles) : directives inutiles, affectations et
+  paramètres inutiles retirés ; aucun avertissement de compilation.
+- Profil du jeu : la synthèse du son est plafonnée à deux images d'avance, par morceaux fixes
+  sans allocation ; le survol de l'interface ne redemande plus la liste des panneaux au moteur ;
+  les courbes ne sont redessinées qu'à l'arrivée d'un point ; le relief en volume n'alloue plus
+  rien à chaque image ; les morceaux de terrain sont préparés hors du fil principal ; le calcul du
+  relief est ~15 % plus rapide.
+- Robustesse : recherche de cellule sûre depuis tous les threads (indice propre à chaque
+  thread), attente du calcul des nuages en quittant, angles bornés avant arc sinus.
+
 ### Corrections avant la 1.0
 
 1.  **Mer en rectangles dans les terres** : une cuvette sous le niveau de la mer, loin des côtes,
