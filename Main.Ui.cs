@@ -113,9 +113,15 @@ public partial class Main
             _hud.AutowrapMode = withUi ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off;
         }
         _hud.Position = withUi ? new Vector2(190f, 50f) : new Vector2(16f, 12f);
+        // (le texte s'arrête au-dessus des panneaux du bas, au lieu de passer dessous)
+        _hud.ClipContents = withUi;
+        Vector2 screen = GetViewport().GetVisibleRect().Size;
         if (withUi)
-            _hud.Size = new Vector2(Math.Max(200f, GetViewport().GetVisibleRect().Size.X - 190f - 300f), 0f);
+            _hud.Size = new Vector2(Math.Max(200f, screen.X - 190f - 300f), Math.Max(100f, screen.Y - 50f - BottomPanelsHeight));
     }
+
+    // Hauteur réservée aux panneaux du bas (sonde, courbes, journal) sous le texte des détails
+    private const float BottomPanelsHeight = 170f;
 
     // --- Paramètres --------------------------------------------------------------------------------
 
