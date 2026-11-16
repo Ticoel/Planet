@@ -13,8 +13,10 @@ public sealed partial class SoundscapePlayer : Node
     private readonly Soundscape _soundscape = new(MixRate, 7);
     private AudioStreamPlayer _player;
     private AudioStreamGeneratorPlayback _playback;
-    private float[] _left = new float[1024], _right = new float[1024];
-    private Vector2[] _frames = new Vector2[1024];
+    // Morceaux fixes (pas d'allocation à chaque image : PushBuffer prend un tableau entier)
+    private const int Chunk = 512;
+    private readonly float[] _left = new float[Chunk], _right = new float[Chunk];
+    private readonly Vector2[] _frames = new Vector2[Chunk];
 
     /// <summary>Ce que la caméra entend en ce moment (mis à jour par Main).</summary>
     public SoundscapeInput Input { get; set; }
@@ -35,28 +37,18 @@ public sealed partial class SoundscapePlayer : Node
     {
         if (_playback == null)
             return;
+        // Juste ce que la carte son consommera d'ici deux images (au plus) : remplir tout le tampon
+        // d'un coup coûtait cher après chaque saccade, et sans fin avec un pilote audio factice
+        int budget = (int)(System.Math.Min(delta, 0.1) * 2 * MixRate) + Chunk;
         int available = _playback.GetFramesAvailable();
-        while (available > 0)
+        while (available >= Chunk && budget > 0)
         {
-            int count = System.Math.Min(available, _left.Length);
-            if (count != _frames.Length)
-            {
-                // Dernier morceau plus court : tampons à la bonne taille (PushBuffer prend tout)
-                _left = new float[count];
-                _right = new float[count];
-                _frames = new Vector2[count];
-            }
             _soundscape.Render(Input, _left, _right);
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < Chunk; i++)
                 _frames[i] = new Vector2(_left[i], _right[i]) * Volume;
             _playback.PushBuffer(_frames);
-            available -= count;
-            if (count < 1024)
-            {
-                _left = new float[1024];
-                _right = new float[1024];
-                _frames = new Vector2[1024];
-            }
+            available -= Chunk;
+            budget -= Chunk;
         }
     }
 }

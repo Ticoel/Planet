@@ -169,17 +169,22 @@ public sealed class UiRegistry
         JournalVersion++;
     }
 
+    /// <summary>Change à chaque point ajouté ou effacé (les courbes ne sont redessinées qu'alors).</summary>
+    public int SeriesVersion { get; private set; }
+
     /// <summary>Enregistre un point de chaque courbe.</summary>
     public void SampleSeries()
     {
         foreach (var series in Series)
             if (series.Sample() is { } value && !double.IsNaN(value))
                 series.Add(value);
+        SeriesVersion++;
     }
 
     public void ClearSeries()
     {
         foreach (var series in Series)
             series.Clear();
+        SeriesVersion++;
     }
 }

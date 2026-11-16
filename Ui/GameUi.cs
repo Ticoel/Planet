@@ -23,7 +23,7 @@ public sealed class UiHost
     public required Action<int> SetQuality { get; init; }
     /// <summary>Cellule sondée (−1 : aucune), son titre, et si la sonde est épinglée.</summary>
     public required Func<int> ProbeCell { get; init; }
-    public required Func<string> ProbeTitle { get; init; }
+    public required Func<int, string> ProbeTitle { get; init; }
     public required Func<bool> ProbePinned { get; init; }
     public required Action ReleaseProbe { get; init; }
     public required Action ToggleHelp { get; init; }
@@ -74,16 +74,19 @@ public sealed partial class GameUi : CanvasLayer
         set => _root.Visible = value;
     }
 
+    private Control[] _hitPanels = System.Array.Empty<Control>();
+    private int _graphVersion = -1;
+
     /// <summary>Le pointeur est au-dessus d'un panneau (le survol de la planète est alors ignoré).</summary>
     public bool PointerOverUi
     {
         get
         {
-            if (!_root.Visible)
+            if (_root == null || !_root.Visible)
                 return false;
             Vector2 mouse = _root.GetGlobalMousePosition();
-            foreach (Node child in _root.GetChildren())
-                if (child is Control { Visible: true } control && control.GetGlobalRect().HasPoint(mouse))
+            foreach (var panel in _hitPanels)
+                if (panel.Visible && panel.GetGlobalRect().HasPoint(mouse))
                     return true;
             return false;
         }
@@ -98,6 +101,8 @@ public sealed partial class GameUi : CanvasLayer
         BuildTopBar();
         BuildSidePanels();
         BuildBottomPanels();
+        // (liste gardée : la redemander à Godot à chaque survol coûtait des appels au moteur)
+        _hitPanels = _root.GetChildren().OfType<Control>().ToArray();
     }
 
     // --- Apparence ---------------------------------------------------------------------------------
@@ -294,7 +299,7 @@ public sealed partial class GameUi : CanvasLayer
             var box = new CheckBox { Text = series.Label, ButtonPressed = series.Shown, FocusMode = Control.FocusModeEnum.None, ClipText = true };
             box.AddThemeColorOverride("font_color", new Color(series.Color.R, series.Color.G, series.Color.B));
             box.AddThemeColorOverride("font_pressed_color", new Color(series.Color.R, series.Color.G, series.Color.B));
-            box.Toggled += pressed => series.Shown = pressed;
+            box.Toggled += pressed => { series.Shown = pressed; _graph.QueueRedraw(); };
             _legendBox.AddChild(box);
         }
         _graph.Series = Registry.Series;
@@ -431,7 +436,7 @@ public sealed partial class GameUi : CanvasLayer
         {
             int cell = _host.ProbeCell();
             _releaseButton.Visible = _host.ProbePinned();
-            _probeTitle.Text = cell >= 0 ? _host.ProbeTitle() : "pointez la planète ; cliquez pour épingler";
+            _probeTitle.Text = cell >= 0 ? _host.ProbeTitle(cell) : "pointez la planète ; cliquez pour épingler";
             var lines = new List<string>();
             if (cell >= 0)
                 foreach (var field in Registry.ProbeFields)
@@ -439,8 +444,12 @@ public sealed partial class GameUi : CanvasLayer
                         lines.Add($"{field.Label} : {text}");
             _probeText.Text = string.Join("\n", lines);
         }
-        if (_graphPanel.Visible)
+        // (redessinées seulement quand un point arrive ou qu'une courbe est montrée ou cachée)
+        if (_graphPanel.Visible && _graphVersion != Registry.SeriesVersion)
+        {
+            _graphVersion = Registry.SeriesVersion;
             _graph.QueueRedraw();
+        }
         if (_journalVersion != Registry.JournalVersion)
         {
             _journalVersion = Registry.JournalVersion;

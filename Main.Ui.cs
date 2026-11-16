@@ -53,7 +53,7 @@ public partial class Main
             GetQuality = () => _quality,
             SetQuality = index => { _quality = index; ApplyQuality(); },
             ProbeCell = () => ProbeCell,
-            ProbeTitle = () => ProbeTitle(ProbeCell),
+            ProbeTitle = ProbeTitle,
             ProbePinned = () => _probePinned,
             ReleaseProbe = () => _probePinned = false,
             ToggleHelp = () => _helpPanel.Visible = !_helpPanel.Visible,

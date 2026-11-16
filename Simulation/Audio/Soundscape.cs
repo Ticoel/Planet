@@ -187,8 +187,18 @@ public sealed class Soundscape
     /// <summary>Coefficient d'un passe-bas à un pôle pour une fréquence de coupure (Hz).</summary>
     private float Coefficient(float cutoffHz) => 1f - MathF.Exp(-2f * MathF.PI * cutoffHz / SampleRate);
 
-    /// <summary>Écrêtage doux : jamais au-delà de ±1, même quand tout se cumule.</summary>
-    private static float SoftClip(float x) => MathF.Tanh(x);
+    /// <summary>
+    /// Écrêtage doux : jamais au-delà de ±1, même quand tout se cumule. Approximation rationnelle
+    /// de tanh (Padé), à moins de 2 % près, bien moins coûteuse (appelée deux fois par échantillon).
+    /// </summary>
+    private static float SoftClip(float x)
+    {
+        if (x <= -3f) return -1f;
+        if (x >= 3f) return 1f;
+        float x2 = x * x;
+        // (près de ±3, l'arrondi pouvait donner 1,0000001)
+        return Math.Clamp(x * (27f + x2) / (27f + 9f * x2), -1f, 1f);
+    }
 
     private static void Lerp(ref float value, float target, float t) => value += (target - value) * t;
 
