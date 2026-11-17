@@ -344,7 +344,9 @@ float plume_envelope(Plume P, vec3 p, out float feature, out float thin, out flo
     float offset = P.height * P.bend * (sc / P.height) * (sc / P.height);
     float r = P.base + (P.steam ? 0.22 : 0.2) * sc;
     float column_top = P.steam ? P.height : P.top + 0.5 * P.thick;
-    float e_column = length(vec2(x - offset, y)) / r + smoothstep(0.9 * column_top, 1.05 * column_top, s) * 4.0;
+    // (vapeur d'une source ou d'un geyser : elle se dissipe en montant, sans sommet net)
+    float e_column = length(vec2(x - offset, y)) / r
+                   + (P.small ? smoothstep(0.45 * column_top, 1.1 * column_top, s) * 2.5 : smoothstep(0.9 * column_top, 1.05 * column_top, s) * 4.0);
     // Ombrelle et traînée : demi-ellipsoïde au-dessus de la colonne côté amont, puis section
     // elliptique qui s'élargit (~0,3 m par m) et s'épaissit vers l'aval, en descendant un peu
     float xt = x - P.x0;
@@ -355,6 +357,9 @@ float plume_envelope(Plume P, vec3 p, out float feature, out float thin, out flo
     float e_trail = xt < 0.0 ? length(vec3(xt / P.spread, y / P.spread, z / P.thick))
                              : length(vec2(y / half_width, z / half_thick));
     e_trail += smoothstep(0.5, 1.0, along / P.len) * 3.0;
+    // Pas d'ombrelle pour la vapeur des petits évents : elle dessinait un champignon à sommet plat
+    if (P.small)
+        e_trail = 9.0;
     // Nuage de cendres au pied de la colonne (éruptions explosives) : la colonne aspire l'air
     // autour, des bouffées retombent et roulent sur les flancs
     float e_skirt = 9.0;

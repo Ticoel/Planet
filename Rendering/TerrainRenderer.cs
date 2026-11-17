@@ -134,6 +134,10 @@ public partial class TerrainRenderer : Node3D
     private ImageTexture _cellDataTexture;
     private byte[] _cellDataBytes;
     private float[] _cellData;
+    // Sol mouillé de chaque cellule (0 à 255), pour le sol loin de la caméra
+    private Image _cellWetImage;
+    private ImageTexture _cellWetTexture;
+    private byte[] _cellWetBytes;
     private long _frame;
     // Relief affiché (_generation : le plus récent, peut-être encore en préparation)
     private int _displayGeneration;
@@ -277,6 +281,10 @@ public partial class TerrainRenderer : Node3D
         _cellDataTexture = ImageTexture.CreateFromImage(_cellDataImage);
         SetBoth("cell_data", _cellDataTexture);
         SetBoth("has_climate", false);
+        _cellWetBytes = new byte[CellColorLayer.TextureWidth * _cellColorHeight];
+        _cellWetImage = Image.CreateFromData(CellColorLayer.TextureWidth, _cellColorHeight, false, Image.Format.R8, _cellWetBytes);
+        _cellWetTexture = ImageTexture.CreateFromImage(_cellWetImage);
+        _material.SetShaderParameter("cell_wet", _cellWetTexture);
     }
 
     /// <summary>Numéro de la cellule la plus proche de chaque pixel des 6 faces du cube (CellIndexResolution² par face).</summary>
@@ -308,7 +316,9 @@ public partial class TerrainRenderer : Node3D
     /// simulé (horloge géologique), limite de la neige selon la latitude.
     /// </summary>
     /// <param name="canopy">Densité de la canopée des forêts (0 à 1) ou, en négatif, part de sable des déserts ; ou null.</param>
-    public void UpdateCellClimate(float[] temperature, float[] snowMm, float[] elevationKm, float[] canopy = null)
+    /// <param name="wetness">Sol mouillé de chaque cellule (0 à 1), pour le sol loin de la caméra
+    /// (près d'elle, le modèle local du sol prend le relais).</param>
+    public void UpdateCellClimate(float[] temperature, float[] snowMm, float[] elevationKm, float[] canopy = null, float[] wetness = null)
     {
         if (_cellDataImage == null)
             return;
@@ -331,6 +341,13 @@ public partial class TerrainRenderer : Node3D
         _cellDataImage.SetData(CellColorLayer.TextureWidth, _cellColorHeight, false, Image.Format.Rgbaf, _cellDataBytes);
         _cellDataTexture.Update(_cellDataImage);
         SetBoth("has_climate", true);
+        if (wetness != null && _cellWetBytes != null)
+        {
+            for (int cell = 0; cell < wetness.Length; cell++)
+                _cellWetBytes[cell] = (byte)Math.Clamp((int)(wetness[cell] * 255f + 0.5f), 0, 255);
+            _cellWetImage.SetData(CellColorLayer.TextureWidth, _cellColorHeight, false, Image.Format.R8, _cellWetBytes);
+            _cellWetTexture.Update(_cellWetImage);
+        }
     }
 
     /// <summary>
@@ -388,6 +405,19 @@ public partial class TerrainRenderer : Node3D
         Explorer.SetField(field);
         for (int face = 0; face < CubeSphere.FaceCount; face++)
             _cache[new ChunkKey(face, 0, 0, 0).Packed] = CreateEntry(TerrainChunkBuilder.Build(field, new ChunkKey(face, 0, 0, 0)), _generation);
+    }
+
+    /// <summary>
+    /// Le relief détaillé a changé partout sans changer d'objet (dunes posées ou retirées) : tous
+    /// les morceaux sont refaits en arrière-plan puis remplacés d'un coup, le relief en volume
+    /// aussi.
+    /// </summary>
+    public void RefreshRelief()
+    {
+        if (Field == null)
+            return;
+        SetField(Field, progressive: true);
+        ClearVolume();
     }
 
     /// <summary>
@@ -1148,6 +1178,17 @@ vec3 layer_color_smooth(vec3 d, bool land) {
 
 // Climat des cellules voisines, mélangé (lu cellule par cellule, la limite de la neige
 // dessinait des marches d'escalier)
+// Sol mouillé des cellules (pluie récente, eau du sol) : le sol loin de la caméra
+uniform sampler2D cell_wet : filter_nearest;
+float cell_wetness(ivec4 cells, vec4 weights) {
+    if (!has_climate)
+        return 0.0;
+    float wet = 0.0;
+    for (int k = 0; k < 4; k++)
+        wet += texelFetch(cell_wet, cell_pixel(cells[k]), 0).r * weights[k];
+    return wet;
+}
+
 vec4 climate_data(ivec4 cells, vec4 weights) {
     if (!has_climate)
         return vec4(0.0);
@@ -1369,17 +1410,19 @@ void fragment() {
     vec4 n2 = texture_noise(p, 2.0) * detail_weight(2.0, footprint);
 
     float slope0 = 1.0 - clamp(dot(normal, up), 0.0, 1.0);
-    float rockiness = smoothstep(0.12, 0.3, slope0 + 0.08 * n128.x);
-    // Micro-relief plus fin que le maillage : on penche la normale selon la pente des bruits
-    // (roche rugueuse, sédiments plus doux, rien sous la neige ni au fond de l'eau)
-    float roughGround = mix(0.10, 0.28, rockiness) * (depth > 0.0 ? 0.3 : 1.0);
-    vec3 bump = (n32.yzw * 0.8 + n8.yzw * 0.6 + n2.yzw * 0.4) * roughGround;
     // Cellules voisines et poids du fondu, une fois pour toutes (couleurs, neige, canopée)
     ivec4 cells = ivec4(0);
     vec4 weights = vec4(0.0);
     if (coloring == 1 || coloring == 2 || (coloring == 0 && has_climate))
         smooth_cells(up, cells, weights);
     vec4 cdata = coloring == 2 || coloring == 0 ? climate_data(cells, weights) : vec4(0.0);
+    // (pas sur les faces raides des dunes : le sable tient jusqu'à ~34°)
+    float duneSand = coloring == 2 ? max(-cdata.w, 0.0) : 0.0;
+    float rockiness = smoothstep(0.12 + 0.12 * duneSand, 0.3 + 0.1 * duneSand, slope0 + 0.08 * n128.x);
+    // Micro-relief plus fin que le maillage : on penche la normale selon la pente des bruits
+    // (roche rugueuse, sédiments plus doux, rien sous la neige ni au fond de l'eau)
+    float roughGround = mix(0.10, 0.28, rockiness) * (depth > 0.0 ? 0.3 : 1.0);
+    vec3 bump = (n32.yzw * 0.8 + n8.yzw * 0.6 + n2.yzw * 0.4) * roughGround;
     float snowBase = coloring == 1 || coloring == 3 ? 0.0 : snow_cover(cdata, up, h);
     // Canopée des forêts (w > 0) ou part de sable des déserts (w < 0), vue réaliste (étape 12a)
     float canopy = coloring == 2 ? max(cdata.w, 0.0) : 0.0;
@@ -1493,10 +1536,12 @@ void fragment() {
         }
         // Pluie : le sol mouillé fonce et luit ; quand il pleut plus vite que le sol ne boit, l'eau
         // stagne en flaques sur le plat et dans les creux du micro-relief, avant de s'infiltrer.
-        // (autour de la caméra seulement : c'est là que le climat du moment est connu)
-        if ((ground_wet > 0.01 || puddle_mm > 0.05) && coloring != 1 && coloring != 3) {
+        // Autour de la caméra, le modèle du sol au fil des heures ; au loin, la pluie récente de
+        // chaque cellule (avant, au-delà de 3 à 10 km, le sol redevenait sec sous la même averse)
+        float far_wet = cell_wetness(cells, weights);
+        if ((ground_wet > 0.01 || puddle_mm > 0.05 || far_wet > 0.01) && coloring != 1 && coloring != 3) {
             float near = 1.0 - smoothstep(3000.0, 10000.0, length(v_world));   // (v_world : relatif à la caméra)
-            float wet = ground_wet * near * (1.0 - 0.5 * rockiness);
+            float wet = mix(far_wet, ground_wet, near) * (1.0 - 0.5 * rockiness);
             color *= mix(1.0, 0.6, wet);
             roughness = mix(roughness, 0.4, wet);
             specular = mix(specular, 0.45, wet);

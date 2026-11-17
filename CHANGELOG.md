@@ -1,5 +1,30 @@
 # Historique des versions
 
+## 1.0.2 — 2026-11-17
+
+Corrections d'après les rapports de bug de la 1.0.1.
+
+- **Fleuves coupés** (« le fleuve s'arrête et reprend plus loin ») : sur deux planètes de test,
+  le lit des grands fleuves était à sec sur 70 à 80 % des points. L'eau est maintenant posée sur
+  le lit final (volcans, cratères, embouchures et deltas compris) ; un test vérifie que le lit
+  des grands fleuves est en eau sur au moins 99 % de leur cours.
+- **Berges trop rectilignes** : largeur qui varie le long du fleuve, bords découpés, bancs de
+  sable et îles sur les grands fleuves.
+- **Relief en volume inactif** depuis la 1.0.1 (« 0 remplacent la surface ») : le morceau de
+  terrain sous chaque bloc n'était jamais trouvé. Grottes et ouvertures de nouveau creusées.
+- **Dunes** : de vraies dunes dans le relief des déserts de sable (crêtes de ~30 m espacées de
+  quelques centaines de mètres, dunes plus petites dessus, croissants isolés là où le sable
+  manque, mers de sable et plaines caillouteuses), là où le climat met le sable.
+- **Sol sec au loin sous l'averse** : au loin, le sol est mouillé d'après la pluie récente de
+  chaque région (avant, il redevenait sec au-delà de 3 à 10 km).
+- **Vapeur sous l'eau** : une source côtière recouverte par la mer ne fume plus ; la brume et
+  les panaches s'arrêtent à la surface de l'eau.
+- **Vapeur des geysers et des sources** : plus de sommet plat en champignon, elle se dissipe en
+  montant.
+- **Icebergs** : vêlés seulement devant une vraie mer (le front tombait parfois à terre, et rien
+  n'était vêlé), poussés vers le large jusqu'à assez de fond ; ils dérivent maintenant au temps
+  réel (avant, à 6 h par seconde, ils filaient hors de la vue aussitôt vêlés).
+
 ## 1.0.1 — 2026-11-16
 
 Corrections d'après les rapports de bug de la 1.0 (touche ²), et nouvelle chasse aux bugs.

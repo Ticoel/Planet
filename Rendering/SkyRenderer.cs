@@ -809,6 +809,9 @@ void sky() {
     /// <summary>Cyclones en cours (voir ShaderLibrary.Clouds : apply_cyclones).</summary>
     public void SetCyclones(Vector4[] cyclones) => _postMaterial.SetShaderParameter("cyclones", cyclones);
 
+    /// <summary>Niveau de la mer (m) : le voile d'atmosphère et les panaches s'arrêtent à la surface de l'eau.</summary>
+    public void SetSeaLevel(float seaLevel) => _postMaterial?.SetShaderParameter("sea_level", seaLevel);
+
     public void SetEruptions(int count, Vector4[] vents, Vector4[] shapes, Vector4[] winds)
     {
         _postMaterial.SetShaderParameter("eruption_count", count);
@@ -832,6 +835,8 @@ uniform bool underground = false;
 uniform vec3 fog_color = vec3(0.7);
 uniform float fog_height = 500.0;
 uniform float ground_altitude = 0.0;
+// Niveau de la mer (m) : la profondeur lue est celle du fond (l'eau, transparente, ne l'écrit pas)
+uniform float sea_level = 0.0;
 // Qualité : nombre de pas dans les nuages et dans les panaches, longueur d'un pas dans un panache
 // (en tailles de volute)
 uniform int cloud_steps = 36;
@@ -1055,6 +1060,16 @@ void fragment() {
     float t_scene = sky ? 1e30 : length(view.xyz);
     vec3 up = normalize(local_up);
     vec3 sun = normalize(sun_direction);
+    // Au-dessus de la mer, la scène s'arrête à la surface de l'eau : sans cela, la vapeur et la
+    // brume entre la surface et le fond se voyaient à travers l'eau, comme sous la mer
+    if (!sky && camera_altitude > sea_level) {
+        float rc = planet_global_radius + camera_altitude;
+        float b = dot(rd, up) * rc;
+        float c = (camera_altitude - sea_level) * (2.0 * planet_global_radius + camera_altitude + sea_level);
+        float disc = b * b - c;
+        if (b < 0.0 && disc > 0.0)
+            t_scene = min(t_scene, -b - sqrt(disc));
+    }
 
     // Perspective atmosphérique sur le relief (le ciel a déjà la sienne)
     vec3 inscatter = vec3(0.0), transmittance = vec3(1.0);

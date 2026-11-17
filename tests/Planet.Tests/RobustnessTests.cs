@@ -142,6 +142,28 @@ public static class RobustnessTests
                 }
                 Assert.True(steps > 100 && wet >= 0.99 * steps, $"{where} : lit des grands fleuves en eau sur {wet} points de {steps}");
 
+                // Dunes : du sable partout ; sur les plaines, des dunes de quelques dizaines de mètres
+                // (ni plates ni démesurées), sans aiguille ; puis on les retire
+                var sand = Enumerable.Repeat(1f, world.Grid.CellCount).ToArray();
+                double tallest = 0;
+                foreach (int c in land.Where(c => world.Tectonics.CellElevation[c] < 0.6f).Take(40))
+                {
+                    Double3 center = Double3.From(world.Grid.Positions[c]).Normalized();
+                    var (ax, ay) = LavaFlow.TangentFrame(center);
+                    for (int j = 0; j < n; j++)
+                        for (int i = 0; i < n; i++)
+                        {
+                            Double3 d = (center + (ax * (i - n / 2) + ay * (j - n / 2)) * (40.0 / TerrainHeightField.RadiusMeters)).Normalized();
+                            world.Field.DuneShare = sand;
+                            double with = world.Field.Sample(d, 30, ref hint).Height;
+                            world.Field.DuneShare = null;
+                            double dune = with - world.Field.Sample(d, 30, ref hint).Height;
+                            Assert.True(double.IsFinite(dune) && dune > -1e-6 && dune < 80, $"{where} : dune de {dune:0.0} m");
+                            tallest = Math.Max(tallest, dune);
+                        }
+                }
+                Assert.True(tallest > 8, $"{where} : pas de dunes sur les plaines de sable (au plus {tallest:0.0} m)");
+
                 // Morceaux de terrain à tous les niveaux
                 for (int i = 0; i < 60; i++)
                 {

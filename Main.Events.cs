@@ -116,7 +116,7 @@ public partial class Main
         // Dunes : elles avancent avec le vent dominant (motif périodique : décalage borné)
         _terrain.SetShaderParameter("dune_shift", (float)(day / 365.25 * DuneSpeedMPerYear % 2048.0));
         UpdateTornado(delta, delta * rate, cell);
-        UpdateIcebergs(delta, days);
+        UpdateIcebergs(delta, days, delta * rate);
     }
 
     // --- Cyclones -----------------------------------------------------------------------------------
@@ -370,10 +370,11 @@ public partial class Main
     /// lâche quelques-uns par mois), qui dérivent à ~2 % du vent et fondent (quelques mètres par
     /// jour dans une eau à quelques degrés).
     /// </summary>
-    private void UpdateIcebergs(double realDelta, double days)
+    /// <param name="localSeconds">Temps des phénomènes locaux écoulé (s).</param>
+    private void UpdateIcebergs(double realDelta, double days, double localSeconds)
     {
         var hydrology = _climate.Hydrology;
-        if (hydrology != null && _calvingVersion != _climate.HydrologyVersion)
+        if (hydrology != null && _terrain.Field != null && _calvingVersion != _climate.HydrologyVersion)
         {
             _calvingVersion = _climate.HydrologyVersion;
             // Glaciers : recalculés chaque année d'après la neige qui ne fond plus ; ils avancent
@@ -386,12 +387,19 @@ public partial class Main
             _glacierCells = glaciers;
             var cells = new List<int>();
             var fronts = new List<Double3>();
+            // (seulement vers une vraie mer, au niveau actuel : le centre de la cellule voisine
+            // doit être sous l'eau ; sinon le « front » tombait à terre, et aucun iceberg ne
+            // pouvait être vêlé)
+            double level = _displaySeaLevel + _climate.SeaLevelMeters;
+            int frontHint = -1;
             for (int c = 0; c < _grid.CellCount; c++)
             {
                 if (_tectonics.CellElevation[c] <= 0 || !(hydrology.Glacier[c] || _climate.Biomes[c] == Biome.IceSheet))
                     continue;
+                if (_terrain.Field.Sample(Double3.From(_grid.Positions[c]).Normalized(), 200, ref frontHint).Height <= level)
+                    continue;
                 foreach (int n in _grid.Neighbors[c])
-                    if (_tectonics.CellElevation[n] < 0)
+                    if (_terrain.Field.Sample(Double3.From(_grid.Positions[n]).Normalized(), 200, ref frontHint).Height < level - 20)
                     {
                         cells.Add(n);
                         fronts.Add(CoastPoint(c, n));
@@ -420,11 +428,19 @@ public partial class Main
                 Double3 sea = Double3.From(_grid.Positions[_calvingCells[f]]).Normalized();
                 Double3 seaward = (sea - front * sea.Dot(front)).Normalized();
                 var (ax, ay) = LavaFlow.TangentFrame(front);
-                double spread = 3000 / TerrainHeightField.RadiusMeters, offshore = (300 + 2500 * _eventRandom.NextDouble()) / TerrainHeightField.RadiusMeters;
-                Double3 at = (front + seaward * offshore + (ax * (_eventRandom.NextDouble() - 0.5) + ay * (_eventRandom.NextDouble() - 0.5)) * spread).Normalized();
+                // Le bloc tombe dans la mer : on avance vers le large jusqu'à ~10 m de fond (au plus
+                // 12 km), puis on l'écarte un peu le long du front
                 int hint = -1;
-                if (_terrain.Field.Sample(at, 50, ref hint).Height > seaLevel - 5)
-                    continue;   // sur la terre ou un haut-fond : pas d'iceberg
+                double r = TerrainHeightField.RadiusMeters, offshore = 300 + 600 * _eventRandom.NextDouble();
+                Double3 at = front;
+                bool afloat = false;
+                for (int step = 0; step < 40 && !afloat; step++, offshore += 300)
+                {
+                    at = (front + seaward * (offshore / r) + (ax * (_eventRandom.NextDouble() - 0.5) + ay * (_eventRandom.NextDouble() - 0.5)) * (1500 / r)).Normalized();
+                    afloat = _terrain.Field.Sample(at, 50, ref hint).Height < seaLevel - 10;
+                }
+                if (!afloat)
+                    continue;   // pas de mer assez profonde devant ce front
                 _icebergs.Add((at, (float)(20 + 130 * Math.Pow(_eventRandom.NextDouble(), 2)), (float)(_eventRandom.NextDouble() * 6.28)));
                 _calvedCount++;
             }
@@ -433,8 +449,11 @@ public partial class Main
         {
             var (direction, size, heading) = _icebergs[i];
             int c = _icebergHint = _grid.NearestCell(direction.ToVector3(), Math.Max(_icebergHint, 0));
+            // Dérive à ~2 % du vent, au temps des phénomènes locaux (temps réel, accéléré 3 fois au
+            // plus) : au temps du climat (6 h par seconde), un iceberg filait à des kilomètres par
+            // seconde et sortait de la vue aussitôt vêlé. La fonte, elle, suit le climat
             Double3 drift = Double3.From(_climate.Winds.Wind[c]) * 0.02;
-            direction = (direction + drift * (days * 86400 / TerrainHeightField.RadiusMeters)).Normalized();
+            direction = (direction + drift * (localSeconds / TerrainHeightField.RadiusMeters)).Normalized();
             size -= (float)(days * Math.Max(0.3, _climate.SurfaceTemperature[c] + 2) * 1.5);
             bool far = direction.DistanceTo(up) * TerrainHeightField.RadiusMeters > 400000;
             // Échoué sur la côte : le relief détaillé sous l'iceberg (et non la cellule la plus

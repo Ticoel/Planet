@@ -785,6 +785,71 @@ public sealed class TerrainHeightField
     /// </summary>
     public CrustEdits Edits { get; set; }
 
+    // --- Dunes ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Part de sable des déserts de chaque cellule (0 à 1, d'après les biomes du climat simulé ;
+    /// null : pas de dunes). Remplacée d'un bloc (lue depuis les threads du terrain).
+    /// </summary>
+    public float[] DuneShare { get; set; }
+
+    /// <summary>Espacement (m) des grandes dunes et leur hauteur (m) : 300 à 600 m, 20 à 40 m dans les ergs.</summary>
+    private const double DuneWavelength = 1100, DuneHeightM = 34;
+
+    /// <summary>
+    /// Dunes des déserts de sable : crêtes vives et creux larges (bruit en crêtes), allongées
+    /// du nord au sud (perpendiculaires aux alizés, qui soufflent d'est en ouest), avec des dunes
+    /// plus petites par-dessus ; isolées en croissants là où le sable manque ; en mers de sable
+    /// (ergs) séparées de plaines caillouteuses (regs) ; seulement sur le plat.
+    /// </summary>
+    private double Dunes(Double3 position, Double3 direction, ReadOnlySpan<int> cells, double baseHeight, double baseSlope, double minWavelength)
+    {
+        var shares = DuneShare;
+        if (shares == null || baseHeight < 5)
+            return 0;
+        double share = BlendValue(direction, cells, shares);
+        if (share <= 0.01)
+            return 0;
+        double N(double x, double y, double z, int salt) => GradientNoise.Sample(x, y, z, Seed + salt);
+        var (plain, hill, _, _) = ReliefMix(baseHeight, baseSlope);
+        double erg = SmoothStep(-0.15, 0.3, N(position.X / 60000, position.Y / 60000, position.Z / 60000, 501));
+        double where = share * Math.Min(1, plain + 0.5 * hill) * (1 - SmoothStep(0.01, 0.03, baseSlope)) * erg;
+        if (where <= 0.01)
+            return 0;
+        double total = 0;
+        for (int octave = 0; octave < 2; octave++)
+        {
+            double wavelength = octave == 0 ? DuneWavelength : DuneWavelength / 4;
+            double fine = 1 - SmoothStep(0.2 * wavelength, 0.45 * wavelength, minWavelength);
+            if (fine <= 0)
+                continue;
+            int salt = 502 + 10 * octave;
+            // (étiré le long de l'axe des pôles : crêtes nord-sud)
+            double ridge = 1 - Math.Abs(N(position.X / wavelength, position.Y / (4 * wavelength), position.Z / wavelength, salt));
+            double crest = Math.Pow(Math.Clamp(ridge, 0, 1), 3);
+            double supply = SmoothStep(-0.45, 0.45, N(position.X / (2.5 * wavelength), position.Y / (2.5 * wavelength), position.Z / (2.5 * wavelength), salt + 1));
+            total += (octave == 0 ? 1.0 : 0.2) * crest * supply * fine;
+        }
+        return DuneHeightM * where * total;
+    }
+
+    /// <summary>Valeur par cellule mélangée entre les cellules proches (mêmes poids que l'altitude).</summary>
+    private double BlendValue(Double3 p, ReadOnlySpan<int> cells, float[] values)
+    {
+        double weightSum = 0, sum = 0;
+        foreach (int cell in cells)
+        {
+            double q2 = (p - _positions[cell]).LengthSquared() / _supportSquared[cell];
+            if (q2 >= 1)
+                continue;
+            double q = Math.Sqrt(q2);
+            double w = Math.Pow(1 - q, 4) * (4 * q + 1);
+            weightSum += w;
+            sum += w * values[cell];
+        }
+        return weightSum > 0 ? sum / weightSum : values[cells[0]];
+    }
+
     /// <summary>Relief sans la croûte modulaire (le relief « naturel », replats compris).</summary>
     public double BaseTerrainHeight(Double3 direction, double minWavelength, ref int hint)
     {
@@ -826,7 +891,8 @@ public sealed class TerrainHeightField
         // Volcans et cratères avant les vallées : les fleuves creusent leurs flancs. (Ajoutés
         // après, ils soulevaient un lit creusé sur la plaine d'en dessous, parfois annulé par la
         // règle du fond au-dessus de la mer : un lit à sec, des centaines de mètres sous l'eau)
-        double height = baseHeight + detail + folds + LandformHeight(direction, near[0], minWavelength);
+        double height = baseHeight + detail + folds + LandformHeight(direction, near[0], minWavelength)
+                        + Dunes(position, direction, near, baseHeight, baseSlope, minWavelength) * (1 - valley.Floor);
         // Le fond des vallées reste au-dessus de la mer tant que le sol l'est : le fleuve coule
         // jusqu'à la côte au lieu de transformer toute la plaine en bras de mer
         // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait

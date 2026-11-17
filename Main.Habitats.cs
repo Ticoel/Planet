@@ -133,9 +133,14 @@ public partial class Main
 
         double minutes = _localEventSeconds / 60.0;
         int painted = 0;
+        // (niveau actuel de la mer : une source côtière que la mer recouvre ne fume pas, et son
+        // bassin n'est pas peint sur le fond ; avant, sa vapeur montait du fond, sous l'eau)
+        double seaLevel = _displaySeaLevel + (climate ? _climate.SeaLevelMeters : 0f);
         foreach (var habitat in _nearHabitats)
         {
             Double3 anchor = Anchor(habitat);
+            if (anchor.Length() - TerrainHeightField.RadiusMeters < seaLevel + 0.3)
+                continue;
             Double3 relative = anchor - camera;
             _habitatSites[painted] = new Vector4((float)relative.X, (float)relative.Y, (float)relative.Z, habitat.RadiusM);
             _habitatKinds[painted] = new Vector4((float)habitat.Kind, habitat.TemperatureC, habitat.Ph, habitat.Variation);

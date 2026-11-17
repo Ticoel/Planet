@@ -317,7 +317,8 @@ public partial class Main : Node3D
         {
             bool climate = _clock == ClockMode.Climate && _climate.HasTemperature;
             _terrain.UpdateCellClimate(climate ? _climate.SurfaceTemperature : null, _climate.Snow, _tectonics.CellElevation,
-                                       climate ? ComputeCanopy() : null);
+                                       climate ? ComputeCanopy() : null, climate ? ComputeWetness() : null);
+            UpdateDunes(climate);
             _climateDataTimer = 0.25;
         }
         _terrain.Coloring = ColoringFor(_displayMode);
@@ -907,7 +908,7 @@ public partial class Main : Node3D
         _terrainTask = null;
         var stopwatch = Stopwatch.StartNew();
         var field = new TerrainHeightField(_grid, (float[])_tectonics.CellElevation.Clone(), Seed, TerrainRunoff(), _tectonics.SnapshotLandforms(),
-                                           HabitatBenches(), _glacial.SeaLevelM) { Edits = _crust };
+                                           HabitatBenches(), _glacial.SeaLevelM) { Edits = _crust, DuneShare = _duneShare };
         _terrain.SetField(field, progressive);
         _terrainSource = _tectonics;
         _terrainTimeMyr = _tectonics.TimeMyr;
@@ -1068,6 +1069,7 @@ public partial class Main : Node3D
         _terrain.SetShaderParameter("tide_sun", new Vector4(tide.SunDirection.X, tide.SunDirection.Y, tide.SunDirection.Z, tide.SunAmplitude));
         _terrain.SetShaderParameter("tide_high", tide.MaxHeight);
         _terrain.SetShaderParameter("sea_level", _displaySeaLevel + (climate ? _climate.SeaLevelMeters : 0f));
+        _sky.SetSeaLevel(_displaySeaLevel + (climate ? _climate.SeaLevelMeters : 0f));
         _terrain.SetShaderParameter("cloud_time", (float)((_climate.TimeDays * 86400.0) % SkyRenderer.CloudTimeWrapSeconds));
 
         var frame = new SkyFrame
@@ -1110,7 +1112,57 @@ public partial class Main : Node3D
     }
 
     private float[] _canopy;
+    private float[] _wetness;
     private bool _hideClouds;
+
+    /// <summary>
+    /// Sol mouillé de chaque cellule (0 à 1), pour le sol loin de la caméra : la pluie des
+    /// derniers jours surtout, un peu l'eau du sol ; rien sur le sol gelé.
+    /// </summary>
+    private float[] ComputeWetness()
+    {
+        _wetness ??= new float[_grid.CellCount];
+        var rain = _climate.Statistics.RecentPrecipitation;
+        for (int cell = 0; cell < _wetness.Length; cell++)
+        {
+            double soil = Math.Clamp(_climate.SoilWater[cell] / 150.0, 0, 1);
+            double wet = 0.85 * Smooth(2, 25, rain[cell]) + 0.2 * soil * soil;
+            _wetness[cell] = _climate.SurfaceTemperature[cell] < -1f ? 0f : (float)Math.Clamp(wet, 0, 1);
+        }
+        return _wetness;
+    }
+
+    // Part de sable des déserts de chaque cellule, posée sur le relief détaillé (dunes) ; null :
+    // pas de dunes (horloge géologique, sans climat simulé)
+    private float[] _duneShare;
+
+    /// <summary>
+    /// Dunes : là où le climat simulé fait des déserts (sable des déserts chauds, moins dans les
+    /// déserts froids, comme la couleur du sol). Le relief est refait, progressivement, quand les
+    /// déserts changent (au fil des années).
+    /// </summary>
+    private void UpdateDunes(bool climate)
+    {
+        var field = _terrain.Field;
+        if (field == null)
+            return;
+        float[] share = null;
+        if (climate && _canopy != null)
+        {
+            share = new float[_canopy.Length];
+            for (int c = 0; c < share.Length; c++)
+                share[c] = Math.Clamp(-_canopy[c] / 0.75f, 0f, 1f);
+        }
+        bool changed = (share == null) != (_duneShare == null);
+        if (!changed && share != null)
+            for (int c = 0; c < share.Length && !changed; c++)
+                changed = Math.Abs(share[c] - _duneShare[c]) > 0.05f;
+        if (!changed && ReferenceEquals(field.DuneShare, _duneShare))
+            return;
+        _duneShare = share;
+        field.DuneShare = share;
+        _terrain.RefreshRelief();
+    }
 
     // --- Lieux de test (F1 à F7, F9 à F11) -------------------------------------------------------------
 
