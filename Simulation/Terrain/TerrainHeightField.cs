@@ -823,27 +823,35 @@ public sealed class TerrainHeightField
             detail = broadDetail + (detail - broadDetail) * (1 - 0.85 * valley.Floor);
             folds = broadFolds + (folds - broadFolds) * (1 - valley.Floor);
         }
-        double height = baseHeight + detail + folds;
+        // Volcans et cratères avant les vallées : les fleuves creusent leurs flancs. (Ajoutés
+        // après, ils soulevaient un lit creusé sur la plaine d'en dessous, parfois annulé par la
+        // règle du fond au-dessus de la mer : un lit à sec, des centaines de mètres sous l'eau)
+        double height = baseHeight + detail + folds + LandformHeight(direction, near[0], minWavelength);
         // Le fond des vallées reste au-dessus de la mer tant que le sol l'est : le fleuve coule
         // jusqu'à la côte au lieu de transformer toute la plaine en bras de mer
         // (sans cassure : au-dessous de 1 m, on ne creuse plus du tout ; avant, le fond passait
         // d'un coup de 1 m à toute la profondeur de la vallée, d'où une falaise le long du rivage)
+        // (le lit, lui, se creuse toujours sous le fond, même au ras de la mer : sinon le fleuve
+        // s'asséchait dans ses derniers mètres avant la côte). Le creusement du lit sert aussi à
+        // poser l'eau sur le lit final, après toutes les retouches du sol qui suivent
         double uncarved = height;
-        height = Math.Max(height - valley.Depth, Math.Min(height, 1.0));
+        double bedCut = valley.BedCut;
+        height = Math.Max(uncarved - valley.ValleyCarve, Math.Min(uncarved, 1.0)) - bedCut;
         // Embouchure : le fleuve creuse jusqu'à son niveau de base, la mer ; sa vallée descend
         // jusqu'au rivage au lieu de rester perchée sur le plateau (le fleuve tombait d'une
         // falaise de 200 m, en mur d'eau plat)
-        if (valley.Mouth > 0 && height > 1.0)
-            height -= (height - 1.0) * valley.Mouth;
+        // (le fond et le lit descendent ensemble : le lit garde sa profondeur jusqu'à la mer)
+        if (valley.Mouth > 0 && height + bedCut > 1.0)
+            height -= (height + bedCut - 1.0) * valley.Mouth;
         // Deltas et vasières : plaine de vase au ras de la mer, sans falaise
         var wetShare = WetlandShare(direction, position, near[0], baseHeight, baseSlope);
         var (wetHeight, wetland) = ApplyWetland(position, height, wetShare, minWavelength);
+        bedCut *= 1 - wetland;
         double cliffHeight = Cliffs(position, height, baseHeight, baseSlope, minWavelength);
         // (ni dans les deltas et les vasières, ni au débouché d'une vallée : sur son fond plat, à
         // 1 m, la falaise dressait une plate-forme de 30 m, d'où le fleuve tombait en cascade)
         double noCliff = Math.Min(1, Math.Max(2 * Math.Max(wetShare.delta, wetShare.coastal), Math.Max(valley.Floor, valley.Mouth)));
         height = wetHeight + (cliffHeight - height) * (1 - noCliff);
-        height += LandformHeight(direction, near[0], minWavelength);
 
         // Lacs : au cœur de leur zone, l'eau est au niveau du lac ; vers le bord de la zone, ce
         // niveau s'abaisse progressivement jusqu'à passer sous le sol. La rive tombe là où le
@@ -865,22 +873,20 @@ public sealed class TerrainHeightField
         // couleur peinte. Le lit est creusé sous les berges selon le débit ; l'eau le remplit
         // jusqu'à 40 cm sous elles (surface plane d'une berge à l'autre). Hors du lit, son niveau
         // reste sous le sol (caché), pour que l'eau s'interpole sans nappe entre deux sommets
-        if (valley.Depth > 0 && height > 1.0)
+        if (valley.Depth > 0 && height + Math.Max(0, bedCut) > 1.0)
         {
-            double bank = uncarved - valley.ValleyCarve;
+            // Berges : le sol final (volcans, cratères, embouchure, deltas compris) plus le
+            // creusement du lit. (Avant, l'eau se calculait sur le sol d'avant ces retouches : sur
+            // le flanc d'un volcan, elle passait des centaines de mètres sous le lit, et le
+            // fleuve disparaissait par tronçons)
+            double bank = height + Math.Max(0, bedCut);
             // Plaine d'inondation : le niveau du fleuve (fond de vallée moins 40 cm), plan, caché
             // sous le sol jusque sous les versants ; une crue le fait monter (shader de l'eau) et
             // il apparaît, à plat, sur le fond de la vallée, jusqu'où il touche les versants.
             // (Avant, sous les versants, un niveau qui suivait le sol 3 m plus bas : une crue de
             // 3 m le faisait affleurer partout, en nappe drapée sur les pentes)
-            double floodplain = Math.Min(height - 0.05, uncarved - valley.FloorDepth - 0.4);
+            double floodplain = Math.Min(height - 0.05, bank - Math.Max(0, valley.FloorDepth - valley.ValleyCarve) - 0.4);
             double riverWater = valley.Bed > 0.01 ? bank - 0.4 : floodplain;
-            // (vers l'embouchure, l'eau descend avec le fond)
-            if (valley.Mouth > 0)
-            {
-                floodplain = Math.Min(height - 0.05, floodplain - Math.Max(0, floodplain - 1.0) * valley.Mouth);
-                riverWater -= Math.Max(0, riverWater - 1.0) * valley.Mouth;
-            }
             water = Math.Max(water, Math.Max(riverWater, floodplain));
             floodable = 1;
         }
@@ -1013,8 +1019,10 @@ public sealed class TerrainHeightField
     }
 
     /// <summary>Vallée et lit du cours d'eau le plus proche (voir <see cref="Valley"/>).</summary>
+    /// <param name="Depth">Creusement total : vallée plus lit.</param>
+    /// <param name="BedCut">Creusement du lit sous le fond de la vallée (m).</param>
     private readonly record struct ValleyShape(double Depth, double Floor, double River, double Bed, double ValleyCarve, double FloorDepth, double FloorHalf = 0,
-                                               double Mouth = 0);
+                                               double Mouth = 0, double BedCut = 0);
 
     /// <summary>
     /// Vallée et lit du cours d'eau le plus proche, selon son débit Q (m³/s) et le relief :
@@ -1077,8 +1085,8 @@ public sealed class TerrainHeightField
             double valleyCarve = depth * (1 - SmoothStep(floorHalf, width, distance)) * birth;
             // Lit : seulement si le maillage est assez fin pour lui (sinon, de loin, un trait d'eau)
             bool drawn = 2 * channelHalf > 0.5 * minWavelength;
-            double bedProfile = 1 - SmoothStep(channelHalf * 0.7, channelHalf * 1.05, distance);
-            double carve = valleyCarve + (drawn ? (bankDepth + 0.4) * bedProfile : 0);
+            double bedProfile = drawn ? BedProfile(position, distance, channelHalf) : 1 - SmoothStep(channelHalf * 0.7, channelHalf * 1.05, distance);
+            double bedCut = drawn ? (bankDepth + 0.4) * bedProfile : 0;
             double river = drawn
                 ? bedProfile
                 // De loin : part du trait d'eau dans la maille (fleuves visibles jusqu'à l'horizon,
@@ -1086,11 +1094,15 @@ public sealed class TerrainHeightField
                 : Math.Min(1, 2 * channelHalf / Math.Max(minWavelength, 1)) * (1 - SmoothStep(0.25 * minWavelength, 0.6 * minWavelength, distance));
             // Plusieurs tracés proches (le même fleuve vu par deux cellules voisines, dont les
             // tracés se recouvrent ; un confluent) : chaque grandeur garde son maximum, sans
-            // cassure. (Avant, on prenait tout du tracé qui creusait le plus : là où deux tracés
-            // creusaient presque autant, le choix changeait d'un point à l'autre, et le fond de
-            // vallée avec lui : des aiguilles de centaines de mètres le long des fleuves)
+            // cassure ; le lit le plus creusé est creusé sous la vallée la plus creusée (le
+            // creusement total est fait à la fin). (Avant, on prenait tout du tracé qui creusait
+            // le plus : là où deux tracés creusaient presque autant, le choix changeait d'un point
+            // à l'autre, et le fond de vallée avec lui : des aiguilles de centaines de mètres le
+            // long des fleuves ; puis, en prenant le maximum de « vallée + lit » d'un côté et de
+            // la vallée de l'autre, le lit d'un tracé sortait de l'eau de l'autre : le fleuve
+            // s'arrêtait et reprenait plus loin)
             double floor = 1 - SmoothStep(floorHalf * 0.5, floorHalf * 1.5, distance);
-            best = new ValleyShape(Math.Max(best.Depth, carve),
+            best = new ValleyShape(0,
                                    Math.Max(best.Floor, floor),
                                    Math.Max(best.River, river * birth),
                                    Math.Max(best.Bed, drawn ? bedProfile * birth : 0),
@@ -1099,10 +1111,38 @@ public sealed class TerrainHeightField
                                    // (largeur du fond pondérée par sa présence : sans cassure)
                                    Math.Max(best.FloorHalf, floorHalf * floor),
                                    // Vers l'embouchure, la vallée descend jusqu'à la mer (fond et versants)
-                                   Math.Max(best.Mouth, _riverMouth[cell] ? SmoothStep(0.4, 1.0, along) * (1 - SmoothStep(floorHalf, width, distance)) : 0));
+                                   Math.Max(best.Mouth, _riverMouth[cell] ? SmoothStep(0.4, 1.0, along) * (1 - SmoothStep(floorHalf, width, distance)) : 0),
+                                   Math.Max(best.BedCut, bedCut * birth));
         }
-        return best;
+        return best with { Depth = best.ValleyCarve + best.BedCut };
     }
+
+    /// <summary>
+    /// Profil du lit (1 dans le chenal, 0 hors du lit) à une distance du tracé, berges
+    /// irrégulières : la largeur varie le long du fleuve (±30 %, sur ~6 largeurs : mouilles et
+    /// seuils), les bords sont découpés (deux échelles), et les grands fleuves ont des bancs de
+    /// sable et des îles. (Avant : deux berges parallèles, parfaitement lisses.)
+    /// </summary>
+    private double BedProfile(Double3 position, double distance, double channelHalf)
+    {
+        if (distance > channelHalf * 1.7)
+            return 0;
+        double full = 2 * channelHalf;
+        double N(double wavelength, int salt) => GradientNoise.Sample(position.X / wavelength, position.Y / wavelength, position.Z / wavelength, Seed + salt);
+        double half = channelHalf * (1 + 0.3 * N(6 * full, 321));
+        double edge = channelHalf * (0.18 * N(1.1 * full, 322) + 0.06 * N(Math.Max(12, 0.25 * full), 323));
+        double profile = 1 - SmoothStep(half * 0.7, half * 1.05, distance + edge);
+        // Bancs et îles (fleuves de plus de ~60 m de large) : le fond y remonte au-dessus de l'eau
+        if (channelHalf > 30 && profile > 0)
+        {
+            double bar = SmoothStep(0.25, 0.5, N(2.2 * full, 324)) * (1 - SmoothStep(0.35 * half, 0.8 * half, distance)) * SmoothStep(30, 120, channelHalf);
+            profile *= 1 - bar;
+        }
+        return profile;
+    }
+
+    /// <summary>Tracé courbe du cours d'eau d'une cellule (null si elle n'en a pas) : pour les tests.</summary>
+    internal System.Collections.Generic.IReadOnlyList<Double3> RiverCurve(int cell) => _riverCell[cell] ? _riverCurve[cell] : null;
 
     /// <summary>Distance (m) d'un point au tracé courbe d'un cours d'eau, et position le long du tracé (0 à 1).</summary>
     private static double CurveDistance(Double3[] curve, Double3 p, out double along)

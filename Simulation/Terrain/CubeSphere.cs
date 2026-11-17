@@ -74,6 +74,14 @@ public static class CubeSphere
         return (face, Math.Atan(a) * 4 / Math.PI, Math.Atan(b) * 4 / Math.PI);
     }
 
+    /// <summary>Morceau d'un niveau qui contient une direction (s et t vont de −1 à 1 sur la face).</summary>
+    public static ChunkKey ChunkAt(Double3 direction, int level)
+    {
+        var (face, s, t) = FromDirection(direction);
+        int n = 1 << level;
+        return new ChunkKey(face, level, Math.Clamp((int)((s + 1) / 2 * n), 0, n - 1), Math.Clamp((int)((t + 1) / 2 * n), 0, n - 1));
+    }
+
     /// <summary>Direction du centre d'un morceau.</summary>
     public static Double3 CenterDirection(ChunkKey key) =>
         Direction(key.Face, key.MinS + key.FaceSize / 2, key.MinT + key.FaceSize / 2);

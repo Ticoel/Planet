@@ -315,14 +315,10 @@ public partial class TerrainRenderer
     /// </summary>
     private bool FineSurfaceAt(Double3 point)
     {
-        var (face, s, t) = CubeSphere.FromDirection(point.Normalized());
+        Double3 direction = point.Normalized();
         for (int level = Quadtree.MaxLevel; level >= Quadtree.MaxLevel - 1; level--)
-        {
-            int n = 1 << level;
-            var key = new ChunkKey(face, level, Math.Clamp((int)(s * n), 0, n - 1), Math.Clamp((int)(t * n), 0, n - 1));
-            if (_cache.TryGetValue(key.Packed, out var entry) && entry.Visible)
+            if (_cache.TryGetValue(CubeSphere.ChunkAt(direction, level).Packed, out var entry) && entry.Visible)
                 return true;
-        }
         return false;
     }
 

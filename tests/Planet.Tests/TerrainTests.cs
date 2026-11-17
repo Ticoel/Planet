@@ -294,6 +294,24 @@ public static class TerrainTests
     private const int Side = TerrainChunkBuilder.Resolution + 1;
 
     [Test]
+    public static void ChunkAtContainsTheDirection()
+    {
+        // (régression : s et t traités comme allant de 0 à 1 ; le relief en volume ne trouvait
+        // jamais le morceau affiché sous lui, et ne remplaçait plus jamais la surface)
+        var random = new Random(3);
+        for (int k = 0; k < 2000; k++)
+        {
+            double z = random.NextDouble() * 2 - 1, a = random.NextDouble() * 2 * Math.PI, r = Math.Sqrt(1 - z * z);
+            var d = new Double3(r * Math.Cos(a), r * Math.Sin(a), z);
+            int level = random.Next(0, 19);
+            var key = CubeSphere.ChunkAt(d, level);
+            var (face, s, t) = CubeSphere.FromDirection(d);
+            Assert.True(key.Face == face && s >= key.MinS - 1e-9 && s <= key.MinS + key.FaceSize + 1e-9
+                        && t >= key.MinT - 1e-9 && t <= key.MinT + key.FaceSize + 1e-9, $"{d} hors du morceau {key}");
+        }
+    }
+
+    [Test]
     public static void NeighbourChunksShareTheirEdge()
     {
         var field = Field.Value;

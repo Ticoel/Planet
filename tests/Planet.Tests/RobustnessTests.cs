@@ -107,13 +107,45 @@ public static class RobustnessTests
                         }
                 }
 
+                // Les grands fleuves coulent sans interruption : le long de leur tracé, au plus
+                // profond du lit (perpendiculaire), il y a de l'eau. (Le lit se retrouvait à sec
+                // sur des tronçons entiers : eau calculée avant les volcans, ou lits de deux
+                // tracés mélangés ; le fleuve s'arrêtait et reprenait plus loin.) Tolérance : les
+                // vasières côtières, où le delta prend le relais
+                int wet = 0, steps = 0;
+                var discharge = world.Field.Hydrology.Discharge;
+                foreach (int c in Enumerable.Range(0, world.Grid.CellCount).Where(c => world.Field.RiverCurve(c) != null && discharge[c] > 500)
+                                             .OrderByDescending(c => discharge[c]).Take(15))
+                {
+                    var curve = world.Field.RiverCurve(c);
+                    double channel = 1.75 * Math.Sqrt(discharge[c]);
+                    double search = Math.Min(2500, 6 * channel) * 1.9 + channel;
+                    for (int k = 0; k < 48; k++)
+                    {
+                        double t = (k + 0.5) / 48 * (curve.Count - 1);
+                        int seg = (int)t;
+                        Double3 point = (curve[seg] + (curve[seg + 1] - curve[seg]) * (t - seg)).Normalized();
+                        Double3 side = (curve[seg + 1] - curve[seg]).Cross(point).Normalized();
+                        TerrainSample deepest = default;
+                        double bestRiver = 0;
+                        for (double o = -search; o <= search; o += Math.Max(5, channel / 8))
+                        {
+                            var s = world.Field.Sample((point + side * (o / TerrainHeightField.RadiusMeters)).Normalized(), 2.5, ref hint);
+                            if (s.River > bestRiver) { bestRiver = s.River; deepest = s; }
+                        }
+                        if (bestRiver < 0.9 || deepest.Height < 5)
+                            continue;
+                        steps++;
+                        if (deepest.WaterLevel > deepest.Height)
+                            wet++;
+                    }
+                }
+                Assert.True(steps > 100 && wet >= 0.99 * steps, $"{where} : lit des grands fleuves en eau sur {wet} points de {steps}");
+
                 // Morceaux de terrain à tous les niveaux
                 for (int i = 0; i < 60; i++)
                 {
-                    var (face, fs, ft) = CubeSphere.FromDirection(RandomDirection(random));
-                    int level = random.Next(0, 19);
-                    double size = 1.0 / (1 << level);
-                    var key = new ChunkKey(face, level, Math.Min((int)(fs / size), (1 << level) - 1), Math.Min((int)(ft / size), (1 << level) - 1));
+                    var key = CubeSphere.ChunkAt(RandomDirection(random), random.Next(0, 19));
                     var chunk = TerrainChunkBuilder.Build(world.Field, key);
                     Assert.Finite(chunk.Positions, $"{where} : sommets du morceau {key}");
                     Assert.Finite(chunk.Normals, $"{where} : normales du morceau {key}");
