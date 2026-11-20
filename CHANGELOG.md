@@ -1,5 +1,26 @@
 # Historique des versions
 
+## 1.0.3 — 2026-11-20
+
+Corrections d'après les rapports de bug de la 1.0.2.
+
+- **Crues** : l'eau ne remplit plus toute la largeur de la vallée d'un plan uniforme aux bords en
+  escalier ; le lit monte de toute la crue, le fond de la vallée moins, de moins en moins vers
+  ses bords, rien sur les versants ; tout morceau de terrain d'une vallée a sa surface d'eau.
+  L'eau de crue, boueuse, est mate (elle ne renvoie plus le ciel en nappe claire).
+- **Tranchées droites** dans les plaines : les « nouveaux bras de fleuve » ouverts par les crues
+  (fossés rectilignes de 3,5 m) sont retirés.
+- **Traits blancs** à la place des rivières lointaines sur les pentes : plus d'eaux blanches peintes
+  de loin.
+- **Icebergs** : blocs de glace irréguliers à facettes (quatre formes, bosses et pinacles) qui
+  dépassent de 35 à 70 % de leur largeur, au lieu de dalles plates de quelques mètres.
+- **Entrée des grottes** : passage progressif de la paroi au terrain sur toute la couronne (plus
+  de polygone clair au bord dentelé ni de triangles retournés), gravats de plus en plus
+  clairsemés vers l'extérieur.
+- **Arrivée sur un lieu** : pendant le vol, le relief du lieu d'arrivée est chargé en priorité,
+  dans la direction du regard ; s'il n'est pas prêt à l'approche, la fin du vol ralentit (6 s
+  de plus au plus) au lieu d'arriver sur un relief grossier qui se précise sous les yeux.
+
 ## 1.0.2 — 2026-11-17
 
 Corrections d'après les rapports de bug de la 1.0.1.

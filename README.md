@@ -8,7 +8,7 @@ glissements, cyclones…), puis exploration de l'orbite jusqu'au sol à l'échel
 dans les grottes. Rien ne vient de la vraie Terre : continents, montagnes, climats et nuages
 émergent de la simulation.
 
-**Version 1.0.2** (17 novembre 2026) : voir [`CHANGELOG.md`](CHANGELOG.md).
+**Version 1.0.3** (20 novembre 2026) : voir [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Aperçu
 
@@ -97,7 +97,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
 
 ## Installer et lancer
 
-**Version exportée** (archive `Planet-1.0.2-linux.zip` ou `Planet-1.0.2-windows.zip`) :
+**Version exportée** (archive `Planet-1.0.3-linux.zip` ou `Planet-1.0.3-windows.zip`) :
 décompresser, puis lancer `Planet.x86_64` (Linux) ou `Planet.exe` (Windows). Il faut une carte
 graphique compatible Vulkan (ou Direct3D 12 sous Windows) ; le calcul du climat se fait sur la
 carte graphique quand elle le permet, sinon sur le processeur.
@@ -159,7 +159,7 @@ réglage du démarrage).
 
 # Conception
 
-Version 1.0.2 (2026-11-17) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 18 faites, 172 tests.
+Version 1.0.3 (2026-11-20) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 18 faites, 172 tests.
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -366,9 +366,8 @@ Version 1.0.2 (2026-11-17) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 
 - **Une Terre vivante** (étape 17), tout se déclenche seul dans l'horloge climatique :
   - **crues** : la pluie récente de tout le bassin descend le réseau des fleuves ; le fleuve monte
     comme le débit à la puissance 0,4 (Leopold et Maddock), déborde de son lit (deux fois le débit
-    habituel suffit) et inonde, à plat, le fond de sa vallée ; en sécheresse il baisse. Les plus
-    fortes crues rompent parfois une berge : le fleuve s'ouvre un nouveau bras dans la plaine,
-    inscrit dans la croûte ; les lacs montent aussi ;
+    habituel suffit) et inonde le fond de sa vallée d'une eau boueuse, moins profonde vers ses
+    bords ; en sécheresse il baisse ; les lacs montent aussi ;
   - **lahars** : forte pluie sur les cendres fraîches (moins de 5 ans) d'un volcan proche : une
     coulée de boue très fluide dévale les pentes et s'étale loin dans les vallées ;
   - **tsunamis** : un séisme de magnitude 7,5 et plus sous la mer soulève une vague qui traverse
@@ -752,8 +751,6 @@ de ces mêmes ouvrages.
 ## Une Terre vivante
 - Leopold L. B., Maddock T. (1953). *The hydraulic geometry of stream channels and some
   physiographic implications.* USGS Professional Paper 252. — profondeur des fleuves selon le débit.
-- Slingerland R., Smith N. D. (2004). *River avulsions and their deposits.* Annual Review of Earth
-  and Planetary Sciences 32, 257-285. — fleuves qui changent de lit.
 - Pierson T. C. (1995). *Flow characteristics of large eruption-triggered debris flows at snow-clad
   volcanoes.* Journal of Volcanology and Geothermal Research 66, 283-294. — lahars.
 - Salm B. (1993). *Flow, flow transition and runout distances of flowing avalanches.* Annals of

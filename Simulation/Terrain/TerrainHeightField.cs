@@ -954,7 +954,12 @@ public sealed class TerrainHeightField
             double floodplain = Math.Min(height - 0.05, bank - Math.Max(0, valley.FloorDepth - valley.ValleyCarve) - 0.4);
             double riverWater = valley.Bed > 0.01 ? bank - 0.4 : floodplain;
             water = Math.Max(water, Math.Max(riverWater, floodplain));
-            floodable = 1;
+            // Crue : le lit monte de toute la crue, le fond de la vallée de 60 % de la crue, de
+            // moins en moins vers son bord, plus rien sur les versants : l'eau s'étale sur le fond
+            // et s'amincit vers ses bords. (Avant, toute la largeur de la vallée se remplissait
+            // d'un plan d'eau uniforme, aux bords en escalier là où un morceau de terrain n'avait
+            // pas de surface d'eau)
+            floodable = (float)Math.Max(floodable, Math.Max(valley.Bed, 0.6 * valley.Floor));
         }
         return new TerrainSample(height, water, river, Wetland: (float)wetland, Floodable: floodable);
     }

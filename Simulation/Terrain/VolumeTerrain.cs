@@ -95,6 +95,12 @@ public static class VolumeChunkBuilder
     // Largeur de la couronne d'éboulis autour des ouvertures des grottes (m)
     private const double RimWidthM = 3.0;
 
+    private static double SmoothStep01(double t)
+    {
+        t = Math.Clamp(t, 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
     /// <summary>Construit le bloc (i, j) du repère (tâche de fond : le relief est lu depuis plusieurs threads).</summary>
     public static VolumeChunkMesh Build(VolumeFrame frame, int i, int j, TerrainHeightField field, IReadOnlyList<Cave> caves)
     {
@@ -225,13 +231,18 @@ public static class VolumeChunkBuilder
                     // Sol de surface loin des grottes : sommet posé exactement sur le relief détaillé,
                     // normale tirée de sa pente (comme les morceaux de terrain) ; sinon la lumière
                     // différait un peu et les blocs se voyaient en carrés
-                    if (!inside && wall > RimWidthM)
+                    // Autour des ouvertures, passage progressif sur toute la couronne (de 1 m de la
+                    // paroi à RimWidthM) : avant, à 3 m, sommets et éclairage changeaient d'un coup,
+                    // d'où un polygone clair au bord dentelé et des triangles retournés
+                    double onGround = inside ? 0 : SmoothStep01((wall - 1.0) / (RimWidthM - 1.0));
+                    if (onGround > 0)
                     {
                         double u = (local.X - x0) / s, v = (local.Y - y0) / s;
                         double dx = (Bilinear(ground, p, u + 0.5, v) - Bilinear(ground, p, u - 0.5, v)) / s;
                         double dy = (Bilinear(ground, p, u, v + 0.5) - Bilinear(ground, p, u, v - 0.5)) / s;
-                        normal = (frame.Up - frame.AxisX * dx - frame.AxisY * dy).Normalized();
-                        local = new Double3(local.X, local.Y, groundHere);
+                        Double3 groundNormal = (frame.Up - frame.AxisX * dx - frame.AxisY * dy).Normalized();
+                        normal = (normal * (1 - onGround) + groundNormal * onGround).Normalized();
+                        local = new Double3(local.X, local.Y, local.Z + (groundHere - local.Z) * onGround);
                         world = frame.ToWorld(local);
                         direction = world.Normalized();
                         height = world.Length() - TerrainHeightField.RadiusMeters;
@@ -247,13 +258,14 @@ public static class VolumeChunkBuilder
                     water.Add(new Vector2((float)level, inside ? 0f : (float)sample.River));
                     // Bord des ouvertures : éboulis (roche claire du calcaire, basalte noir des tunnels
                     // de lave), plus marqués près de la paroi ; jour « futur » : ils ne s'effacent pas
+                    // (de plus en plus clairsemés en s'éloignant du trou, jusqu'à rien au bord de la
+                    // couronne : avant, ils s'arrêtaient net)
                     Vector2 crust = new(sample.Debris, sample.DebrisDay);
-                    if (!inside && wall < RimWidthM)
+                    if (!inside && wall < 1.6 * RimWidthM)
                     {
-                        float rim = (float)(1 - Math.Max(0, wall) / RimWidthM);
-                        crust = kind == CaveKind.LavaTube
-                            ? new Vector2(VolcanicDeposits.LavaCode, 1e9f)
-                            : new Vector2(Math.Max(sample.Debris, 0.35f + 0.6f * rim), 1e9f);
+                        float rim = (float)SmoothStep01(1 - Math.Max(0, wall) / (1.6 * RimWidthM));
+                        if (rim > sample.Debris)
+                            crust = new Vector2(0.9f * rim, 1e9f);
                     }
                     debris.Add(inside ? Vector2.Zero : crust);
                     float open = inside ? (float)Math.Exp(-Math.Max(0, depth) / 6.0) : 1f;

@@ -144,6 +144,22 @@ public sealed class ExplorerCamera
     public bool InTransition => _transition;
 
     /// <summary>
+    /// Pendant un vol de transition : la vue d'arrivée (position, direction du regard), pour
+    /// charger son relief à l'avance ; null sinon.
+    /// </summary>
+    public (Double3 position, Double3 forward)? TransitionTarget =>
+        _transition ? (_toPosition, _toHeading * Math.Cos(_toPitch) + _toPosition.Normalized() * Math.Sin(_toPitch)) : null;
+
+    /// <summary>
+    /// Relief de la vue d'arrivée prêt (null : on ne le sait pas). Tant qu'il ne l'est pas, la
+    /// fin du vol ralentit (6 s de plus au plus) : on n'arrive pas sur un relief grossier qui se
+    /// précise sous les yeux.
+    /// </summary>
+    public Func<bool> TargetLoaded { get; set; }
+    private const double MaxTransitionWait = 6;
+    private double _transitionWait;
+
+    /// <summary>
     /// Va vers une nouvelle vue en volant au lieu d'y sauter : <paramref name="place"/> place la
     /// caméra (PlaceAbove, LookAt…), puis la caméra y vole depuis sa position actuelle en quelques
     /// secondes (montée, voyage, descente, comme un globe virtuel), le temps que le relief se
@@ -175,6 +191,7 @@ public sealed class ExplorerCamera
         double span = Math.Max(arc, Math.Abs(position.Length() - _toPosition.Length()));
         _transitionSeconds = Math.Clamp(1.2 + 0.9 * Math.Log10(1 + span / 1000), 1.2, 4.5);
         _transitionTime = 0;
+        _transitionWait = 0;
         _transition = true;
         UpdateGround();
     }
@@ -186,7 +203,12 @@ public sealed class ExplorerCamera
             _transition = false;                            // le joueur reprend la main
             return;
         }
-        _transitionTime += delta;
+        // (dernière partie du vol, la plus proche du sol : au ralenti tant que le relief n'est pas prêt)
+        bool waiting = _transitionTime > 0.6 * _transitionSeconds && _transitionWait < MaxTransitionWait
+                       && TargetLoaded != null && !TargetLoaded();
+        if (waiting)
+            _transitionWait += delta;
+        _transitionTime += waiting ? 0.12 * delta : delta;
         double t = Math.Min(1, _transitionTime / _transitionSeconds);
         double s = t * t * (3 - 2 * t);
         double radius = TerrainHeightField.RadiusMeters;

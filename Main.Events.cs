@@ -10,8 +10,7 @@ using Planet.Simulation.Terrain;
 namespace Planet;
 
 /// <summary>
-/// Une Terre vivante (étape 17), dans l'horloge climatique : crues des fleuves (et nouveaux bras
-/// creusés par les plus fortes), tsunamis après les grands séismes sous la mer, cyclones
+/// Une Terre vivante (étape 17), dans l'horloge climatique : crues des fleuves, tsunamis après les grands séismes sous la mer, cyclones
 /// tropicaux, tornades sous les orages, icebergs vêlés par les glaciers, dunes qui avancent.
 /// (Lahars, avalanches de neige et recul des falaises : <see cref="Main"/>.Crust ; aurores,
 /// étoiles filantes, brouillards, arcs-en-ciel et tempêtes de sable : <see cref="SkyRenderer"/>.)
@@ -28,8 +27,8 @@ public partial class Main
     private readonly CycloneModel _cyclones = new();
     private readonly Random _eventRandom = new(29);
     private double _eventsDay = double.NaN;
-    private double _floodTimer, _avulsionCooldown;
-    private int _avulsionCount, _tsunamiCount, _cycloneCount, _tornadoCount, _calvedCount;
+    private double _floodTimer;
+    private int _tsunamiCount, _cycloneCount, _tornadoCount, _calvedCount;
     private TornadoRenderer _tornadoRenderer;
     private IcebergRenderer _icebergRenderer;
     // Temps des phénomènes locaux (geysers…) : le temps réel, accéléré au plus 3 fois ; avec
@@ -77,7 +76,7 @@ public partial class Main
         _recentSlides.Clear();
         _recentQuakes.Clear();
         _eventIndex = -1;
-        _avulsionCount = _tsunamiCount = _cycloneCount = _tornadoCount = _calvedCount = 0;
+        _tsunamiCount = _cycloneCount = _tornadoCount = _calvedCount = 0;
         _tornadoRenderer?.HideTornado();
     }
 
@@ -164,85 +163,6 @@ public partial class Main
                                  _climate.Statistics.RecentPrecipitation, _climate.Statistics.AnnualPrecipitation);
         }
         _flood.Follow(cell, days);
-        // Les plus fortes crues rompent parfois une berge : le fleuve s'ouvre un nouveau bras
-        _avulsionCooldown -= delta;
-        if (_running && _flood.RiseM > 2.5 && _avulsionCooldown <= 0 && _terrain.Explorer.AltitudeAboveGround < 8000)
-        {
-            _avulsionCooldown = 20;
-            if (_eventRandom.NextDouble() < 0.35)
-                TryAvulsion();
-        }
-    }
-
-    /// <summary>
-    /// Avulsion : en crue, le fleuve rompt sa berge et s'ouvre un nouveau bras, qui descend la
-    /// plaine par la plus grande pente (inscrit dans la croûte : un chenal de ~3,5 m de profondeur
-    /// et ~50 m de large, sur 1 à 3 km ; l'eau de la plaine d'inondation s'y voit).
-    /// </summary>
-    private void TryAvulsion()
-    {
-        var field = _terrain.Field;
-        var height = ThreadSafeHeight(field, 4.0);
-        Double3 center = ViewTarget();
-        var (ax, ay) = LavaFlow.TangentFrame(center);
-        double r = TerrainHeightField.RadiusMeters;
-        int hint = -1;
-        Double3? breach = null;
-        for (int k = 0; k < 150 && breach == null; k++)
-        {
-            double rho = 4000 * Math.Sqrt(_eventRandom.NextDouble()), phi = _eventRandom.NextDouble() * 2 * Math.PI;
-            Double3 d = (center + ax * (rho * Math.Cos(phi) / r) + ay * (rho * Math.Sin(phi) / r)).Normalized();
-            if (field.Sample(d, 4, ref hint).River > 0.9)
-                breach = d;
-        }
-        if (breach is not { } start)
-            return;
-        // Le nouveau bras part de côté, puis suit la pente de la plaine
-        var patch = new CrustPatch(start, 160, 20, (float)_climate.TimeDays, "Avulsion");
-        var (_, downhill, _) = SlopeStability.LocalSlope(height, start, 300);
-        Double3 side = start.Cross(downhill).Normalized() * (_eventRandom.NextDouble() < 0.5 ? -1 : 1);
-        var (px, py) = patch.Project((start + side * (120 / r)).Normalized());
-        double dx = side.Dot(patch.AxisX), dy = side.Dot(patch.AxisY);
-        var delta = new float[patch.Size * patch.Size];
-        var debris = new float[patch.Size * patch.Size];
-        double length = 1000 + 2000 * _eventRandom.NextDouble(), limit = patch.HalfExtentM - 10 * patch.CellM;
-        for (double travelled = 0; travelled < length && Math.Abs(px) < limit && Math.Abs(py) < limit; travelled += 20)
-        {
-            var (slope, down, _) = SlopeStability.LocalSlope(height, patch.DirectionAt(px, py), 60);
-            double gx = down.Dot(patch.AxisX), gy = down.Dot(patch.AxisY);
-            double wobble = (_eventRandom.NextDouble() - 0.5) * 0.5;
-            dx = 0.6 * dx + 0.4 * gx - wobble * dy;
-            dy = 0.6 * dy + 0.4 * gy + wobble * dx;
-            double norm = Math.Max(1e-9, Math.Sqrt(dx * dx + dy * dy));
-            dx /= norm;
-            dy /= norm;
-            px += dx * 20;
-            py += dy * 20;
-            int ci = (int)((px + patch.HalfExtentM) / patch.CellM), cj = (int)((py + patch.HalfExtentM) / patch.CellM);
-            for (int j = cj - 3; j <= cj + 3; j++)
-                for (int i = ci - 3; i <= ci + 3; i++)
-                {
-                    if (i < 6 || j < 6 || i >= patch.Size - 6 || j >= patch.Size - 6)
-                        continue;
-                    double ex = (i + 0.5) * patch.CellM - patch.HalfExtentM - px, ey = (j + 0.5) * patch.CellM - patch.HalfExtentM - py;
-                    double q = (ex * ex + ey * ey) / (30.0 * 30.0);
-                    if (q >= 1)
-                        continue;
-                    int k = j * patch.Size + i;
-                    float cut = (float)(-3.5 * (1 - q));
-                    if (cut < delta[k])
-                    {
-                        delta[k] = cut;
-                        debris[k] = -0.6f;
-                    }
-                }
-            _ = slope;
-        }
-        patch.Publish(delta, debris);
-        _crust.Add(patch);
-        _terrain.InvalidateRegion(patch.Center, patch.ReachM);
-        _avulsionCount++;
-        ShowNotice("Crue : le fleuve rompt sa berge et s'ouvre un nouveau bras dans la plaine");
     }
 
     // --- Tsunamis --------------------------------------------------------------------------------------
@@ -483,6 +403,6 @@ public partial class Main
         if (strongest != null)
             cyclone = $"   cyclones en cours : {_cyclones.Cyclones.Count} (le plus fort : {strongest.MaxWind * 3.6:0} km/h, catégorie {CycloneModel.Category(strongest.MaxWind)})";
         return $"Planète vivante : {flood}{cyclone}   depuis le début : {_cycloneCount} cyclones, {_tsunamiCount} tsunamis, " +
-               $"{_tornadoCount} tornades, {_avulsionCount} nouveaux bras de fleuve, {_calvedCount} icebergs vêlés";
+               $"{_tornadoCount} tornades, {_calvedCount} icebergs vêlés";
     }
 }

@@ -110,6 +110,8 @@ public partial class TerrainRenderer : Node3D
     public int VisibleChunkCount { get; private set; }
     public int CachedChunkCount => _cache.Count;
     public int PendingChunkCount { get; private set; }
+    /// <summary>Morceaux qui manquent encore à la vue d'arrivée d'un vol de transition.</summary>
+    public int TargetPendingCount { get; private set; }
     public int DeepestVisibleLevel { get; private set; }
     public double LastSelectionMs { get; private set; }
     /// <summary>Morceaux du nouveau relief encore à calculer avant de l'afficher.</summary>
@@ -196,6 +198,7 @@ public partial class TerrainRenderer : Node3D
     {
         Camera = new Camera3D { Name = "ExplorerCamera", Near = 1f, Far = 1.0e6f, Fov = 70f };
         AddChild(Camera);
+        Explorer.TargetLoaded = () => TargetPendingCount == 0;
         _material = new ShaderMaterial { Shader = new Shader { Code = ShaderCode } };
         RefreshPlanetRadius();
         _waterMaterial = new ShaderMaterial { Shader = new Shader { Code = WaterShaderCode } };
@@ -595,6 +598,28 @@ public partial class TerrainRenderer : Node3D
             }
         }
         StaleChunkCount = stale;
+
+        // Vol de transition : le relief de la vue d'arrivée est demandé dès le départ, avant celui
+        // du chemin (on ne voit le chemin qu'un instant) ; le vol ralentit à l'approche tant qu'il
+        // manque des morceaux (ExplorerCamera.TargetLoaded)
+        int targetMissing = 0;
+        if (!updating && Explorer.TransitionTarget is { } target)
+        {
+            Double3 forward = target.forward.Normalized();
+            // (cône de 75° autour du regard d'arrivée : l'écran large voit loin sur les côtés)
+            double cosHalf = Math.Cos(75 * Math.PI / 180);
+            bool inView(Double3 relative, double radius)
+            {
+                double distance = relative.Length();
+                if (distance <= radius)
+                    return true;
+                double margin = Math.Asin(Math.Min(1, radius / distance));
+                return Math.Acos(Math.Clamp(relative.Dot(forward) / distance, -1, 1)) - margin < Math.Acos(cosHalf);
+            }
+            Quadtree.Select(target.position, key => Lookup(_cache, key), inView,
+                            (key, priority) => { targetMissing++; requests.Add((key, priority - 0.5)); });
+        }
+        TargetPendingCount = targetMissing;
 
         // Morceaux à refaire après une modification de la croûte : ceux qu'on voit d'abord, mais
         // après l'affinage du sol proche (le morceau périmé reste affiché en attendant ; avant,
@@ -1643,7 +1668,9 @@ void fragment() {
             vec4 r1 = texture_noise(p - flow * speed * t1 * FLOW_CYCLE, 2.0);
             vec4 r2 = texture_noise(p - flow * speed * t2 * FLOW_CYCLE + vec3(3.7, 1.3, 5.1), 2.0);
             vec4 ripples = (r1 * w1 + r2 * (1.0 - w1)) * detail_weight(2.0, footprint);
-            float rapids = smoothstep(0.12, 0.32, steep) * (0.55 + 0.45 * ripples.x);
+            // (de loin, la pente du maillage grossier, prise sur les versants, n'est pas celle du
+            // fleuve : pas d'eaux blanches, sinon les rivières se peignaient en traits blancs)
+            float rapids = smoothstep(0.12, 0.32, steep) * (0.55 + 0.45 * ripples.x) * (1.0 - smoothstep(300.0, 1500.0, length(v_world)));
             vec3 water_color = mix(vec3(0.12, 0.30, 0.38), vec3(0.85, 0.9, 0.92), clamp(rapids, 0.0, 1.0));
             color = mix(color, water_color, river);
             roughness = mix(roughness, mix(0.12, 0.6, rapids), river);
@@ -1916,8 +1943,9 @@ void fragment() {
     color = mix(color, ice_color, ice);
     v_shade = cloud_shadow(v_world, up, v_water.x) * plume_shadow(v_world, up, v_water.x);
     ALBEDO = color;
-    ROUGHNESS = mix(mix(0.08, 0.7, foam), mix(0.25, 0.8, ice_snow), ice);
-    SPECULAR = 0.6;
+    // (eau de crue boueuse : mate, elle ne renvoie plus le ciel en nappe claire)
+    ROUGHNESS = mix(mix(mix(0.08, 0.45, muddy), 0.7, foam), mix(0.25, 0.8, ice_snow), ice);
+    SPECULAR = mix(0.6, 0.3, muddy);
     // Plus opaque qu'avant : les fonds sableux ne transparaissent que sur les premiers mètres ;
     // les eaux de moins d'un mètre (bassins des sources, bords des lacs et des fleuves) restent
     // claires : on voit leur fond
