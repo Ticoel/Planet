@@ -188,7 +188,7 @@ public partial class Main : Node3D
         int CloudSteps, int PlumeSteps, float PlumeStep);
 
     /// <summary>
-    /// Les trois niveaux de qualité graphique (touche O). Chacun règle d'un coup : la résolution
+    /// Les quatre niveaux de qualité graphique (touche O). Chacun règle d'un coup : la résolution
     /// de calcul de l'image (agrandie par AMD FSR), la finesse du relief au loin (distance de
     /// subdivision du quadtree), les ombres portées du relief, et le nombre de pas du lancer de
     /// rayons dans les nuages et les panaches.
@@ -204,9 +204,14 @@ public partial class Main : Node3D
         new("haute (pleine résolution lissée par FSR 2, relief fin, ombres douces)", Viewport.Scaling3DModeEnum.Fsr2, 1.0f,
             LodFactor: 4.5, CachedChunks: 9000, Shadows: true, ShadowAtlas: 8192,
             CloudSteps: 56, PlumeSteps: 256, PlumeStep: 0.08f),
+        // (tout le plus loin possible : relief fin à 1,5 fois la distance de « haute », détails de
+        // texture deux fois plus loin ; ce qui change avec la distance se voit bien moins)
+        new("maximale (relief et détails fins jusqu'au loin, ombres douces)", Viewport.Scaling3DModeEnum.Fsr2, 1.0f,
+            LodFactor: 7.0, CachedChunks: 14000, Shadows: true, ShadowAtlas: 8192,
+            CloudSteps: 56, PlumeSteps: 256, PlumeStep: 0.08f),
     };
-    // (niveau du démarrage : haute)
-    private int _quality = 2;
+    // (niveau du démarrage : maximale)
+    private int _quality = 3;
 
     // Message affiché quelques secondes (lieu choisi avec F1–F7, Maj+F4, F9–F11, L)
     private string _notice;
@@ -1390,7 +1395,8 @@ public partial class Main : Node3D
         _terrain.MaxCachedChunks = level.CachedChunks;
         _terrain.CastShadows = level.Shadows;
         _sky.ShadowsEnabled = level.Shadows;
-        SkyRenderer.SetShadowQuality(level.ShadowAtlas, soft: _quality == 2);
+        SkyRenderer.SetShadowQuality(level.ShadowAtlas, soft: _quality >= 2);
+        _terrain.DetailReach = _quality >= 3 ? 2f : 1f;
         _sky.SetVolumeQuality(level.CloudSteps, level.PlumeSteps, level.PlumeStep);
     }
 

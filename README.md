@@ -8,7 +8,7 @@ glissements, cyclones…), puis exploration de l'orbite jusqu'au sol à l'échel
 dans les grottes. Rien ne vient de la vraie Terre : continents, montagnes, climats et nuages
 émergent de la simulation.
 
-**Version 1.0.4** (27 novembre 2026) : voir [`CHANGELOG.md`](CHANGELOG.md).
+**Version 1.0.5** (27 novembre 2026) : voir [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Aperçu
 
@@ -97,7 +97,7 @@ se déclenchent seuls, au gré de la pluie, du gel et des séismes).*
 
 ## Installer et lancer
 
-**Version exportée** (archive `Planet-1.0.4-linux.zip` ou `Planet-1.0.4-windows.zip`) :
+**Version exportée** (archive `Planet-1.0.5-linux.zip` ou `Planet-1.0.5-windows.zip`) :
 décompresser, puis lancer `Planet.x86_64` (Linux) ou `Planet.exe` (Windows). Il faut une carte
 graphique compatible Vulkan (ou Direct3D 12 sous Windows) ; le calcul du climat se fait sur la
 carte graphique quand elle le permet, sinon sur le processeur.
@@ -154,12 +154,14 @@ H (ou le bouton « ? ») ouvre le panneau des commandes dans le jeu.
 
 Qualité graphique (O) : **basse** (image à 59 % agrandie par AMD FSR 1, relief allégé, sans
 ombres portées), **moyenne** (image à 67 %, FSR 2, ombres portées), **haute** (pleine résolution
-lissée par FSR 2, relief fin jusqu'au loin, ombres douces, nuages et panaches plus fins ;
-réglage du démarrage).
+lissée par FSR 2, relief fin au loin, ombres douces, nuages et panaches plus fins),
+**maximale** (relief fin 1,5 fois plus loin, détails de texture deux fois plus loin : ce qui
+change avec la distance se voit bien moins ; réglage du démarrage, demande une carte graphique
+récente).
 
 # Conception
 
-Version 1.0.4 (2026-11-27) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 18 faites, 172 tests.
+Version 1.0.5 (2026-11-27) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 18 faites, 172 tests.
 
 ## Principes
 - **Tout est procédural** : continents, relief, climat, eau et ciel émergent de la simulation, à
@@ -210,7 +212,7 @@ Version 1.0.4 (2026-11-27) : étapes 1 à 13, 14a, 16a, 16b, 17 et le début de 
   montagne, méandres à l'échelle du lit ; de loin, un trait d'eau proportionnel à la largeur.
 - **Terrain** : CDLOD (niveaux 0 à 18, morphing exact vers le parent, jupes), morceaux calculés et
   préparés en double précision sur des threads, rendu relatif à la caméra, cache de 2 500 à
-  9 000 morceaux selon la qualité ; près de la caméra, relief en volume (voir plus bas).
+  14 000 morceaux selon la qualité ; près de la caméra, relief en volume (voir plus bas).
 - **Ciel** : diffusion de Rayleigh, Mie et ozone (couchers de soleil, liseré bleu vu de l'espace,
   perspective atmosphérique) ; Lune sur son orbite (phases, vraie taille) ; étoiles et Voie lactée.
 - **Nuages** : couverture tirée du climat, découpée par un « temps qu'il fait » procédural

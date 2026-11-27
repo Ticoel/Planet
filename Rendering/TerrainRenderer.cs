@@ -110,6 +110,11 @@ public partial class TerrainRenderer : Node3D
     public int VisibleChunkCount { get; private set; }
     public int CachedChunkCount => _cache.Count;
     public int PendingChunkCount { get; private set; }
+    /// <summary>
+    /// Portée des détails de texture (1 : normale ; 2 : deux fois plus loin, qualité maximale).
+    /// </summary>
+    public float DetailReach { set => SetBoth("detail_reach", value); }
+
     /// <summary>Morceaux qui manquent encore à la vue d'arrivée d'un vol de transition.</summary>
     public int TargetPendingCount { get; private set; }
     public int DeepestVisibleLevel { get; private set; }
@@ -1097,8 +1102,10 @@ vec4 texture_noise(vec3 p, float scale) {
 
 // Poids d'un détail de taille « scale » selon la taille d'un pixel au sol : on efface ce qui
 // serait plus petit que quelques pixels (sinon il scintille)
+// (detail_reach : jusqu'où on les garde ; 2 en qualité maximale)
+uniform float detail_reach = 1.0;
 float detail_weight(float scale, float footprint) {
-    return 1.0 - smoothstep(scale * 0.12, scale * 0.35, footprint);
+    return 1.0 - smoothstep(scale * 0.12 * detail_reach, scale * 0.35 * detail_reach, footprint);
 }
 
 // Couleur de la couche adoucie, pour la vue réaliste. La texture des numéros de cellules est en
@@ -1570,13 +1577,17 @@ void fragment() {
             color *= mix(1.0, 0.6, wet);
             roughness = mix(roughness, 0.4, wet);
             specular = mix(specular, 0.45, wet);
-            float level = sqrt(clamp(puddle_mm / 30.0, 0.0, 1.0));
+            // (eau en surface : celle du modèle local près de la caméra ; au loin, d'après la pluie
+            // de la région, pour que les flaques ne disparaissent pas avec la distance)
+            float far_puddle = 40.0 * max(far_wet - 0.6, 0.0);
+            float pooled = mix(far_puddle, puddle_mm, near);
+            float level = sqrt(clamp(pooled / 30.0, 0.0, 1.0));
             float threshold = mix(0.75, -0.55, level);
             // (forme tirée des bruits bruts, sans leur effacement selon la distance : sinon, en
             // s'éloignant, la forme changeait et les flaques semblaient bouger ; c'est la flaque
             // entière qui s'efface au loin)
             float hollow = -(texture_noise(p, 32.0).x * 0.7 + texture_noise(p, 8.0).x * 0.3);
-            float puddle = near * step(0.05, puddle_mm) * (1.0 - smoothstep(0.03, 0.11, slope0))
+            float puddle = step(0.05, pooled) * (1.0 - smoothstep(0.03, 0.11, slope0))
                            * smoothstep(threshold, threshold + 0.06, hollow) * detail_weight(16.0, footprint);
             if (puddle > 0.0) {
                 // Ronds de pluie : de petites ondes qui s'élargissent et s'effacent

@@ -1,5 +1,13 @@
 # Historique des versions
 
+## 1.0.5 — 2026-11-27
+
+- **Qualité maximale** (nouvelle, réglage du démarrage) : relief fin 1,5 fois plus loin qu'en
+  qualité haute, détails de texture gardés deux fois plus loin : ce qui change avec la distance
+  de la caméra se voit bien moins. (O ou le menu pour revenir à « haute » si l'image saccade.)
+- **Flaques au loin** : elles ne sont plus réservées aux abords de la caméra ; au loin, elles
+  suivent la pluie de la région.
+
 ## 1.0.4 — 2026-11-27
 
 - **Taches blanches qui bougeaient avec la caméra** sur le plat (fonds de vallée) : la forme des
