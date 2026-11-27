@@ -954,12 +954,10 @@ public sealed class TerrainHeightField
             double floodplain = Math.Min(height - 0.05, bank - Math.Max(0, valley.FloorDepth - valley.ValleyCarve) - 0.4);
             double riverWater = valley.Bed > 0.01 ? bank - 0.4 : floodplain;
             water = Math.Max(water, Math.Max(riverWater, floodplain));
-            // Crue : le lit monte de toute la crue, le fond de la vallée de 60 % de la crue, de
-            // moins en moins vers son bord, plus rien sur les versants : l'eau s'étale sur le fond
-            // et s'amincit vers ses bords. (Avant, toute la largeur de la vallée se remplissait
-            // d'un plan d'eau uniforme, aux bords en escalier là où un morceau de terrain n'avait
-            // pas de surface d'eau)
-            floodable = (float)Math.Max(floodable, Math.Max(valley.Bed, 0.6 * valley.Floor));
+            // Crue : seul le lit monte (le fleuve gonfle et déborde un peu sur ses berges). Inonder
+            // le fond de la vallée faisait affleurer l'eau par plaques blanches dans le moindre
+            // creux, ou en nappe plate aux bords en escalier
+            floodable = (float)Math.Max(floodable, valley.Bed);
         }
         return new TerrainSample(height, water, river, Wetland: (float)wetland, Floodable: floodable);
     }
@@ -1156,7 +1154,7 @@ public sealed class TerrainHeightField
             double valleyCarve = depth * (1 - SmoothStep(floorHalf, width, distance)) * birth;
             // Lit : seulement si le maillage est assez fin pour lui (sinon, de loin, un trait d'eau)
             bool drawn = 2 * channelHalf > 0.5 * minWavelength;
-            double bedProfile = drawn ? BedProfile(position, distance, channelHalf) : 1 - SmoothStep(channelHalf * 0.7, channelHalf * 1.05, distance);
+            double bedProfile = drawn ? BedProfile(position, distance, channelHalf, minWavelength) : 1 - SmoothStep(channelHalf * 0.7, channelHalf * 1.05, distance);
             double bedCut = drawn ? (bankDepth + 0.4) * bedProfile : 0;
             double river = drawn
                 ? bedProfile
@@ -1194,12 +1192,15 @@ public sealed class TerrainHeightField
     /// seuils), les bords sont découpés (deux échelles), et les grands fleuves ont des bancs de
     /// sable et des îles. (Avant : deux berges parallèles, parfaitement lisses.)
     /// </summary>
-    private double BedProfile(Double3 position, double distance, double channelHalf)
+    private double BedProfile(Double3 position, double distance, double channelHalf, double minWavelength)
     {
         if (distance > channelHalf * 1.7)
             return 0;
         double full = 2 * channelHalf;
-        double N(double wavelength, int salt) => GradientNoise.Sample(position.X / wavelength, position.Y / wavelength, position.Z / wavelength, Seed + salt);
+        // (chaque découpe s'efface quand elle devient plus fine que le maillage : sinon, de loin,
+        // les berges crénelaient en dents de scie)
+        double N(double wavelength, int salt) => GradientNoise.Sample(position.X / wavelength, position.Y / wavelength, position.Z / wavelength, Seed + salt)
+                                                 * (1 - SmoothStep(0.25 * wavelength, 0.5 * wavelength, minWavelength));
         double half = channelHalf * (1 + 0.3 * N(6 * full, 321));
         double edge = channelHalf * (0.18 * N(1.1 * full, 322) + 0.06 * N(Math.Max(12, 0.25 * full), 323));
         double profile = 1 - SmoothStep(half * 0.7, half * 1.05, distance + edge);

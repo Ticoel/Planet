@@ -1,5 +1,16 @@
 # Historique des versions
 
+## 1.0.4 — 2026-11-27
+
+- **Taches blanches qui bougeaient avec la caméra** sur le plat (fonds de vallée) : la forme des
+  flaques de pluie (et des mares des vasières, de la boue craquelée) dépendait de la distance de
+  la caméra ; elle est maintenant fixée au sol, et la flaque entière s'estompe au loin. Reflet du
+  ciel adouci.
+- **Crues** : seul le lit monte (le fleuve gonfle et déborde un peu) ; inonder le fond de la vallée
+  faisait affleurer l'eau par plaques dans le moindre creux.
+- **Berges en dents de scie au loin** : les découpes des berges s'effacent quand elles deviennent
+  plus fines que le maillage du terrain.
+
 ## 1.0.3 — 2026-11-20
 
 Corrections d'après les rapports de bug de la 1.0.2.

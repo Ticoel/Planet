@@ -1572,9 +1572,12 @@ void fragment() {
             specular = mix(specular, 0.45, wet);
             float level = sqrt(clamp(puddle_mm / 30.0, 0.0, 1.0));
             float threshold = mix(0.75, -0.55, level);
-            float hollow = -(n32.x * 0.6 + n8.x * 0.3 + n2.x * 0.1);
+            // (forme tirée des bruits bruts, sans leur effacement selon la distance : sinon, en
+            // s'éloignant, la forme changeait et les flaques semblaient bouger ; c'est la flaque
+            // entière qui s'efface au loin)
+            float hollow = -(texture_noise(p, 32.0).x * 0.7 + texture_noise(p, 8.0).x * 0.3);
             float puddle = near * step(0.05, puddle_mm) * (1.0 - smoothstep(0.03, 0.11, slope0))
-                           * smoothstep(threshold, threshold + 0.06, hollow) * detail_weight(8.0, footprint);
+                           * smoothstep(threshold, threshold + 0.06, hollow) * detail_weight(16.0, footprint);
             if (puddle > 0.0) {
                 // Ronds de pluie : de petites ondes qui s'élargissent et s'effacent
                 vec4 drops = texture_noise(p + vec3(0.0, TIME * 1.5, 0.0), 0.5) * detail_weight(0.5, footprint);
@@ -1586,7 +1589,7 @@ void fragment() {
                 float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(up, view), 0.0, 1.0), 5.0);
                 float daylight = smoothstep(-0.1, 0.3, dot(up, sun_direction));
                 vec3 sky_tint = vec3(0.42, 0.52, 0.66) * (0.08 + 0.92 * daylight);
-                vec3 still = mix(color * 0.25 + vec3(0.03, 0.035, 0.04), sky_tint, max(fresnel, 0.3));
+                vec3 still = mix(color * 0.25 + vec3(0.03, 0.035, 0.04), sky_tint, max(0.8 * fresnel, 0.25));
                 color = mix(color, still, puddle);
                 roughness = mix(roughness, 0.03, puddle);
                 specular = mix(specular, 0.9, puddle);
@@ -1608,7 +1611,7 @@ void fragment() {
             roughness = mix(roughness, mix(0.9, 0.22, soaked), marsh);
             specular = mix(specular, mix(0.25, 0.55, soaked), marsh);
             // Flaques laissées dans les creux de la vase
-            float pools = marsh * soaked * smoothstep(0.05, 0.25, -(n32.x * 0.7 + n8.x * 0.3)) * detail_weight(8.0, footprint);
+            float pools = marsh * soaked * smoothstep(0.05, 0.25, -(texture_noise(p, 32.0).x * 0.7 + texture_noise(p, 8.0).x * 0.3)) * detail_weight(16.0, footprint);
             color = mix(color, color * 0.3 + vec3(0.02, 0.03, 0.035), pools);
             roughness = mix(roughness, 0.03, pools);
             specular = mix(specular, 0.9, pools);
@@ -1619,7 +1622,7 @@ void fragment() {
         // et fonds plats des déserts chauds (playas : la boue des rares pluies sèche et se fend)
         float playa = desertSand * (1.0 - smoothstep(0.01, 0.04, slope0)) * smoothstep(0.15, 0.35, -n512.x);
         float mudFlat = mud_cracks * (1.0 - smoothstep(3000.0, 10000.0, length(v_world))) * (1.0 - smoothstep(0.03, 0.11, slope0))
-                        * smoothstep(-0.2, 0.3, -(n32.x * 0.6 + n8.x * 0.4));
+                        * smoothstep(-0.2, 0.3, -(texture_noise(p, 32.0).x * 0.6 + texture_noise(p, 8.0).x * 0.4)) * detail_weight(16.0, footprint);
         float crackAmount = max(max(playa, mudFlat), marshDry) * (coloring == 1 || coloring == 3 ? 0.0 : 1.0);
         if (crackAmount > 0.01 && footprint < 2.0) {
             // Polygones de ~20 cm dans la boue, de ~1,5 m sur les playas
